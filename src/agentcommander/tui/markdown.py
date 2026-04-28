@@ -187,7 +187,7 @@ def render_markdown(text: str, *, indent: str = "") -> str:
         if q:
             content = _render_inline(q.group(2))
             for line in _wrap_text(content, width - 2, indent=""):
-                out.append(indent + q.group(1) + _QUOTE_BAR + style("muted", line))
+                out.append(indent + q.group(1) + _quote_bar() + style("muted", line))
             continue
 
         # Bullet
