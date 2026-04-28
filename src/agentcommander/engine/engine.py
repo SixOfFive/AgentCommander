@@ -48,6 +48,9 @@ class RunOptions:
     conversation_id: str
     user_message: str
     working_directory: str | None = None
+    # Optional live-stream hook: receives (role, delta) for every token
+    # chunk emitted by the active role. Synchronous; should not block.
+    on_role_delta: "Any | None" = None
 
 
 @dataclass
