@@ -1,0 +1,187 @@
+"""Renderers for the terminal UI.
+
+Pure stdlib. Each renderer takes structured data (a PipelineEvent, a Message,
+etc.) and emits formatted lines that match Claude Code's linux look.
+"""
+from __future__ import annotations
+
+import textwrap
+from datetime import datetime, timezone
+from typing import Any
+
+from agentcommander.engine.engine import PipelineEvent
+from agentcommander.tui.ansi import (
+    PALETTE,
+    fg256,
+    style,
+    term_size,
+    writeln,
+)
+
+
+# ─── Helpers ───────────────────────────────────────────────────────────────
+
+
+def _wrap(text: str, indent: str = "") -> list[str]:
+    """Word-wrap to terminal width, preserving paragraph breaks."""
+    cols, _ = term_size()
+    width = max(40, cols - len(indent) - 2)
+    out: list[str] = []
+    for raw_line in text.split("\n"):
+        if not raw_line.strip():
+            out.append(indent.rstrip())
+            continue
+        wrapped = textwrap.wrap(
+            raw_line,
+            width=width,
+            replace_whitespace=False,
+            drop_whitespace=False,
+        )
+        for line in wrapped or [raw_line]:
+            out.append(indent + line)
+    return out
+
+
+def _short(text: str, n: int) -> str:
+    text = text.replace("\n", " ").strip()
+    return text if len(text) <= n else text[: n - 1] + "…"
+
+
+# ─── Banner ────────────────────────────────────────────────────────────────
+
+
+_LOGO = """\
+  ╭──────────────────────────────────────╮
+  │   AgentCommander  ·  multi-agent CLI │
+  ╰──────────────────────────────────────╯
+"""
+
+
+def render_banner(*, version: str, providers_count: int, models_count: int,
+                  vram_gb: float, working_dir: str | None) -> None:
+    writeln()
+    for line in _LOGO.rstrip().split("\n"):
+        writeln(style("accent", line))
+    writeln()
+    writeln(style("muted", f"  v{version}  ·  {providers_count} provider(s)  ·  "
+                            f"{models_count} model(s) in TypeCast catalog  ·  "
+                            f"VRAM {vram_gb:g} GB"))
+    if working_dir:
+        writeln(style("muted", f"  workdir: {working_dir}"))
+    else:
+        writeln(style("warn", "  workdir: (not set — pick one with /workdir <path>)"))
+    writeln(style("muted", "  type /help for commands  ·  /quit to exit"))
+    writeln()
+
+
+# ─── User / assistant messages ─────────────────────────────────────────────
+
+
+def render_user_message(text: str) -> None:
+    writeln()
+    writeln(style("user_label", "You ❯ ") + style("user_text", _short(text, 200)))
+    if "\n" in text:
+        for line in _wrap(text, indent="    ")[1:]:  # remaining lines
+            writeln(style("user_text", line))
+
+
+def render_assistant_message(text: str) -> None:
+    writeln()
+    writeln(style("assistant_label", "● ") + style("assistant_text", "AgentCommander"))
+    for line in _wrap(text, indent=""):
+        writeln(style("assistant_text", line))
+    writeln()
+
+
+def render_system_line(text: str) -> None:
+    writeln(style("system_text", "  " + text))
+
+
+def render_error(text: str) -> None:
+    writeln(style("error", "  ⚠ " + text))
+
+
+# ─── Pipeline events ───────────────────────────────────────────────────────
+
+
+def render_event(evt: PipelineEvent) -> None:
+    """Live-render a single PipelineEvent during a run."""
+    if evt.type == "iteration":
+        if evt.action:
+            writeln(
+                style("iter_marker", f"  ⟳ iter {evt.iteration}  →  ")
+                + style("iter_action", evt.action)
+            )
+        elif evt.iteration is not None and evt.iteration > 0:
+            # Skip — too noisy when there's no action yet.
+            pass
+        elif evt.extra and "category" in evt.extra:
+            writeln(style("muted", f"  router: category = {evt.extra['category']}"))
+    elif evt.type == "role":
+        writeln()
+        writeln(style("role_label", f"  ▸ {evt.role}"))
+        if evt.output:
+            for line in _wrap(_short(evt.output, 800), indent="    "):
+                writeln(style("assistant_text", line))
+    elif evt.type == "role_delta":
+        # Streaming — print without a newline. Caller controls flushing.
+        from agentcommander.tui.ansi import write
+        write(style("assistant_text", evt.delta or ""))
+    elif evt.type == "tool":
+        marker = style("tool_ok", "✓") if evt.ok else style("tool_err", "✗")
+        writeln(f"  {marker} " + style("tool_marker", f"tool:{evt.tool}"))
+        if evt.error:
+            writeln(style("tool_err", "    " + evt.error))
+        elif evt.output:
+            for line in _wrap(_short(evt.output, 600), indent="    "):
+                writeln(style("system_text", line))
+    elif evt.type == "guard":
+        writeln(style("guard_label", f"  ⌫ guard:{evt.family}  ") +
+                style("muted", f"({evt.reason})"))
+    elif evt.type == "done":
+        if evt.final:
+            render_assistant_message(evt.final)
+    elif evt.type == "error":
+        writeln()
+        writeln(style("error", f"  ⚠ {evt.error}"))
+        writeln()
+
+
+# ─── Tables (providers, roles, etc.) ──────────────────────────────────────
+
+
+def render_table(headers: list[str], rows: list[list[str]], *,
+                 indent: str = "  ") -> None:
+    if not rows:
+        writeln(indent + style("muted", "(empty)"))
+        return
+    widths = [len(h) for h in headers]
+    for r in rows:
+        for i, cell in enumerate(r):
+            widths[i] = max(widths[i], len(cell))
+    sep = "  "
+    header_line = sep.join(h.ljust(widths[i]) for i, h in enumerate(headers))
+    writeln(indent + style("muted", header_line))
+    writeln(indent + style("rule", sep.join("─" * w for w in widths)))
+    for r in rows:
+        line = sep.join(cell.ljust(widths[i]) for i, cell in enumerate(r))
+        writeln(indent + line)
+
+
+# ─── Status line ──────────────────────────────────────────────────────────
+
+
+def render_status_line(*, working_dir: str | None, default_model: str | None,
+                       running: bool = False) -> None:
+    """Print a single-line status footer (between turns)."""
+    parts: list[str] = []
+    parts.append(f"workdir: {working_dir or '(none)'}")
+    parts.append(f"model: {default_model or '(none)'}")
+    if running:
+        parts.append("status: running")
+    line = "  ".join(parts)
+    writeln(style("muted", "  " + line))
+
+
+# Suppress unused import warning — `datetime` reserved for future timestamp lines.
+_ = (datetime, timezone, fg256, PALETTE, Any)
