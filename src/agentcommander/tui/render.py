@@ -199,12 +199,15 @@ def render_event(evt: PipelineEvent) -> None:
             for line in _wrap(_short(evt.output, 600), indent="    "):
                 writeln(style("system_text", line))
     elif evt.type == "guard":
+        _close_streaming()
         writeln(style("guard_label", f"  ⌫ guard:{evt.family}  ") +
                 style("muted", f"({evt.reason})"))
     elif evt.type == "done":
+        _close_streaming()
         if evt.final:
             render_assistant_message(evt.final)
     elif evt.type == "error":
+        _close_streaming()
         writeln()
         writeln(style("error", f"  ⚠ {evt.error}"))
         writeln()
