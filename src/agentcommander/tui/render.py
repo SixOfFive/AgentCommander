@@ -88,11 +88,21 @@ def render_user_message(text: str) -> None:
             writeln(style("user_text", line))
 
 
-def render_assistant_message(text: str) -> None:
+def render_assistant_message(text: str, *, markdown: bool = True) -> None:
+    """Render the final assistant message.
+
+    `markdown=True` (default) runs the text through render_markdown for
+    bold/italic/code/headings/bullets/links. Set to False for raw passthrough
+    when the text is already pre-formatted.
+    """
     writeln()
     writeln(style("assistant_label", "● ") + style("assistant_text", "AgentCommander"))
-    for line in _wrap(text, indent=""):
-        writeln(style("assistant_text", line))
+    if markdown:
+        rendered = render_markdown(text, indent="")
+        writeln(rendered)
+    else:
+        for line in _wrap(text, indent=""):
+            writeln(style("assistant_text", line))
     writeln()
 
 
