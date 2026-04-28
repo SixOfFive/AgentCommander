@@ -143,7 +143,7 @@ def render_markdown(text: str, *, indent: str = "") -> str:
         if fence_lang:
             out.append(indent + style("muted", f"  ┄ {fence_lang} ┄"))
         for cl in fence_buf:
-            out.append(indent + _FENCE_BORDER + cl)
+            out.append(indent + _fence_border() + cl)
         out.append(indent + style("muted", "  ┄"))
         fence_buf.clear()
         fence_lang = ""
