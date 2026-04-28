@@ -179,7 +179,7 @@ def render_markdown(text: str, *, indent: str = "") -> str:
 
         # Horizontal rule
         if re.match(r"^\s*(-{3,}|\*{3,}|_{3,})\s*$", stripped):
-            out.append(indent + _RULE)
+            out.append(indent + _rule())
             continue
 
         # Block quote
