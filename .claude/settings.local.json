@@ -31,7 +31,8 @@
       "Bash(py --version)",
       "Bash(py -3.14 -c \"import sys; print\\(sys.version\\)\")",
       "Bash(py -3.14 -m pip --version)",
-      "Bash(py -3.14 -c ' *)"
+      "Bash(py -3.14 -c ' *)",
+      "Bash(chmod +x ac.sh)"
     ]
   }
 }
