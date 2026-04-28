@@ -287,12 +287,14 @@ class PipelineRun:
                        opts: RunOptions) -> Iterator[PipelineEvent]:
         role = ACTION_TO_ROLE[decision.action]
         started = time.time()
-        # Streaming buffer shared between the on_delta callback and the
-        # generator so we can yield role_delta events as tokens arrive.
-        delta_buffer: list[tuple[str, str]] = []
 
-        def on_delta(delta: str) -> None:
-            delta_buffer.append((role.value, delta))
+        # Live streaming: deltas render immediately inside the call_role
+        # provider loop via opts.on_role_delta. The TUI passes a callable
+        # that prints to stdout — true typewriter effect, no buffering.
+        on_delta = None
+        if opts.on_role_delta is not None:
+            def on_delta(delta: str, _role: str = role.value) -> None:
+                opts.on_role_delta(_role, delta)
 
         try:
             output = call_role(role,
@@ -305,14 +307,6 @@ class PipelineRun:
                        f"Role {role.value} call failed: {exc}")
             yield PipelineEvent(type="error", role=role.value, error=str(exc))
             return
-
-        # Drain the buffer as role_delta events. NOTE: in this synchronous
-        # generator, all deltas arrive *before* this point — so they emit
-        # in a burst. The TUI renderer treats role_delta as best-effort:
-        # callers that want a true typewriter effect should use the
-        # streaming entry point in PipelineRun.events_streaming() (TODO).
-        for r, d in delta_buffer:
-            yield PipelineEvent(type="role_delta", role=r, delta=d)
 
         self.state.scratchpad.append(ScratchpadEntry(
             step=iteration, role=role.value, action=decision.action,
