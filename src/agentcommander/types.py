@@ -1,16 +1,15 @@
-"""Cross-cutting type definitions for AgentCommander.
+"""Cross-cutting type definitions.
 
-Mirrors the shapes from EngineCommander/src/main/orchestration/engine-types.ts
-plus the shared types for IPC. Pydantic models for the values that cross
-provider/orchestrator boundaries; plain dataclasses everywhere else.
+Pure stdlib — dataclasses + Enum + typing. No pydantic.
+
+Mirrors EngineCommander/src/main/orchestration/engine-types.ts where applicable.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
 
 # ─── Roles (the 19 EC pipeline roles) ──────────────────────────────────────
 
@@ -45,21 +44,40 @@ ALL_ROLES: tuple[Role, ...] = tuple(Role)
 ProviderType = Literal["ollama", "llamacpp", "openrouter", "anthropic", "google"]
 
 
-class ProviderConfig(BaseModel):
+@dataclass
+class ProviderConfig:
     id: str
     type: ProviderType
     name: str
     endpoint: str | None = None
-    api_key: str | None = None  # encrypted on disk via OS keyring later
+    api_key: str | None = None
     enabled: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "ProviderConfig":
+        return cls(
+            id=d["id"],
+            type=d["type"],
+            name=d["name"],
+            endpoint=d.get("endpoint"),
+            api_key=d.get("api_key"),
+            enabled=bool(d.get("enabled", True)),
+        )
 
 
 # ─── Engine ────────────────────────────────────────────────────────────────
 
 
-class OrchestratorDecision(BaseModel):
-    """Mirrors EC's OrchestratorDecision shape. All fields except `action`
-    are optional — different actions populate different fields.
+@dataclass
+class OrchestratorDecision:
+    """Mirrors EC's OrchestratorDecision shape. Most fields are optional —
+    different actions populate different fields.
+
+    Constructed from the orchestrator's JSON output via `from_dict`. Extra
+    keys in the JSON are tolerated and dropped.
     """
 
     action: str
@@ -81,13 +99,30 @@ class OrchestratorDecision(BaseModel):
     prefer: str | None = None
     steps: list[dict[str, Any]] | None = None
 
-    model_config = {"extra": "ignore"}
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "OrchestratorDecision":
+        if not isinstance(d, dict):
+            raise TypeError("OrchestratorDecision.from_dict requires a dict")
+        action = d.get("action")
+        if not isinstance(action, str):
+            raise ValueError("decision.action is required (string)")
+        # Pick only known fields to avoid surprises.
+        known = {
+            "action", "reasoning", "input", "url", "language", "path", "content",
+            "pattern", "command", "message", "files", "method", "headers", "body",
+            "host", "port", "prefer", "steps",
+        }
+        kwargs: dict[str, Any] = {k: d.get(k) for k in known if k in d}
+        return cls(**kwargs)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {k: v for k, v in asdict(self).items() if v is not None}
 
 
 @dataclass
 class ScratchpadEntry:
     step: int
-    role: str  # Role.value | "tool" | "parallel" | "system"
+    role: str  # "router"... | "tool" | "parallel" | "system"
     action: str
     input: str
     output: str
@@ -116,7 +151,7 @@ class LoopState:
 class Conversation:
     id: str
     title: str
-    created_at: int  # epoch ms
+    created_at: int
     updated_at: int
 
 
@@ -132,7 +167,8 @@ class Message:
 # ─── Pipeline events emitted to the TUI ────────────────────────────────────
 
 
-class PipelineEvent(BaseModel):
+@dataclass
+class PipelineEvent:
     """Streamed from engine → CLI for live rendering."""
 
     type: Literal["iteration", "role", "role_delta", "tool", "guard", "done", "error"]
