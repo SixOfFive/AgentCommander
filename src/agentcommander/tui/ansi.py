@@ -75,11 +75,19 @@ def move_cursor(row: int, col: int) -> str:
 
 
 def enable_ansi() -> bool:
-    """On Windows ConHost (older Windows 10), enable VT processing.
+    """Enable ANSI VT processing on Windows + force UTF-8 stdout/stderr everywhere.
 
-    No-op on modern Windows Terminal, Linux, macOS.
+    No-op on Linux/macOS for the VT side; UTF-8 reconfigure runs everywhere
+    so box-drawing characters render even when stdout is redirected.
+
     Returns True if ANSI is supported.
     """
+    # Force UTF-8 on text streams. Python 3.7+ ships .reconfigure().
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass
     if sys.platform == "win32":
         try:
             import ctypes
@@ -91,6 +99,12 @@ def enable_ansi() -> bool:
             if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
                 return False
             kernel32.SetConsoleMode(handle, mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+            # Make CP65001 the active code page for the Console (best effort).
+            try:
+                kernel32.SetConsoleOutputCP(65001)
+                kernel32.SetConsoleCP(65001)
+            except Exception:  # noqa: BLE001
+                pass
             return True
         except Exception:  # noqa: BLE001
             return False

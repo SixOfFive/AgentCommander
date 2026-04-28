@@ -32,7 +32,12 @@
       "Bash(py -3.14 -c \"import sys; print\\(sys.version\\)\")",
       "Bash(py -3.14 -m pip --version)",
       "Bash(py -3.14 -c ' *)",
-      "Bash(chmod +x ac.sh)"
+      "Bash(chmod +x ac.sh)",
+      "Bash(cmd.exe /c ac.bat --version)",
+      "Bash(cmd.exe //c \"ac.bat --version\")",
+      "Bash(cmd.exe //c \".\\\\ac.bat --version\")",
+      "Bash(cmd.exe //c \".\\\\ac.bat --help\")",
+      "Bash(cmd.exe //c \".\\\\ac.bat\")"
     ]
   }
 }
