@@ -196,7 +196,7 @@ def render_markdown(text: str, *, indent: str = "") -> str:
             content = _render_inline(b.group(2))
             first = True
             for line in _wrap_text(content, width - len(b.group(1)) - 2, indent=""):
-                prefix = b.group(1) + (_BULLET if first else "  ")
+                prefix = b.group(1) + (_bullet() if first else "  ")
                 out.append(indent + prefix + line)
                 first = False
             continue
