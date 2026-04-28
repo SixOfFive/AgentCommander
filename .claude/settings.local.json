@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git ls-remote *)",
+      "Bash(echo \"---exit: $?\")",
+      "Bash(git init *)",
+      "Bash(git remote *)",
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "Bash(git config *)",
+      "Bash(sh -c 'git add -A && \\(git diff --cached --quiet || git commit -m \"auto: changes from claude\"\\)')",
+      "PowerShell($j = Get-Content \"C:/Users/sixoffive/Documents/AgentCommander/.claude/settings.json\" -Raw | ConvertFrom-Json; $h = $j.hooks.PostToolUse | Where-Object { $_.matcher -eq \"Edit|Write|MultiEdit|NotebookEdit\" } | Select-Object -ExpandProperty hooks | Where-Object { $_.type -eq \"command\" }; if \\($h\\) { $h.command } else { \"NO MATCH\"; exit 1 })",
+      "Bash(git -C \"C:/Users/sixoffive/Documents/AgentCommander\" log --oneline)",
+      "Bash(git -C \"C:/Users/sixoffive/Documents/AgentCommander\" status)",
+      "Bash(git -C \"C:/Users/sixoffive/Documents/AgentCommander\" add -A)",
+      "Bash(git -C \"C:/Users/sixoffive/Documents/AgentCommander\" commit -m \"Add auto-commit hook and connect to remote\")",
+      "Bash(git -C \"C:/Users/sixoffive/Documents/AgentCommander\" status --short)",
+      "Bash(git -C \"C:/Users/sixoffive/Documents/AgentCommander\" push -u origin main)",
+      "Bash(xargs wc *)",
+      "Bash(curl -fsSL https://raw.githubusercontent.com/SixOfFive/TypeCast/main/README.md)",
+      "Bash(curl -fsSL https://raw.githubusercontent.com/SixOfFive/TypeCast/main/models-catalog.json)",
+      "Bash(npm --version)",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(npm test *)",
+      "Bash(cat)",
+      "Bash(bash /tmp/count.sh)",
+      "Bash(npm start *)",
+      "Bash(node_modules/.bin/electron .)",
+      "Bash(tasklist)",
+      "Bash(py --version)",
+      "Bash(py -3.14 -c \"import sys; print\\(sys.version\\)\")",
+      "Bash(py -3.14 -m pip --version)"
+    ]
+  }
+}
