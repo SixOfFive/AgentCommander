@@ -51,7 +51,14 @@ class SlashCommand:
 
 def cmd_help(ctx: CommandContext, _args: list[str]) -> None:
     render_system_line("Available commands:")
-    rows = [[c.name, c.summary] for c in COMMANDS.values()]
+    seen: set[int] = set()
+    rows: list[list[str]] = []
+    for c in COMMANDS.values():
+        if id(c) in seen:
+            continue
+        seen.add(id(c))
+        aliases = (" / " + ", ".join(c.aliases)) if c.aliases else ""
+        rows.append([c.name + aliases, c.summary])
     render_table(["command", "summary"], rows)
 
 
