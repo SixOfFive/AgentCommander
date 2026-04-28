@@ -5,6 +5,8 @@ rem Runs the CLI without requiring a global pip install — uses the source tree
 setlocal
 set "AC_ROOT=%~dp0"
 set "PYTHONPATH=%AC_ROOT%src;%PYTHONPATH%"
+set "PYTHONIOENCODING=utf-8"
+set "PYTHONUTF8=1"
 
 rem Pick the first available Python: py -3 (Windows launcher) → python → python3
 where py >nul 2>nul
