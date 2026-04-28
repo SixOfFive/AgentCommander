@@ -11,12 +11,15 @@ from typing import Any
 
 from agentcommander.engine.engine import PipelineEvent
 from agentcommander.tui.ansi import (
+    CLEAR_LINE,
     PALETTE,
     fg256,
     style,
     term_size,
+    write,
     writeln,
 )
+from agentcommander.tui.markdown import render_markdown
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────
