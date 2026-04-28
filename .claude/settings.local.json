@@ -37,7 +37,8 @@
       "Bash(cmd.exe //c \"ac.bat --version\")",
       "Bash(cmd.exe //c \".\\\\ac.bat --version\")",
       "Bash(cmd.exe //c \".\\\\ac.bat --help\")",
-      "Bash(cmd.exe //c \".\\\\ac.bat\")"
+      "Bash(cmd.exe //c \".\\\\ac.bat\")",
+      "Bash(py -3.14 -m unittest discover tests -v)"
     ]
   }
 }
