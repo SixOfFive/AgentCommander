@@ -53,10 +53,22 @@ _HEADING_1 = fg256(75) + BOLD
 _HEADING_2 = fg256(141) + BOLD
 _HEADING_3 = fg256(180) + BOLD
 _LINK_URL = DIM
-_QUOTE_BAR = fg256(238) + "│ " + RESET
-_FENCE_BORDER = fg256(238) + "│ " + RESET
-_BULLET = fg256(245) + "• " + RESET
-_RULE = fg256(238) + "─" * 60 + RESET
+
+
+def _bullet() -> str:
+    return fg256(245) + "• " + RESET if supports_color() else "* "
+
+
+def _quote_bar() -> str:
+    return fg256(238) + "│ " + RESET if supports_color() else "| "
+
+
+def _fence_border() -> str:
+    return fg256(238) + "│ " + RESET if supports_color() else "  "
+
+
+def _rule() -> str:
+    return (fg256(238) + "─" * 60 + RESET) if supports_color() else "-" * 60
 
 
 def _render_inline(line: str) -> str:
