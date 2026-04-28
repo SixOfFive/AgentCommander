@@ -104,6 +104,7 @@ def _run_pipeline(state: dict, user_message: str) -> None:
         conversation_id=conv_id,
         user_message=user_message,
         working_directory=state.get("working_dir"),
+        on_role_delta=render_role_delta,  # live typewriter streaming
     )
     run = PipelineRun(opts)
 
