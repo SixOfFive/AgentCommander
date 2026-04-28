@@ -190,6 +190,7 @@ def render_event(evt: PipelineEvent) -> None:
     elif evt.type == "role_delta":
         render_role_delta(evt.role or "?", evt.delta or "")
     elif evt.type == "tool":
+        _close_streaming()
         marker = style("tool_ok", "✓") if evt.ok else style("tool_err", "✗")
         writeln(f"  {marker} " + style("tool_marker", f"tool:{evt.tool}"))
         if evt.error:
