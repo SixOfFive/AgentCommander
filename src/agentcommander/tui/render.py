@@ -117,29 +117,78 @@ def render_error(text: str) -> None:
 # ─── Pipeline events ───────────────────────────────────────────────────────
 
 
+_streaming_state: dict = {"role": None, "had_chars": False}
+
+
+def render_role_delta(role: str, delta: str) -> None:
+    """Print a streaming token delta for `role` immediately.
+
+    Called from the engine's on_role_delta hook (synchronous). Adds a
+    one-time role header on first delta of a new role, then streams chars
+    raw (no markdown). When the role finishes, render_event(role) clears
+    and re-renders with full markdown formatting.
+    """
+    if not delta:
+        return
+    if _streaming_state["role"] != role:
+        if _streaming_state["had_chars"]:
+            writeln()
+        writeln()
+        writeln(style("role_label", f"  ▸ {role}"))
+        write("    ")
+        _streaming_state["role"] = role
+        _streaming_state["had_chars"] = False
+    # Replace newlines with newline + indent so streamed prose stays aligned.
+    if "\n" in delta:
+        parts = delta.split("\n")
+        for i, p in enumerate(parts):
+            if i > 0:
+                writeln()
+                write("    ")
+            if p:
+                write(style("assistant_text", p))
+                _streaming_state["had_chars"] = True
+    else:
+        write(style("assistant_text", delta))
+        _streaming_state["had_chars"] = True
+
+
+def _close_streaming() -> None:
+    if _streaming_state["had_chars"]:
+        writeln()
+    _streaming_state["role"] = None
+    _streaming_state["had_chars"] = False
+
+
 def render_event(evt: PipelineEvent) -> None:
     """Live-render a single PipelineEvent during a run."""
     if evt.type == "iteration":
         if evt.action:
+            _close_streaming()
             writeln(
                 style("iter_marker", f"  ⟳ iter {evt.iteration}  →  ")
                 + style("iter_action", evt.action)
             )
         elif evt.iteration is not None and evt.iteration > 0:
-            # Skip — too noisy when there's no action yet.
             pass
         elif evt.extra and "category" in evt.extra:
             writeln(style("muted", f"  router: category = {evt.extra['category']}"))
     elif evt.type == "role":
-        writeln()
-        writeln(style("role_label", f"  ▸ {evt.role}"))
-        if evt.output:
-            for line in _wrap(_short(evt.output, 800), indent="    "):
-                writeln(style("assistant_text", line))
+        # The role just completed. If we streamed it live, re-render the full
+        # output with markdown. Otherwise (no streaming) print plain.
+        had_streaming = _streaming_state["had_chars"] and _streaming_state["role"] == evt.role
+        _close_streaming()
+        if not had_streaming:
+            writeln()
+            writeln(style("role_label", f"  ▸ {evt.role}"))
+            if evt.output:
+                from agentcommander.tui.markdown import render_markdown
+                writeln(render_markdown(_short(evt.output, 4000), indent="    "))
+        # If streaming did happen, the live render is already on screen —
+        # don't duplicate. (For long polished output, the assistant message
+        # at the end of the run will markdown-render the same content.)
     elif evt.type == "role_delta":
-        # Streaming — print without a newline. Caller controls flushing.
-        from agentcommander.tui.ansi import write
-        write(style("assistant_text", evt.delta or ""))
+        render_role_delta(evt.role or "?", evt.delta or "")
     elif evt.type == "tool":
         marker = style("tool_ok", "✓") if evt.ok else style("tool_err", "✗")
         writeln(f"  {marker} " + style("tool_marker", f"tool:{evt.tool}"))
