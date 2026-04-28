@@ -36,6 +36,7 @@ from agentcommander.tui.render import (
     render_banner,
     render_error,
     render_event,
+    render_role_delta,
     render_system_line,
     render_user_message,
 )
