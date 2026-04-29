@@ -240,15 +240,37 @@ def _gather_installed(providers: list) -> tuple[set[str], dict[str, str]]:
     return installed_ids, model_to_provider
 
 
+def _entry_context_length(entry: dict[str, Any]) -> int:
+    """Best-effort read of the catalog entry's max context window in tokens.
+    Returns 0 when the catalog doesn't carry that field for this model."""
+    raw = entry.get("contextLength")
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    if isinstance(raw, str):
+        try:
+            return int(float(raw))
+        except ValueError:
+            return 0
+    return 0
+
+
 def _best_pick_for_role(
     role: Role,
     candidates: list[ModelCandidate],
+    *,
+    min_context: int = 0,
 ) -> tuple[ModelCandidate | None, float]:
     """Return ``(best_candidate, best_score)`` for this role, or ``(None, 0)``.
 
-    Filters: must fit available VRAM, must not be in the entry's ``avoid_for``
-    list. The "best" candidate is the one with the highest TypeCast score on
-    this role; ties are broken by iteration order (which mirrors the catalog).
+    Filters:
+      - must fit available VRAM
+      - must not be in the entry's ``avoid_for`` list
+      - if ``min_context > 0``, the catalog entry's ``contextLength`` must be
+        at least ``min_context`` tokens (drops models trained on a smaller
+        window so we don't quietly downgrade the user's chosen context)
+
+    The "best" candidate is the one with the highest TypeCast score on this
+    role; ties are broken by iteration order (which mirrors the catalog).
     """
     tc = _AC_TO_TYPECAST.get(role)
     if not tc:
@@ -259,6 +281,8 @@ def _best_pick_for_role(
         if not fits_available_vram(cand.entry):
             continue
         if _avoids(cand.entry, tc):
+            continue
+        if min_context > 0 and _entry_context_length(cand.entry) < min_context:
             continue
         s = _role_score(cand.entry, tc)
         if s > best_score:
@@ -274,6 +298,7 @@ def apply_autoconfigure(
     providers: list,
     get_role_assignment_fn,
     audit_fn=None,
+    min_context: int = 0,
 ) -> AutoconfigApplied:
     """Run TypeCast best-fit per role and return an in-memory map. Does NOT write the DB.
 
