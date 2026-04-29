@@ -88,6 +88,12 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
     except Exception as exc:  # noqa: BLE001
         raise ProviderError(f"{type(exc).__name__}: {exc}") from exc
 
+    if on_finish is not None:
+        try:
+            on_finish(prompt_tokens, completion_tokens)
+        except Exception:  # noqa: BLE001
+            pass
+
     duration_ms = int((time.time() - started) * 1000)
     audit("role.call", {
         "role": role_enum.value,
