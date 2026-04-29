@@ -188,8 +188,24 @@ class StatusBar:
         write(f"\x1b[{self.status_row()};1H\x1b[2K")
         write(self._compose_status_row(cols))
 
-        # Input row — keep clear so the input prompt has a clean canvas.
+        # Input row — clear and (optionally) re-paint the in-flight typing
+        # buffer so the user can see what they're typing while the pipeline
+        # streams output above. When pending_input is None we leave the row
+        # blank so `read_line_at_bottom` can paint its own prompt.
         write(f"\x1b[{self.input_row()};1H\x1b[2K")
+        if self.state.pending_input is not None:
+            prompt_text = "❯ "
+            if supports_color():
+                write(style("user_label", prompt_text))
+            else:
+                write(prompt_text)
+            cap = max(0, cols - len(prompt_text) - 1)
+            txt = self.state.pending_input
+            if cap == 0:
+                txt = ""
+            elif len(txt) > cap:
+                txt = ("…" + txt[-(cap - 1):]) if cap > 1 else "…"
+            write(txt)
 
         write("\x1b8")  # restore cursor
         sys.stdout.flush()
