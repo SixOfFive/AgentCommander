@@ -743,6 +743,47 @@ def _build_registry() -> dict[str, SlashCommand]:
             examples=("/typecast", "/typecast autoconfigure"),
         ),
         SlashCommand(
+            name="/autoconfig", aliases=("/ac",),
+            summary="run TypeCast autoconfigure with optional context-window filter",
+            handler=cmd_autoconfig,
+            usage="/autoconfig                            # default in-memory autoconfig\n"
+                  "/autoconfig --mincontext <N>           # filter by ctx + persist picks\n"
+                  "/autoconfig clear                      # wipe persisted picks + redo",
+            details=(
+                "Walks the TypeCast catalog over every installed model and assigns\n"
+                "the best-scoring fit per role using the threshold cascade\n"
+                "(scores 100 → 90 → … → 10; roles with no qualifying model land in\n"
+                "the unset list). Suffix tokens with k/m for binary multiples — \n"
+                "128k = 131072 tokens.\n"
+                "\n"
+                "--mincontext <N>  drops candidates whose catalog contextLength\n"
+                "                  is below N tokens (so a 32k-trained model is\n"
+                "                  skipped when you ask for 128k). The picks are\n"
+                "                  persisted to role_assignments with\n"
+                "                  context_window_tokens = N, so call_role passes\n"
+                "                  num_ctx=N on every Ollama request — no silent\n"
+                "                  fallback to the runtime default. Persisted rows\n"
+                "                  are skipped on subsequent startup autoconfigs;\n"
+                "                  re-run with a new --mincontext to re-pick them.\n"
+                "                  Pre-existing /roles set overrides (no context)\n"
+                "                  are preserved.\n"
+                "\n"
+                "clear             deletes every row in role_assignments — both\n"
+                "                  /roles set overrides AND prior --mincontext\n"
+                "                  picks — and then runs the default in-memory\n"
+                "                  autoconfigure (does not persist).\n"
+                "\n"
+                "With no flags, behaves like /roles auto: in-memory picks only,\n"
+                "recomputed every launch."
+            ),
+            examples=(
+                "/autoconfig",
+                "/autoconfig --mincontext 128k",
+                "/autoconfig --mincontext 32000",
+                "/autoconfig clear",
+            ),
+        ),
+        SlashCommand(
             name="/agents", aliases=(),
             summary="list the 19 agents + prompt status",
             handler=cmd_agents,
