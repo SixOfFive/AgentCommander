@@ -42,17 +42,34 @@ _USER_WANTS_ACTION_RX = re.compile(
 
 
 def has_deliverable(scratchpad: list[ScratchpadEntry]) -> bool:
+    """True when the scratchpad contains at least one successful piece of
+    tool work that produced an answer for the user. Used by guards to
+    distinguish "model is evading the task" from "model already did the
+    work and is presenting results".
+    """
     setup_actions = ("pip", "npm", "venv", "mkdir", "install")
     for e in scratchpad:
-        if (e.action == "execute" and "successfully" in (e.output or "")
+        out = (e.output or "")
+        out_lower = out.lower()
+        succeeded = "successfully" in out_lower
+        if (e.action == "execute" and succeeded
                 and not any(s in (e.input or "").lower() for s in setup_actions)):
             return True
         if e.action in ("browse", "screenshot", "extract_text"):
             return True
-        if e.action == "fetch" and len(e.output or "") > 100:
+        # Any successful fetch counts — JSON API responses are often small
+        # (e.g. {"bitcoin":{"usd":75192}} = 26 chars), so the previous
+        # `len > 100` gate wrongly classified them as non-deliverables.
+        if e.action == "fetch" and succeeded:
             return True
-        if (e.action == "execute" and len(e.output or "") > 200
-                and "Installing" not in (e.output or "")):
+        # list_dir / read_file return content the user explicitly asked for.
+        if e.action in ("list_dir", "read_file") and succeeded:
+            return True
+        # write_file is a real deliverable when the file actually got written.
+        if e.action == "write_file" and "Successfully wrote" in out:
+            return True
+        if (e.action == "execute" and len(out) > 200
+                and "Installing" not in out):
             return True
     return False
 
