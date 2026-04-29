@@ -451,7 +451,8 @@ def _run_startup_autoconfigure() -> None:
     n_auto = len(applied.role_picks)
     n_overrides = len(applied.user_overrides)
     n_diff = len(applied.diff_picks)
-    msg = (f"autoconfigured {n_auto} role(s) → default model "
+    n_unset = len(applied.unset_roles)
+    msg = (f"autoconfigured {n_auto} role(s) → primary model "
            f'{style("accent", applied.default_model or "?")}'
            f' on {applied.provider_id}')
     render_system_line(msg)
@@ -459,6 +460,14 @@ def _run_startup_autoconfigure() -> None:
         render_system_line(f"  + {n_diff} role(s) got a stronger TypeCast pick:")
         for role_name, model in applied.diff_picks.items():
             render_system_line(f"    {role_name} → {model}")
+    if n_unset:
+        render_system_line(style("warn",
+            f"  {n_unset} role(s) left unset (no installed model scores ≥ "
+            f"the minimum threshold):"))
+        render_system_line(style("muted",
+            f"    {', '.join(applied.unset_roles)}"))
+        render_system_line(style("muted",
+            "    use /roles set <role> <provider_id> <model> to fill them in"))
     if n_overrides:
         render_system_line(f"  preserved {n_overrides} user override(s) "
                            f"(use /roles unset <role> to release)")
