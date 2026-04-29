@@ -155,18 +155,38 @@ def refuse_to_act_guard(scratchpad: list[ScratchpadEntry], iteration: int, max_i
     return GuardVerdict(action="continue")
 
 
+_FACTUAL_QA_PREFIX_RX = re.compile(
+    r"^\s*(who|what|where|when|why|how|which|name|tell me|is|are|does|do)\b",
+    re.IGNORECASE,
+)
+
+
 def echo_request_guard(scratchpad: list[ScratchpadEntry], iteration: int, max_iter: int,
                         decision: OrchestratorDecision, user_message: str) -> GuardVerdict:
     text = (decision.input or "").strip()
     if len(text) < 20:
         return GuardVerdict(action="pass")
+
+    # Factual Q&A short-circuit: at iter 1 with no tool work yet, an answer
+    # that "echoes" question words is usually just the natural shape of the
+    # response ("What is the capital of France?" → "The capital of France
+    # is Paris" — 2/3 of long words overlap, but it's a correct direct
+    # answer, not evasion). Without this gate the guard rejects the done,
+    # the orchestrator gives up and dispatches a fetch tool, then we waste
+    # iterations summarizing Wikipedia for trivia the model already knew.
+    tool_count = len([e for e in scratchpad if e.role == "tool"])
+    if (iteration <= 1
+            and tool_count == 0
+            and _FACTUAL_QA_PREFIX_RX.match(user_message or "")):
+        return GuardVerdict(action="pass")
+
     user_words = {w for w in user_message.lower().split() if len(w) > 3}
     done_words = [w for w in text.lower().split() if len(w) > 3]
     overlap = sum(1 for w in done_words if w in user_words)
     overlap_ratio = overlap / max(len(done_words), 1)
     if (overlap_ratio > 0.6
             and not has_deliverable(scratchpad)
-            and len([e for e in scratchpad if e.role == "tool"]) <= 1
+            and tool_count <= 1
             and iteration < max_iter - 3):
         push_system_nudge(scratchpad, iteration, "echo_request",
                           "STOP: you are repeating the user's request back instead of doing "
