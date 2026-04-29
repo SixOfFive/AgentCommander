@@ -58,9 +58,8 @@ class LlamaCppProvider(ProviderBase):
         max_tokens: int | None = None,
         num_ctx: int | None = None,  # noqa: ARG002 - unused; llama-server ignores at request time
         json_mode: bool = False,
-        should_cancel: "Callable[[], bool] | None" = None,  # noqa: ARG002 - signature parity; llama-server cancellation not wired
+        should_cancel: Callable[[], bool] | None = None,  # noqa: ARG002 - signature parity; llama-server cancellation not wired
     ) -> Iterator[ChatChunk]:
-        from typing import Callable  # noqa: F401 — local import for annotation
         body: dict[str, Any] = {
             "model": model,
             "messages": [m.to_dict() for m in messages],
