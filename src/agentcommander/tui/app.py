@@ -504,6 +504,24 @@ def run_tui() -> int:
 
     bar.uninstall()
     write(SHOW_CURSOR)
+
+    # Free VRAM before goodbye: ask each provider to unload any models it's
+    # holding. The Ollama provider hits /api/ps + /api/generate keep_alive=0;
+    # llama.cpp and others inherit the no-op base method. Best-effort —
+    # network failures here shouldn't stop the user from exiting.
+    try:
+        from agentcommander.providers.base import list_active
+        total = 0
+        for p in list_active():
+            try:
+                total += p.unload_all_loaded()
+            except Exception:  # noqa: BLE001
+                continue
+        if total > 0:
+            writeln(style("muted", f"  unloaded {total} model(s) from memory"))
+    except Exception:  # noqa: BLE001
+        pass
+
     writeln(style("muted", "  goodbye."))
     return 0
 
