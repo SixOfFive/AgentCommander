@@ -38,10 +38,17 @@ from agentcommander.tui.render import (
     render_event,
     render_role_delta,
     render_system_line,
+    render_table,
     render_user_message,
 )
-from agentcommander.types import Role
-from agentcommander.typecast import detect_vram, get_catalog, refresh_catalog
+from agentcommander.tui.setup import first_run_wizard, needs_first_run_setup
+from agentcommander.types import ALL_ROLES, Role
+from agentcommander.typecast import (
+    apply_autoconfigure,
+    detect_vram,
+    get_catalog,
+    refresh_catalog,
+)
 
 
 # Try to enable readline for line editing + history (stdlib).
