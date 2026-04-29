@@ -4,6 +4,11 @@ Picks the user's assigned (provider, model) for the role, injects the
 role's system prompt, streams tokens, records token usage, returns the
 final text.
 
+For the orchestrator (the role that drives action selection), the live
+tool registry is appended to its system prompt so it can answer "what
+tools do you have access to?" accurately even as tools are added or
+removed at runtime.
+
 Mirrors EC's callRole signature so the guard families port with minimal
 adaptation.
 """
