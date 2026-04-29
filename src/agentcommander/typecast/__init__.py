@@ -30,11 +30,13 @@ from agentcommander.typecast.catalog import (
 from agentcommander.typecast.vram import VramInfo, detect_vram
 
 __all__ = [
+    "AutoconfigApplied",
     "AutoconfigSuggestion",
     "CATALOG_URL",
     "CatalogLoadResult",
     "ModelCandidate",
     "VramInfo",
+    "apply_autoconfigure",
     "build_candidates",
     "detect_vram",
     "fits_available_vram",
