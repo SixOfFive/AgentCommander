@@ -184,7 +184,7 @@ class PipelineRun:
         insert_pipeline_run(self.run_id, opts.conversation_id)
 
         try:
-            category = self._classify_category(opts.user_message)
+            category = self._classify_category(opts.user_message, opts)
             self._max_iterations = CATEGORY_MAX_ITERATIONS.get(category, 20)
             yield PipelineEvent(type="iteration", iteration=0, extra={"category": category})
 
