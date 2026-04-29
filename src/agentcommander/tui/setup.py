@@ -55,6 +55,55 @@ def needs_first_run_setup() -> bool:
     return not list_providers()
 
 
+def prompt_for_ollama_endpoint(default: str | None = None,
+                                max_attempts: int = 3) -> str | None:
+    """Prompt the user for an Ollama endpoint URL on the bottom-anchored row.
+
+    Returns the normalized URL on success, or ``None`` if the prompt was
+    cancelled (Ctrl-C / EOF / used up all attempts). When stdin is not a TTY,
+    falls back to ``default`` (or ``DEFAULT_OLLAMA_ENDPOINT``) without
+    blocking — matters for piped smoke tests.
+
+    Used by both first-run setup and ``/autoconfig clear``.
+    """
+    fallback = default or DEFAULT_OLLAMA_ENDPOINT
+
+    if not sys.stdin.isatty():
+        render_system_line(
+            f"non-interactive stdin detected — using {fallback}"
+        )
+        return fallback
+
+    render_system_line(style("muted",
+        f"  Enter Ollama server URL (or press Enter for {fallback}):"))
+
+    for _ in range(max_attempts):
+        try:
+            raw_or_none = read_line_at_bottom("ollama url ❯ ")
+        except KeyboardInterrupt:
+            writeln()
+            render_error("endpoint prompt cancelled")
+            return None
+        if raw_or_none is None:
+            render_error("endpoint prompt cancelled (EOF)")
+            return None
+        raw = raw_or_none.strip()
+        if not raw:
+            return fallback
+        normalized = _normalize_endpoint(raw)
+        if normalized is None:
+            render_error(f'could not parse "{raw}" — try host:port or http://host:port')
+            continue
+        check = validate_provider_host(normalized)
+        if not check.ok:
+            render_error(f"invalid endpoint: {check.reason}")
+            continue
+        return normalized
+
+    render_error(f"could not get a valid endpoint after {max_attempts} attempts")
+    return None
+
+
 def first_run_wizard() -> bool:
     """Run the first-time setup. Returns True if a provider was added."""
     writeln()
@@ -64,44 +113,9 @@ def first_run_wizard() -> bool:
                             "(never committed to source)."))
     writeln()
 
-    # Non-TTY (piped) — pick the default and move on so smoke tests don't hang.
-    if not sys.stdin.isatty():
-        endpoint = DEFAULT_OLLAMA_ENDPOINT
-        render_system_line(f"non-interactive stdin detected — using default {endpoint}")
-    else:
-        attempts = 0
-        endpoint: str | None = None
-        # Hint visible above the input row.
-        render_system_line(style("muted",
-            f"  Enter Ollama server URL (or press Enter for default {DEFAULT_OLLAMA_ENDPOINT}):"))
-        while attempts < 3:
-            attempts += 1
-            try:
-                raw_or_none = read_line_at_bottom("ollama url ❯ ")
-            except KeyboardInterrupt:
-                writeln()
-                render_error("setup cancelled")
-                return False
-            if raw_or_none is None:
-                render_error("setup cancelled (EOF)")
-                return False
-            raw = raw_or_none.strip()
-            if not raw:
-                endpoint = DEFAULT_OLLAMA_ENDPOINT
-                break
-            normalized = _normalize_endpoint(raw)
-            if normalized is None:
-                render_error(f'could not parse "{raw}" — try host:port or http://host:port')
-                continue
-            check = validate_provider_host(normalized)
-            if not check.ok:
-                render_error(f"invalid endpoint: {check.reason}")
-                continue
-            endpoint = normalized
-            break
-        if endpoint is None:
-            render_error("could not get a valid endpoint after 3 attempts; aborting setup")
-            return False
+    endpoint = prompt_for_ollama_endpoint()
+    if endpoint is None:
+        return False
 
     cfg = ProviderConfig(
         id=DEFAULT_PROVIDER_ID,
