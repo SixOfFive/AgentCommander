@@ -77,7 +77,14 @@ def invoke(name: str, payload: dict[str, Any], *,
     started = time.time()
     try:
         result = descriptor.handler(payload, ctx)
-    except Exception as exc:  # noqa: BLE001 — tool boundary; never let the engine crash
+    except Exception as exc:
+        # PermissionDenied is special — re-raise so the engine can halt the
+        # whole pipeline + drop any planned remaining steps.
+        from agentcommander.tui.permissions import PermissionDenied
+        if isinstance(exc, PermissionDenied):
+            raise
+        # All other tool exceptions become a normal failure result so the
+        # orchestrator can decide what to do.
         return ToolResult(ok=False, error=f"{type(exc).__name__}: {exc}")
     finally:
         try:
