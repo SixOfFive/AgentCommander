@@ -483,12 +483,10 @@ def run_tui() -> int:
     bar.install()
 
     catalog = get_catalog()
-    vram = detect_vram()
     render_banner(
         version=__version__,
         providers_count=len(list_providers()),
         models_count=catalog.model_count if catalog else 0,
-        vram_gb=vram.total_gb,
         working_dir=state["working_dir"],
     )
 
