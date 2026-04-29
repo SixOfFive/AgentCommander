@@ -215,7 +215,7 @@ def _run_pipeline(state: dict, user_message: str) -> None:
     typed_buffer = ""
     legacy_buffer = ""  # only used when char-mode isn't available
 
-    with _pipeline_input_mode() as raw_ready:
+    with raw_mode() as raw_ready:
         if raw_ready:
             bar.set_pending_input("")
             render_system_line(style("muted",
