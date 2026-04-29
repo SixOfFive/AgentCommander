@@ -62,6 +62,7 @@ def _write_file(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
                           error=f"content too large; max {MAX_WRITE_BYTES} bytes")
     try:
         safe = validate_file_access(path, ctx.working_directory, "write")
+        _ask_permission(safe, "write")
         os.makedirs(os.path.dirname(safe) or ".", exist_ok=True)
         with open(safe, "w", encoding="utf-8", newline="\n") as f:
             f.write(content)
