@@ -55,7 +55,6 @@ from agentcommander.tui.status_bar import get_status_bar, read_line_at_bottom
 from agentcommander.types import ALL_ROLES, Role
 from agentcommander.typecast import (
     apply_autoconfigure,
-    detect_vram,
     get_catalog,
     refresh_catalog,
 )
