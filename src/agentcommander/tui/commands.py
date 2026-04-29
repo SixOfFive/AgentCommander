@@ -1421,6 +1421,30 @@ def _build_registry() -> dict[str, SlashCommand]:
                     "tool requires extra safety checks (the EC admin-gated set).",
         ),
         SlashCommand(
+            name="/db", aliases=(),
+            summary="inspect or repair the SQLite store",
+            handler=cmd_db,
+            usage="/db                    # show path + integrity status\n"
+                  "/db check              # full integrity_check report\n"
+                  "/db reindex            # rebuild every index (fast, often clears corruption)\n"
+                  "/db vacuum             # rebuild the file (slower, fully defragments)\n"
+                  "/db backup <path>      # write a copy via sqlite backup API\n"
+                  "/db reset              # DESTRUCTIVE: archive corrupt DB + start fresh",
+            details=(
+                "Most 'database disk image is malformed' errors come from a\n"
+                "broken index — rare but possible after an interrupted write.\n"
+                "Order to try when a check fails:\n"
+                "  1. /db reindex      (free; almost always fixes it)\n"
+                "  2. /db vacuum       (rewrites the whole file)\n"
+                "  3. /db backup foo.sqlite  (preserve what you have)\n"
+                "  4. /db reset        (rename to *.corrupt-NNN, fresh DB)\n"
+                "\n"
+                "Startup also runs PRAGMA quick_check automatically and tries\n"
+                "REINDEX if it fails — most users never see this command."
+            ),
+            examples=("/db", "/db check", "/db reindex", "/db backup ~/ac-backup.sqlite"),
+        ),
+        SlashCommand(
             name="/history", aliases=(),
             summary="show recent conversations",
             handler=cmd_history,
