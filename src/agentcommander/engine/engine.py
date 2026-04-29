@@ -48,9 +48,15 @@ class RunOptions:
     conversation_id: str
     user_message: str
     working_directory: str | None = None
-    # Optional live-stream hook: receives (role, delta) for every token
-    # chunk emitted by the active role. Synchronous; should not block.
+    # Optional live hooks. Synchronous; should not block.
+    #   on_role_delta(role, delta_text) — every streamed token from the active role
+    #   on_role_start(role, model)      — fired when a role call begins
+    #   on_role_end(role, model, prompt_tokens, completion_tokens) — when it finishes
+    #   on_context_update(current, cap_min) — token-count of the next prompt being sent
     on_role_delta: "Any | None" = None
+    on_role_start: "Any | None" = None
+    on_role_end: "Any | None" = None
+    on_context_update: "Any | None" = None
 
 
 @dataclass
@@ -288,9 +294,19 @@ class PipelineRun:
         role = ACTION_TO_ROLE[decision.action]
         started = time.time()
 
+        # Look up resolved (provider, model) for status events.
+        rr = resolve_role(role)
+        model_name = rr.model if rr else "?"
+
+        # on_role_start
+        if opts.on_role_start is not None:
+            try:
+                opts.on_role_start(role.value, model_name)
+            except Exception:  # noqa: BLE001
+                pass
+
         # Live streaming: deltas render immediately inside the call_role
-        # provider loop via opts.on_role_delta. The TUI passes a callable
-        # that prints to stdout — true typewriter effect, no buffering.
+        # provider loop via opts.on_role_delta.
         on_delta = None
         if opts.on_role_delta is not None:
             def on_delta(delta: str, _role: str = role.value) -> None:
@@ -305,8 +321,23 @@ class PipelineRun:
         except (ProviderError, RoleNotAssigned) as exc:
             push_nudge(self.state.scratchpad, iteration, f"{role.value}_failed",
                        f"Role {role.value} call failed: {exc}")
+            if opts.on_role_end is not None:
+                try:
+                    opts.on_role_end(role.value, model_name, 0, 0)
+                except Exception:  # noqa: BLE001
+                    pass
             yield PipelineEvent(type="error", role=role.value, error=str(exc))
             return
+
+        # on_role_end — token counts come back through audit_log; for now
+        # we approximate from the scratchpad output length (chars/4) until
+        # we plumb usage all the way through. Better: track from call_role
+        # via a return tuple. TODO: refactor call_role to return usage.
+        if opts.on_role_end is not None:
+            try:
+                opts.on_role_end(role.value, model_name, 0, len(output) // 4)
+            except Exception:  # noqa: BLE001
+                pass
 
         self.state.scratchpad.append(ScratchpadEntry(
             step=iteration, role=role.value, action=decision.action,
