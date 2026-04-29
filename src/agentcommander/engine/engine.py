@@ -214,6 +214,26 @@ class PipelineRun:
                         continue
                     decision = result["decision"]
 
+                # Forgive a class of common orchestrator hallucinations: when
+                # the router classifies a casual message as "chat" the model
+                # often echoes the category as the action ("chat" / "respond"
+                # / "answer" / "reply"). None of those are registered actions,
+                # so without this they'd hit the unknown-action nudge and the
+                # next iteration would emit `done` with no payload. Treat them
+                # as a `done` whose input is whatever the model put in
+                # ``input`` or, failing that, ``reasoning`` — the trivia path
+                # the orchestrator prompt already documents
+                # (``{"action":"done","input":"2+2=4"}``).
+                _CHAT_LIKE_ACTIONS = {"chat", "respond", "answer", "reply"}
+                if decision.action in _CHAT_LIKE_ACTIONS:
+                    coerced_input = (decision.input or decision.reasoning or "").strip()
+                    decision = OrchestratorDecision(
+                        action="done",
+                        reasoning=(f"coerced {decision.action!r} → done "
+                                   f"({decision.reasoning or 'no reason given'})"),
+                        input=coerced_input,
+                    )
+
                 yield PipelineEvent(type="iteration", iteration=iteration,
                                     action=decision.action)
 
