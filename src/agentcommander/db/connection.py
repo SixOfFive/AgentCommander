@@ -103,36 +103,44 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     # 'malformed' cases. When it fails we run REINDEX — that rebuilds
     # every index from the underlying tables, which fixes the common
     # "index out of sync with table" corruption without losing any rows.
-    # If REINDEX clears the issue, startup proceeds silently. If it
-    # doesn't, we leave a log entry the user can see in the audit trail
-    # and they can try /db check + /db vacuum + /db reset manually.
+    # The result is stashed in `_last_auto_repair` so the TUI banner can
+    # tell the user what happened — they don't have to dig through the
+    # audit log to know REINDEX fired.
+    global _last_auto_repair
+    _last_auto_repair = None
     try:
         row = conn.execute("PRAGMA quick_check").fetchone()
         ok = bool(row) and (row[0] == "ok")
         if not ok:
+            before = row[0] if row else "?"
             try:
                 conn.execute("REINDEX")
                 row2 = conn.execute("PRAGMA quick_check").fetchone()
                 ok2 = bool(row2) and (row2[0] == "ok")
-                # Audit so the user can see in the audit log even if the
-                # startup output got pushed off-screen.
+                _last_auto_repair = {
+                    "before": before,
+                    "after": row2[0] if row2 else "?",
+                    "fixed": ok2,
+                }
                 conn.execute(
                     "INSERT INTO audit_log (event_type, details, created_at) "
                     "VALUES (?, ?, ?)",
-                    ("db.auto_repair",
-                     json.dumps({
-                         "before": row[0] if row else "?",
-                         "after": row2[0] if row2 else "?",
-                         "fixed": ok2,
-                     }),
+                    ("db.auto_repair", json.dumps(_last_auto_repair),
                      int(time.time() * 1000)),
                 )
-            except sqlite3.DatabaseError:
-                pass
-    except sqlite3.DatabaseError:
-        # Even quick_check failed — file is badly damaged. Don't block
-        # startup; the user can /db reset.
-        pass
+            except sqlite3.DatabaseError as exc:
+                _last_auto_repair = {
+                    "before": before,
+                    "after": f"REINDEX failed: {exc}",
+                    "fixed": False,
+                }
+    except sqlite3.DatabaseError as exc:
+        # Even quick_check failed — file is badly damaged.
+        _last_auto_repair = {
+            "before": f"quick_check failed: {exc}",
+            "after": "(skipped)",
+            "fixed": False,
+        }
 
     _db = conn
     _db_path = target
