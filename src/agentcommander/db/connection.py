@@ -17,6 +17,16 @@ from pathlib import Path
 _db: sqlite3.Connection | None = None
 _db_path: Path | None = None
 
+# Result of the most recent init_db auto-repair attempt. None when
+# integrity_check passed cleanly on startup. The TUI reads this and
+# surfaces a banner line so the user knows REINDEX fired (or didn't).
+_last_auto_repair: dict | None = None
+
+
+def last_auto_repair() -> dict | None:
+    """Return the most recent auto-repair status, or None if the DB was clean."""
+    return _last_auto_repair
+
 
 def _default_db_dir() -> Path:
     """OS-appropriate user-data directory."""
