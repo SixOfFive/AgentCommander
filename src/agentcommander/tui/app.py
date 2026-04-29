@@ -149,6 +149,7 @@ def _run_pipeline(state: dict, user_message: str) -> None:
 
     if final_text:
         append_message(conv_id, "assistant", final_text)
+    bar.set_running(False)
 
 
 def _handle_input(state: dict, line: str) -> None:
