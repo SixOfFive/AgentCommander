@@ -30,6 +30,42 @@ class RoleNotAssigned(RuntimeError):
     and either skips (optional roles) or aborts (required roles)."""
 
 
+def tool_registry_appendix() -> str:
+    """Return a markdown section listing currently registered tools.
+
+    Appended to the orchestrator's and chat-fallback's system prompts so
+    the model knows what tools are actually wired up at this moment. Lists
+    tool name, privileged flag, and one-line description — enough for the
+    model to answer "what tools do you have access to?" honestly.
+
+    Returns ``""`` when no tools are registered (e.g. before bootstrap)
+    so the appendix doesn't pollute the prompt with an empty section.
+    """
+    try:
+        from agentcommander.tools.dispatcher import list_tools
+        tools = list_tools()
+    except Exception:  # noqa: BLE001
+        return ""
+    if not tools:
+        return ""
+    lines = [
+        "",
+        "## Currently registered tools (live)",
+        "",
+        "Action verbs the orchestrator can dispatch *right now*. Use this list",
+        "when the user asks what you can do — these are your actual capabilities.",
+        "",
+    ]
+    for t in tools:
+        priv = " [privileged]" if t.privileged else ""
+        # Trim very long descriptions so a single tool can't dominate the prompt.
+        desc = (t.description or "").strip().replace("\n", " ")
+        if len(desc) > 200:
+            desc = desc[:197] + "..."
+        lines.append(f"- **{t.name}**{priv}: {desc}")
+    return "\n".join(lines)
+
+
 def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
               conversation_id: str | None = None,
               json_mode: bool | None = None,
