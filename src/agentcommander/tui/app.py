@@ -335,6 +335,13 @@ def run_tui() -> int:
         "debug": False,
     }
 
+    # Install the persistent bottom panel BEFORE printing the banner so all
+    # subsequent output scrolls up naturally inside the reserved region
+    # instead of overwriting the top of the screen.
+    bar = get_status_bar()
+    bar.set_workdir(state["working_dir"])
+    bar.install()
+
     catalog = get_catalog()
     vram = detect_vram()
     render_banner(
