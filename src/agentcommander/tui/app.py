@@ -15,7 +15,6 @@ from agentcommander.db.repos import (
     append_message,
     create_conversation,
     get_config,
-    get_role_assignment,
     list_providers,
     set_config,
 )
