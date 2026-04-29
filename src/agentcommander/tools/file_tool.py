@@ -19,6 +19,15 @@ from agentcommander.safety.sandbox import (
 from agentcommander.tools.dispatcher import register
 from agentcommander.tools.types import ToolContext, ToolDescriptor, ToolResult
 
+
+def _ask_permission(path: str, op: str) -> None:
+    """Consult the user for read/write/delete permission. Raises PermissionDenied on deny.
+
+    Lazily imported so unit tests that don't init the TUI can still load this module.
+    """
+    from agentcommander.tui.permissions import request_permission
+    request_permission(path, op)  # type: ignore[arg-type]
+
 MAX_READ_BYTES = 5 * 1024 * 1024   # 5 MB
 MAX_WRITE_BYTES = 10 * 1024 * 1024  # 10 MB
 
