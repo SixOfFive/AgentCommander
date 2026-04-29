@@ -265,6 +265,7 @@ def _run_pipeline(state: dict, user_message: str) -> None:
     opts = RunOptions(
         conversation_id=conv_id,
         user_message=user_message,
+        user_message_id=user_msg.id,
         working_directory=state.get("working_dir"),
         on_role_delta=render_role_delta,
         on_role_start=_on_role_start,
