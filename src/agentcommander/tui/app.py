@@ -217,6 +217,13 @@ def _run_pipeline(state: dict, user_message: str) -> None:
     typed_buffer = ""
     legacy_buffer = ""  # only used when char-mode isn't available
 
+    # Tick the bar's run timer once per second so the "run X" / "total Y"
+    # display advances even when no engine events arrive (e.g. the active
+    # role is mid-generation with no completion-token chunk yet).
+    import time as _time
+    last_timer_tick = _time.monotonic()
+    TIMER_TICK_INTERVAL_S = 1.0
+
     with raw_mode() as raw_ready:
         if raw_ready:
             bar.set_pending_input("")
@@ -231,6 +238,10 @@ def _run_pipeline(state: dict, user_message: str) -> None:
                 try:
                     kind, data = events_q.get(timeout=0.05 if raw_ready else 0.15)
                 except queue.Empty:
+                    now_t = _time.monotonic()
+                    if now_t - last_timer_tick >= TIMER_TICK_INTERVAL_S:
+                        bar.redraw()
+                        last_timer_tick = now_t
                     chunk = poll_chars()
                     if chunk:
                         if raw_ready:
