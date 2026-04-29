@@ -1,5 +1,13 @@
 """Persistent bottom status bar + bottom-anchored input row.
 
+Status row layout (right-aligned, separated by ` · `):
+  ▸ role → model    in {prompt}  out {completion}    ctx {now}/{max}    run {mm:ss}    total {mm:ss}
+
+Timers tick from inside `redraw()` — there's no background thread. The TUI
+loop calls `redraw()` once per second during a run so the displayed time
+stays current without coupling to engine events.
+
+
 Reserves the last THREE terminal rows via an ANSI scroll-region escape:
 
     rows 1 .. (H-3)   scroll region for messages (content scrolls UP)
