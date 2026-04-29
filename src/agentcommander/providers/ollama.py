@@ -183,6 +183,16 @@ class OllamaProvider(ProviderBase):
         models that are actually loaded — avoids spurious requests against
         models we never used this session.
         """
+        return [d["name"] for d in self.list_loaded_details() if d.get("name")]
+
+    def list_loaded_details(self) -> list[dict[str, Any]]:
+        """Rich metadata for resident models — what /vram needs.
+
+        Wraps Ollama's /api/ps. Each dict has: name, size_vram (bytes),
+        size (bytes), expires_at (ISO8601 string), details (parameter_size,
+        quantization_level, family, format). Returns ``[]`` on transport
+        failure so `/vram` degrades gracefully when the daemon is down.
+        """
         try:
             data = _get_json(f"{self.endpoint}/api/ps", timeout=3.0)
         except (urllib.error.URLError, OSError, ValueError):
@@ -190,13 +200,20 @@ class OllamaProvider(ProviderBase):
         if not isinstance(data, dict):
             return []
         models = data.get("models", []) or []
-        out: list[str] = []
+        out: list[dict[str, Any]] = []
         for m in models:
             if not isinstance(m, dict):
                 continue
             name = m.get("name") or m.get("model")
-            if isinstance(name, str) and name:
-                out.append(name)
+            if not isinstance(name, str) or not name:
+                continue
+            out.append({
+                "name": name,
+                "size_vram": m.get("size_vram"),
+                "size": m.get("size"),
+                "expires_at": m.get("expires_at"),
+                "details": m.get("details") if isinstance(m.get("details"), dict) else {},
+            })
         return out
 
     def unload(self, model: str) -> bool:
