@@ -236,7 +236,22 @@ class PipelineRun:
 
                 # Dispatch — tool action
                 if decision.action in TOOL_ACTIONS:
-                    yield from self._dispatch_tool(decision, iteration, opts)
+                    try:
+                        yield from self._dispatch_tool(decision, iteration, opts)
+                    except Exception as exc:
+                        # PermissionDenied: user said "Deny" — halt the pipe.
+                        if type(exc).__name__ == "PermissionDenied":
+                            yield PipelineEvent(
+                                type="error",
+                                error=f"halted by user: {exc}",
+                            )
+                            update_pipeline_run(
+                                self.run_id, status="cancelled",
+                                iterations=iteration,
+                                error=str(exc), category=category,
+                            )
+                            return
+                        raise
                     continue
 
                 # Unknown action
