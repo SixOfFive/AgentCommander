@@ -95,6 +95,22 @@ class ProviderBase:
     ) -> Iterable[ChatChunk]:
         raise NotImplementedError
 
+    # ── Optional: model unloading ──
+    # Provider types that hold models in memory between calls can override
+    # these to free resources at exit. The default is a no-op so providers
+    # that don't have the concept (e.g. llama.cpp serves one model per
+    # process and is shut down with the process) don't accidentally do
+    # anything. Only the Ollama provider overrides these in this codebase.
+
+    def unload(self, model: str) -> bool:
+        """Evict ``model`` from the provider's memory. Default: no-op."""
+        return False
+
+    def unload_all_loaded(self) -> int:
+        """Evict every model currently resident on this provider.
+        Returns the count of successful unloads. Default: no-op."""
+        return 0
+
 
 # ─── Factory registry ──────────────────────────────────────────────────────
 
