@@ -67,6 +67,10 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     # first user message for conversations still on the legacy default
     # title ("Conversation" / "New conversation"). Runs once per DB until
     # every legacy row gets a real title, then becomes a no-op.
+    #
+    # DatabaseError catches "database disk image is malformed" — if the DB
+    # is corrupted, we'd rather start the TUI in a degraded state (so the
+    # user can run `/db check` and recover) than crash on import.
     try:
         conn.execute(
             "UPDATE conversations SET title = trim(substr("
@@ -77,7 +81,9 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             "AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = conversations.id "
             "            AND m.role = 'user')"
         )
-    except sqlite3.OperationalError:
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        # Don't block startup. /db check will surface the underlying
+        # integrity issue with actionable detail.
         pass
 
     _db = conn
