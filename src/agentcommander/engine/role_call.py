@@ -96,14 +96,30 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
     model = resolved.model
     system_prompt = get_role_prompt(role_enum)
 
-    # Self-introspection: the orchestrator drives action choice, so it should
-    # know which tools are actually registered right now (not just what the
-    # static prompt template documents). This makes "what tools do you have
-    # access to?" answer-able from the live registry instead of stale docs.
+    # Self-introspection: append the live tool registry to *every* role's
+    # system prompt so a "what tools do you have access to?" question can
+    # be answered honestly even when the orchestrator delegates the response
+    # to a specialist role (e.g. researcher) instead of answering directly.
+    # Without this, delegated roles invent fictional tools because their
+    # static prompts have no awareness of the program's actual capabilities.
+    appendix = tool_registry_appendix()
+    if appendix:
+        system_prompt = system_prompt.rstrip() + "\n" + appendix + "\n"
+
+    # Extra directive for the orchestrator: don't delegate self-introspection.
+    # The list above is authoritative and current — research-style decomposition
+    # produces meandering hallucinated answers about NLP / information retrieval
+    # / knowledge synthesis that have nothing to do with the registered tools.
     if role_enum is Role.ORCHESTRATOR:
-        appendix = tool_registry_appendix()
-        if appendix:
-            system_prompt = system_prompt.rstrip() + "\n" + appendix + "\n"
+        system_prompt = system_prompt.rstrip() + "\n\n" + (
+            "## Self-introspection rule\n\n"
+            "When the user asks about YOUR tools, capabilities, or what you "
+            "can do, answer DIRECTLY with `{\"action\": \"done\", \"input\": "
+            "\"<short bullet list of the registered tools above>\"}`. Do NOT "
+            "delegate to research / plan / architect / coder. The tool list "
+            "in the section above is authoritative and current — the user "
+            "wants that exact list, not a research report about it.\n"
+        )
 
     # If the caller didn't pin a context size, fall back to whatever was
     # persisted on the role assignment (set by `/autoconfig --mincontext N`).
