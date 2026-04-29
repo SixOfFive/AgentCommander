@@ -27,7 +27,7 @@ from agentcommander.db.connection import get_db
 from agentcommander.tui.ansi import RESET, fg256, style, write, writeln
 
 
-Operation = Literal["read", "write", "delete"]
+Operation = Literal["read", "write", "delete", "execute"]
 Decision = Literal["allow", "deny"]
 
 
