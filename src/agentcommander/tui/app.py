@@ -2,11 +2,15 @@
 
 Pure stdlib. Uses `input()` (with readline if available for line editing
 + history). When the pipeline runs, events stream live via render_event().
+The pipeline runs on a worker thread so the main thread can poll the keyboard
+non-blocking and react to `/stop`.
 """
 from __future__ import annotations
 
+import queue
 import shlex
 import sys
+import threading
 import traceback
 
 from agentcommander import __version__
