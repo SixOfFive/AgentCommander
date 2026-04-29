@@ -551,6 +551,7 @@ def read_line_at_bottom(prompt_text: str = "❯ ") -> str | None:
     sys.stdout.flush()
     bar.park_cursor()
     bar.redraw()
+    _record_history(submitted)
     return submitted
 
 
