@@ -51,7 +51,8 @@
       "Bash(timeout 300 ./ac.bat)",
       "Bash(py /tmp/strip_ansi.py)",
       "Bash(timeout 600 ./ac.bat)",
-      "Bash(timeout 60 ./ac.bat)"
+      "Bash(timeout 60 ./ac.bat)",
+      "Bash(timeout 1200 ./ac.bat)"
     ]
   }
 }
