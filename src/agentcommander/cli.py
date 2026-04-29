@@ -30,11 +30,34 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # Lazy imports so `--version` / `--help` are instant.
-    from agentcommander.db.connection import init_db
+    from agentcommander.db.connection import init_db, DBAlreadyOpen
     from agentcommander.db.repos import set_config
     from agentcommander.tui.app import run_tui
 
-    init_db()
+    try:
+        init_db()
+    except DBAlreadyOpen as exc:
+        # Single-instance lock: another ac.bat is using this DB. Friendly
+        # message, no traceback. Exit code 2 is the "config / locked"
+        # convention used elsewhere in this CLI.
+        print(
+            "\nAgentCommander is already running against this DB.",
+            file=sys.stderr,
+        )
+        print(f"  {exc}", file=sys.stderr)
+        print(
+            "\nClose the other process and try again, or run from a "
+            "different working directory (each project has its own DB).",
+            file=sys.stderr,
+        )
+        return 2
+    except Exception as exc:  # noqa: BLE001
+        if args.debug:
+            raise
+        print(f"\nfailed to open DB: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        return 1
+
     if args.working_dir:
         import os
         if not os.path.isdir(args.working_dir):
