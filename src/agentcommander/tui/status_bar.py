@@ -272,17 +272,29 @@ class StatusBar:
             role_part = "· idle"
 
         token_part = f"in {_humanize(s.tokens_in)}  out {_humanize(s.tokens_out)}"
+
+        # Context: "ctx N/M" when both known; "ctx N" when only the running
+        # tally is set; "ctx —/M" when only the cap is known (e.g. between
+        # the role-start signal and the first prompt-tokens reading).
         ctx_part = ""
-        if s.context_now or s.context_cap_min:
-            cap = f"[{_humanize(s.context_cap_min)}]" if s.context_cap_min else ""
-            ctx_part = f"ctx {_humanize(s.context_now)} {cap}".strip()
+        if s.context_now and s.context_cap_min:
+            ctx_part = f"ctx {_humanize(s.context_now)}/{_humanize(s.context_cap_min)}"
+        elif s.context_cap_min:
+            ctx_part = f"ctx —/{_humanize(s.context_cap_min)}"
+        elif s.context_now:
+            ctx_part = f"ctx {_humanize(s.context_now)}"
+
+        # Run timer: live elapsed while the pipeline is active, otherwise the
+        # last completed run's duration (so the user can see "that took X").
+        # Total accumulates across the session.
+        run_part = f"run {_humanize_duration_ms(s.run_elapsed_ms)}"
+        total_part = f"total {_humanize_duration_ms(s.total_elapsed_ms)}"
 
         # Working directory deliberately lives in the top banner, not here —
-        # the bottom row is reserved for run-time data (role, tokens, context)
-        # that changes during a pipeline. Keeping static info up top leaves
-        # room for future status fields without crowding.
+        # the bottom row is reserved for run-time data (role, tokens, context,
+        # timers) that changes during a pipeline.
 
-        plain_parts = [p for p in (role_part, token_part, ctx_part) if p]
+        plain_parts = [p for p in (role_part, token_part, ctx_part, run_part, total_part) if p]
         plain = "  ·  ".join(plain_parts)
         # Right-align: pad with spaces on the left.
         pad = max(0, cols - len(plain))
