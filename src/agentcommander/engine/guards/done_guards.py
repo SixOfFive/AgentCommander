@@ -402,18 +402,30 @@ def file_readback_guard(scratchpad: list[ScratchpadEntry], decision: Orchestrato
 
 
 def multi_step_guard(scratchpad: list[ScratchpadEntry], iteration: int,
-                      user_message: str) -> GuardVerdict:
+                      user_message: str,
+                      decision: OrchestratorDecision | None = None) -> GuardVerdict:
     user_wants_multi = bool(re.search(
         r"\b(then|after|also|and then|next|second|finally|both)\b",
         user_message, re.IGNORECASE,
     ))
     tool_count = len([e for e in scratchpad if e.role == "tool"])
-    if user_wants_multi and tool_count <= 1 and len(scratchpad) <= 3:
-        push_system_nudge(scratchpad, iteration, "multi_step_incomplete",
-                          f'WARNING: the user request has multiple steps ("{user_message[:200]}"). '
-                          f"Only {len(scratchpad)} steps completed. Complete ALL steps before done.")
-        return GuardVerdict(action="continue")
-    return GuardVerdict(action="pass")
+    if not (user_wants_multi and tool_count <= 1 and len(scratchpad) <= 3):
+        return GuardVerdict(action="pass")
+    # If the orchestrator's done has a substantial reply, assume it covered
+    # both parts in one go (typical for chat-style multi-step requests like
+    # "tell me X and then count Y"). Without this, a comprehensive answer
+    # gets rejected as premature and the orchestrator wastes 1-2 iterations
+    # before producing the same answer again. Threshold tuned to be larger
+    # than terse responses but still permissive — anything with 2+ short
+    # sentences clears it.
+    if decision is not None:
+        body = (decision.input or "").strip()
+        if len(body) >= 80:
+            return GuardVerdict(action="pass")
+    push_system_nudge(scratchpad, iteration, "multi_step_incomplete",
+                      f'WARNING: the user request has multiple steps ("{user_message[:200]}"). '
+                      f"Only {len(scratchpad)} steps completed. Complete ALL steps before done.")
+    return GuardVerdict(action="continue")
 
 
 def plan_without_code_guard(scratchpad: list[ScratchpadEntry],
