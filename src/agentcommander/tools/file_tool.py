@@ -100,6 +100,7 @@ def _delete_file(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
         return ToolResult(ok=False, error="path is required")
     try:
         safe = validate_file_access(path, ctx.working_directory, "delete")
+        _ask_permission(safe, "delete")
         if not os.path.exists(safe):
             return ToolResult(ok=False, error=f"path does not exist: {path}")
         os.remove(safe)
