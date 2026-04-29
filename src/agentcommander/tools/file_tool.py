@@ -38,6 +38,7 @@ def _read_file(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
         return ToolResult(ok=False, error="path is required")
     try:
         safe = validate_file_access(path, ctx.working_directory, "read")
+        _ask_permission(safe, "read")
         size = os.path.getsize(safe)
         if size > MAX_READ_BYTES:
             return ToolResult(ok=False,
