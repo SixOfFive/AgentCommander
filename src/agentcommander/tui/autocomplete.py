@@ -35,38 +35,106 @@ class CompletionMatch:
     aliases: tuple[str, ...] = ()
 
 
+# Per-command sub-option tables. Surfaced once the user types whitespace
+# after a top-level command. Keyed by the SlashCommand's canonical name —
+# `/ac` typed by the user resolves to `/autoconfig` via COMMANDS first, so
+# aliases are handled automatically.
+SUB_COMMANDS: dict[str, list[CompletionMatch]] = {
+    "/autoconfig": [
+        CompletionMatch(name="clear",
+                        summary="wipe role assignments + re-prompt for the Ollama endpoint, then redo"),
+        CompletionMatch(name="--mincontext",
+                        summary="filter to models with at least N context tokens (e.g. --mincontext 128k)"),
+    ],
+    "/typecast": [
+        CompletionMatch(name="refresh",
+                        summary="force re-fetch the TypeCast catalog from GitHub"),
+        CompletionMatch(name="autoconfigure",
+                        summary="pick best installed model + per-role overrides"),
+    ],
+    "/providers": [
+        CompletionMatch(name="add",
+                        summary="add a provider: <id> <type> <name> <endpoint>"),
+        CompletionMatch(name="test",
+                        summary="health-check a provider: <id>"),
+        CompletionMatch(name="rm",
+                        summary="remove a provider: <id>"),
+    ],
+    "/roles": [
+        CompletionMatch(name="set",
+                        summary="pin a role override: <role> <provider_id> <model>"),
+        CompletionMatch(name="unset",
+                        summary="release a per-role override: <role>"),
+        CompletionMatch(name="auto",
+                        summary="re-run autoconfig (in-memory only; respects overrides)"),
+        CompletionMatch(name="assign-all",
+                        summary="bulk-assign every role: <provider_id> <model>"),
+    ],
+    "/context": [
+        CompletionMatch(name="off",
+                        summary="clear the session-wide num_ctx override"),
+    ],
+}
+
+
 def match_commands(buffer: str) -> list[CompletionMatch]:
-    """Return SlashCommand entries whose name (or alias) starts with the
-    typed prefix. Returns ``[]`` when:
-      - the buffer doesn't start with ``/``
-      - the user has typed past the command name (any whitespace present)
+    """Return completion matches for the current buffer.
+
+    Two tiers:
+      1. **Top-level**: buffer starts with ``/`` and has no whitespace —
+         match against every registered SlashCommand by name + aliases.
+      2. **Sub-commands**: buffer has exactly one whitespace-separated
+         token plus a partial second word — match against ``SUB_COMMANDS``
+         for the first token's canonical command. Sub-options that take
+         further free-form arguments (paths, urls, role names) are out of
+         scope here; we stop after the second token has any whitespace.
+
+    Returns ``[]`` when the buffer doesn't start with ``/`` or when no
+    matches apply.
     """
     if not buffer.startswith("/"):
-        return []
-    # Once the user is into args (saw a space), stop offering completions —
-    # the command itself is settled.
-    if any(c.isspace() for c in buffer):
         return []
 
     # Lazy import to avoid pulling the command registry at module-load time.
     from agentcommander.tui.commands import COMMANDS
 
-    needle = buffer.lower()
-    seen: set[int] = set()
-    out: list[CompletionMatch] = []
-    for cmd in COMMANDS.values():
-        if id(cmd) in seen:
-            continue
-        names = (cmd.name,) + cmd.aliases
-        if any(n.lower().startswith(needle) for n in names):
-            seen.add(id(cmd))
-            out.append(CompletionMatch(
-                name=cmd.name,
-                summary=cmd.summary,
-                aliases=cmd.aliases,
-            ))
-    out.sort(key=lambda m: m.name)
-    return out
+    # Tier 1: top-level command name still being typed.
+    if not any(c.isspace() for c in buffer):
+        needle = buffer.lower()
+        seen: set[int] = set()
+        out: list[CompletionMatch] = []
+        for cmd in COMMANDS.values():
+            if id(cmd) in seen:
+                continue
+            names = (cmd.name,) + cmd.aliases
+            if any(n.lower().startswith(needle) for n in names):
+                seen.add(id(cmd))
+                out.append(CompletionMatch(
+                    name=cmd.name,
+                    summary=cmd.summary,
+                    aliases=cmd.aliases,
+                ))
+        out.sort(key=lambda m: m.name)
+        return out
+
+    # Tier 2: sub-command on the second token. Anything past the second
+    # token gets free-form args we don't try to complete.
+    parts = buffer.split(maxsplit=1)
+    head = parts[0]
+    rest = parts[1] if len(parts) > 1 else ""
+    if any(c.isspace() for c in rest):
+        return []
+
+    cmd = COMMANDS.get(head)
+    if cmd is None:
+        return []
+
+    subs = SUB_COMMANDS.get(cmd.name, [])
+    if not subs:
+        return []
+
+    needle = rest.lower()
+    return [s for s in subs if s.name.lower().startswith(needle)]
 
 
 def paint_popup(
