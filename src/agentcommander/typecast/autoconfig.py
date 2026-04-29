@@ -212,8 +212,11 @@ class AutoconfigApplied:
     role_picks: dict[str, tuple[str, str]] = field(default_factory=dict)
     # role.value -> model — existing user overrides that were respected (read from DB)
     user_overrides: dict[str, str] = field(default_factory=dict)
-    # role.value -> model — TypeCast diff picks (a stronger model than the default for that role)
+    # role.value -> model — picks that differ from the most-common ("primary") model
     diff_picks: dict[str, str] = field(default_factory=dict)
+    # role.value list — roles where no installed model scored >= the minimum
+    # threshold; left for the user to assign manually with /roles set
+    unset_roles: list[str] = field(default_factory=list)
     skipped_reason: str | None = None
 
 
