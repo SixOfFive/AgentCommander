@@ -136,6 +136,15 @@ class ScratchpadEntry:
     timestamp: float
     duration_ms: int | None = None
     content: str | None = None
+    # Stable per-entry identifier so future compression passes can replace
+    # multiple entries with one synthetic summary while still tracing back
+    # to the originals. UUIDs assigned at creation time by the engine.
+    message_id: str | None = None
+    # If a compression pass replaces this entry (or a group it belongs to),
+    # the replacement entry sets `replaced_message_ids` to the list of
+    # original ids it now stands for. Originals are kept in the scratchpad
+    # for replay/inspection; the engine just hides them from the role prompt.
+    replaced_message_ids: list[str] | None = None
 
 
 @dataclass
