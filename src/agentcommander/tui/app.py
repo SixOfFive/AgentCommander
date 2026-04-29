@@ -46,6 +46,7 @@ from agentcommander.tui.render import (
     render_user_message,
 )
 from agentcommander.tui.setup import first_run_wizard, needs_first_run_setup
+from agentcommander.tui.status_bar import get_status_bar
 from agentcommander.types import ALL_ROLES, Role
 from agentcommander.typecast import (
     apply_autoconfigure,
