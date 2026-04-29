@@ -113,6 +113,20 @@ class ProviderBase:
         Returns the count of successful unloads. Default: no-op."""
         return 0
 
+    def list_loaded_details(self) -> list[dict[str, Any]]:
+        """Detailed metadata for currently-loaded models.
+
+        Each dict should carry at minimum::
+
+            {"name": <model_id>, "size_vram": <bytes>, "size": <bytes>,
+             "expires_at": <iso8601 string or None>,
+             "details": {"parameter_size": ..., "quantization_level": ..., ...}}
+
+        Default: empty list. Only providers that hold models in memory
+        (Ollama) override this. Used by ``/vram``.
+        """
+        return []
+
 
 # ─── Factory registry ──────────────────────────────────────────────────────
 
