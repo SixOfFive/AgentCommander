@@ -409,6 +409,16 @@ class PipelineRun:
         # full context. Replaced (compacted) entries are filtered out.
         self._hydrate_scratchpad_from_db()
 
+        # If the rehydrated scratchpad would crowd out the prompt budget,
+        # compact the oldest entries via the summarizer. Yields one or two
+        # guard events so the user can see compaction happening (it can
+        # take several seconds to summarize).
+        try:
+            yield from self._maybe_compact_scratchpad()
+        except Exception as exc:  # noqa: BLE001
+            audit("compaction.unexpected_error",
+                  {"error": f"{type(exc).__name__}: {exc}"})
+
         try:
             category = self._classify_category(opts.user_message, opts)
             self._max_iterations = CATEGORY_MAX_ITERATIONS.get(category, 20)
