@@ -848,6 +848,150 @@ def cmd_tools(ctx: CommandContext, _args: list[str]) -> None:
     render_table(["tool", "priv", "description"], rows)
 
 
+def _format_gb(bytes_val: int | float | None) -> str:
+    """Format a byte count as a friendly GB string."""
+    if bytes_val is None:
+        return "?"
+    try:
+        gb = float(bytes_val) / (1024 ** 3)
+    except (TypeError, ValueError):
+        return "?"
+    if gb >= 100:
+        return f"{gb:.0f} GB"
+    if gb >= 10:
+        return f"{gb:.1f} GB"
+    return f"{gb:.2f} GB"
+
+
+def cmd_vram(ctx: CommandContext, _args: list[str]) -> None:
+    """Show VRAM usage: total detected, what's currently loaded (live from
+    each provider), and catalog estimates for role-assigned models that
+    aren't loaded right now.
+    """
+    from agentcommander.engine.role_resolver import resolve as resolve_role
+    from agentcommander.providers.base import list_active
+    from agentcommander.typecast.catalog import get_catalog
+    from agentcommander.typecast.vram import detect_vram
+    from agentcommander.types import ALL_ROLES
+
+    # ── Total detected ────────────────────────────────────────────────────
+    vram = detect_vram()
+    total_gb = vram.total_gb if vram.total_gb > 0 else None
+    total_label = (
+        f"{total_gb:.1f} GB" if total_gb else "unknown"
+    )
+    render_system_line(
+        f"VRAM total (detected via {vram.source}): "
+        + style("accent", total_label)
+    )
+    if vram.details:
+        render_system_line(style("muted", f"  ({vram.details})"))
+
+    # ── Live: what each provider has loaded right now ────────────────────
+    loaded: list[dict[str, object]] = []
+    for p in list_active():
+        try:
+            for d in p.list_loaded_details():
+                d_with_provider: dict[str, object] = dict(d)
+                d_with_provider["provider"] = p.id
+                loaded.append(d_with_provider)
+        except Exception:  # noqa: BLE001
+            continue
+
+    total_loaded_bytes = sum(
+        int(d.get("size_vram") or 0)
+        for d in loaded
+        if isinstance(d.get("size_vram"), (int, float))
+    )
+
+    render_system_line("")
+    if loaded:
+        render_system_line(f"Loaded models ({len(loaded)}):")
+        rows: list[list[str]] = []
+        for d in loaded:
+            name = str(d.get("name", "?"))
+            size_str = _format_gb(d.get("size_vram"))
+            details = d.get("details") if isinstance(d.get("details"), dict) else {}
+            param = (details.get("parameter_size") if isinstance(details, dict) else "") or ""
+            quant = (details.get("quantization_level") if isinstance(details, dict) else "") or ""
+            tag = " ".join(x for x in (param, quant) if x)
+            expires = str(d.get("expires_at") or "")
+            # Trim ISO-8601 to HH:MM:SS for readability
+            if "T" in expires:
+                expires = expires.split("T", 1)[1][:8]
+            rows.append([name, size_str, tag, expires])
+        render_table(["model", "vram", "size/quant", "keep_alive_until"], rows)
+
+        loaded_gb = total_loaded_bytes / (1024 ** 3)
+        render_system_line(
+            f"  total loaded: {style('accent', f'{loaded_gb:.2f} GB')}"
+        )
+        if total_gb:
+            free_gb = max(0.0, total_gb - loaded_gb)
+            pct = min(100.0, (loaded_gb / total_gb) * 100)
+            render_system_line(
+                f"  free (est):   {style('accent', f'{free_gb:.2f} GB')}  "
+                + style("muted", f"({pct:.0f}% used of detected total)")
+            )
+    else:
+        render_system_line(style("muted",
+            "  (no models currently loaded — none of the active providers "
+            "report a resident model)"))
+
+    # ── Catalog estimates for role-assigned models not currently loaded ──
+    seen: set[str] = set()
+    role_models: list[tuple[str, str]] = []  # (model, comma-separated roles)
+    role_for_model: dict[str, list[str]] = {}
+    for role in ALL_ROLES:
+        rr = resolve_role(role)
+        if rr is None:
+            continue
+        role_for_model.setdefault(rr.model, []).append(role.value)
+        if rr.model in seen:
+            continue
+        seen.add(rr.model)
+        role_models.append((rr.model, ""))
+
+    loaded_names = {str(d.get("name", "")) for d in loaded}
+    unloaded_models = [
+        m for (m, _) in role_models if m and m not in loaded_names
+    ]
+
+    if unloaded_models:
+        catalog_result = get_catalog()
+        cat = catalog_result.catalog if catalog_result else {}
+        render_system_line("")
+        render_system_line(
+            "Role-assigned models not currently loaded "
+            + style("muted", "(catalog estimate, no context-size adjustment):")
+        )
+        rows = []
+        for m in sorted(unloaded_models):
+            entry = cat.get(m) if isinstance(cat, dict) else None
+            est = "?"
+            ctx_len = ""
+            if isinstance(entry, dict):
+                est_val = entry.get("estimatedVramGb")
+                if isinstance(est_val, (int, float)) and est_val > 0:
+                    est = f"~{float(est_val):.1f} GB"
+                ctx_raw = entry.get("contextLength")
+                if isinstance(ctx_raw, (int, float)) and ctx_raw > 0:
+                    n = int(ctx_raw)
+                    if n >= 1024:
+                        ctx_len = f"{n // 1024}k ctx"
+                    else:
+                        ctx_len = f"{n} ctx"
+            roles_using = ", ".join(role_for_model.get(m, []))
+            rows.append([m, est, ctx_len, roles_using[:60]])
+        render_table(["model", "est. vram", "trained ctx", "used by"], rows)
+
+    render_system_line("")
+    render_system_line(style("muted",
+        "Note: live values come from Ollama's /api/ps; catalog estimates "
+        "don't include context-size overhead — actual VRAM with a large "
+        "num_ctx will be higher than the catalog figure."))
+
+
 def cmd_history(ctx: CommandContext, _args: list[str]) -> None:
     from agentcommander.db.repos import list_conversations
     convs = list_conversations()
