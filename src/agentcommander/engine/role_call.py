@@ -91,6 +91,7 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
     audit("role.call", {
         "role": role_enum.value,
         "model": model,
+        "kind": resolved.kind,
         "duration_ms": duration_ms,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
@@ -99,14 +100,13 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
         insert_token_usage(
             conversation_id=conversation_id,
             role=role_enum.value,
-            provider_id=assignment["provider_id"],
+            provider_id=resolved.provider_id,
             model=model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             duration_ms=duration_ms,
         )
     except Exception:  # noqa: BLE001
-        # Token usage logging should never break the engine.
         pass
 
     return "".join(collected)
