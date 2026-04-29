@@ -255,7 +255,7 @@ class PipelineRun:
     # ─────────────────────────────────────────────────────────────────────
 
     def _classify_category(self, user_message: str) -> str:
-        if get_role_assignment(Role.ROUTER) is None:
+        if resolve_role(Role.ROUTER) is None:
             return "question"
         try:
             raw = call_role(Role.ROUTER, user_input=user_message, json_mode=True)
@@ -265,7 +265,7 @@ class PipelineRun:
             return "question"
 
     def _orchestrate(self) -> OrchestratorDecision:
-        if get_role_assignment(Role.ORCHESTRATOR) is None:
+        if resolve_role(Role.ORCHESTRATOR) is None:
             return OrchestratorDecision(action="done",
                                         reasoning="orchestrator role is not assigned to a model")
         scratchpad_text = compact_scratchpad(self.state.scratchpad)
