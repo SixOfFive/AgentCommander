@@ -40,10 +40,13 @@ class CommandContext:
 
 @dataclass
 class SlashCommand:
-    name: str            # "/help"
+    name: str                              # "/help"
     aliases: tuple[str, ...]
-    summary: str         # one-line help
+    summary: str                           # one-line help
     handler: Callable[["CommandContext", list[str]], None]
+    usage: str = ""                        # canonical usage line, e.g. "/providers add <id> <type> <name> <endpoint>"
+    details: str = ""                      # multi-line detailed help (markdown-light)
+    examples: tuple[str, ...] = ()
 
 
 # ─── Built-in commands ─────────────────────────────────────────────────────
