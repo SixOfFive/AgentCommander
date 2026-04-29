@@ -29,7 +29,8 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
               conversation_id: str | None = None,
               json_mode: bool | None = None,
               num_ctx: int | None = None,
-              on_delta: Callable[[str], None] | None = None) -> str:
+              on_delta: Callable[[str], None] | None = None,
+              on_finish: Callable[[int | None, int | None], None] | None = None) -> str:
     """Invoke the given role through its assigned provider+model.
 
     Returns the full assistant-content string. Streams deltas through
