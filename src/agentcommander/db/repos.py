@@ -78,11 +78,28 @@ def list_messages(conv_id: str) -> list[Message]:
 def append_message(conv_id: str, role: str, content: str) -> Message:
     msg = Message(id=str(uuid.uuid4()), conversation_id=conv_id,
                   role=role, content=content, created_at=_now_ms())  # type: ignore[arg-type]
-    get_db().execute(
+    db = get_db()
+    db.execute(
         "INSERT INTO messages (id, conversation_id, role, content, created_at) "
         "VALUES (?, ?, ?, ?, ?)",
         (msg.id, msg.conversation_id, msg.role, msg.content, msg.created_at),
     )
+    # Auto-title: the first user message becomes the conversation title so
+    # /history shows something scannable instead of every row reading
+    # "Conversation". Only fires while the title is still the default and
+    # this is a user turn — keeps explicit /new <title> overrides intact.
+    if role == "user":
+        row = db.execute(
+            "SELECT title FROM conversations WHERE id = ?",
+            (conv_id,),
+        ).fetchone()
+        if row is not None and row["title"] in ("Conversation", "New conversation", ""):
+            derived = " ".join((content or "").split())[:60].strip()
+            if derived:
+                db.execute(
+                    "UPDATE conversations SET title = ? WHERE id = ?",
+                    (derived, conv_id),
+                )
     touch_conversation(conv_id)
     return msg
 
