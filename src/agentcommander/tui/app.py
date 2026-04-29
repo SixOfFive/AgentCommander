@@ -467,10 +467,20 @@ def _print_session_context_summary(applied) -> None:
     Ceiling = min(contextLength) across distinct picked models. The display
     name is the model that hit that minimum — if you set ``/context`` above
     this value, that model will be the offender that gets warned about.
+
+    The ceiling is also persisted into ``config.session_ceiling_tokens`` so
+    the bottom status bar can fall back to it when no per-role / /context
+    override exists. Without that, the bar would show each role's own
+    catalog ``contextLength`` (e.g. 128k) and disagree with this banner.
     """
-    from agentcommander.db.repos import get_config
+    from agentcommander.db.repos import get_config, set_config
+    from agentcommander.db.connection import get_db
 
     if not applied.role_picks:
+        # No picks → no meaningful ceiling. Wipe any stale value so the bar
+        # doesn't keep reporting last session's number.
+        get_db().execute("DELETE FROM config WHERE key = ?",
+                         ("session_ceiling_tokens",))
         return
 
     rows = _picked_model_contexts(applied.role_picks)
@@ -478,6 +488,8 @@ def _print_session_context_summary(applied) -> None:
         render_system_line(style("muted",
             "  session max context: unknown "
             "(no catalog contextLength for picked models)"))
+        get_db().execute("DELETE FROM config WHERE key = ?",
+                         ("session_ceiling_tokens",))
         return
 
     # Smallest training context across distinct picked models — the ceiling
@@ -495,6 +507,10 @@ def _print_session_context_summary(applied) -> None:
         f'  session max context: {style("accent", _humanize_tokens(smallest_ctx))} '
         f'(lowest training ctx, set by {label})'
     )
+
+    # Persist so the bar can reach for this same number when nothing more
+    # specific is set.
+    set_config("session_ceiling_tokens", smallest_ctx)
 
     raw_override = get_config("context_override_tokens", None)
     if isinstance(raw_override, (int, str)):
