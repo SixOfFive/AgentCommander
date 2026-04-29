@@ -153,7 +153,26 @@ def build_final_output(scratchpad: Iterable[ScratchpadEntry]) -> str:
             if input_hint:
                 header += f" ({input_hint[:120]})"
             parts.append(f"{header}:\n```\n{body}\n```")
-    if errors:
+    if failed_execs:
+        # Surface the last failed execute with its output (stderr + exit
+        # code message). Without this, a failed run just shows "Step 1:
+        # tool/execute\nexit code 1" in the step echo, which doesn't tell
+        # the user what went wrong.
+        last_fail = failed_execs[-1]
+        body = (last_fail.output or "").strip()
+        # Trim if very long (some scripts spew megabytes of stderr)
+        if len(body) > 3000:
+            body = body[:3000] + "\n…[truncated]"
+        # Also surface the script that failed (decision.input → entry.input)
+        # so the user can see what was attempted.
+        script = (last_fail.input or "").strip()
+        header = "**Execution failed**"
+        parts.append(f"{header}:\n```\n{body}\n```")
+        if script and len(script) < 2000:
+            parts.append(f"**Script that failed:**\n```\n{script[:2000]}\n```")
+    elif errors:
+        # Generic error count for non-execute tool failures (kept the old
+        # behavior so we don't regress).
         parts.append(f"**Errors encountered:** {len(errors)}")
 
     # 4. Step-by-step fallback (deduped). Skip:
