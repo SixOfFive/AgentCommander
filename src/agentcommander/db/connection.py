@@ -52,6 +52,17 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     schema_sql = schema_path.read_text(encoding="utf-8")
     conn.executescript(schema_sql)
 
+    # Idempotent column adds for DBs created before a column existed.
+    # SQLite raises OperationalError when the column is already there — we
+    # swallow it so this is safe to re-run on every startup.
+    for ddl in (
+        "ALTER TABLE role_assignments ADD COLUMN context_window_tokens INTEGER",
+    ):
+        try:
+            conn.execute(ddl)
+        except sqlite3.OperationalError:
+            pass
+
     _db = conn
     _db_path = target
     return conn
