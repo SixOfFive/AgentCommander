@@ -177,6 +177,13 @@ class PipelineRun:
             ))
 
             for iteration in range(1, self._max_iterations + 1):
+                if self.is_cancelled():
+                    yield PipelineEvent(type="error", error="cancelled by /stop")
+                    update_pipeline_run(self.run_id, status="cancelled",
+                                        iterations=iteration - 1, error="cancelled by /stop",
+                                        category=category)
+                    return
+
                 self.state.iteration = iteration
                 yield PipelineEvent(type="iteration", iteration=iteration)
 
