@@ -17,6 +17,11 @@ from pathlib import Path
 _db: sqlite3.Connection | None = None
 _db_path: Path | None = None
 
+# Open file handle backing the per-DB single-instance lock. Held for the
+# lifetime of the process; released on graceful shutdown via close_db.
+_lock_handle = None  # type: ignore[var-annotated]
+_lock_path: Path | None = None
+
 # Result of the most recent init_db auto-repair attempt. None when
 # integrity_check passed cleanly on startup. The TUI reads this and
 # surfaces a banner line so the user knows REINDEX fired (or didn't).
@@ -26,6 +31,90 @@ _last_auto_repair: dict | None = None
 def last_auto_repair() -> dict | None:
     """Return the most recent auto-repair status, or None if the DB was clean."""
     return _last_auto_repair
+
+
+class DBAlreadyOpen(RuntimeError):
+    """Raised when another AgentCommander process holds the DB lock.
+
+    Refusing concurrent processes is the simplest defense against the
+    "Tree X page Y: btreeInitPage error 11" corruption pattern, which
+    arises when two writers race a WAL checkpoint and one of them gets
+    killed mid-write.
+    """
+
+
+def _acquire_db_lock(db_target: Path) -> None:
+    """Take an exclusive file lock on ``<db_target>.lock``.
+
+    Cross-platform: ``msvcrt.locking`` on Windows, ``fcntl.flock`` on POSIX.
+    Auto-releases when the process exits (the handle goes away). Stale lock
+    files left by crashed processes are reusable — a fresh `flock`/`locking`
+    call against an unowned file succeeds.
+    """
+    global _lock_handle, _lock_path
+    if _lock_handle is not None:
+        return  # already locked in this process
+    lock_path = db_target.with_suffix(db_target.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(lock_path, "a+b")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError as exc:
+                handle.close()
+                raise DBAlreadyOpen(
+                    f"another AgentCommander process is using {db_target}. "
+                    "Close it before starting a new one. "
+                    f"(lock file: {lock_path})"
+                ) from exc
+        else:
+            import fcntl
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc:
+                handle.close()
+                raise DBAlreadyOpen(
+                    f"another AgentCommander process is using {db_target}. "
+                    "Close it before starting a new one. "
+                    f"(lock file: {lock_path})"
+                ) from exc
+    except DBAlreadyOpen:
+        raise
+    except Exception:  # noqa: BLE001
+        handle.close()
+        raise
+    _lock_handle = handle
+    _lock_path = lock_path
+
+
+def _release_db_lock() -> None:
+    """Best-effort release of the single-instance lock."""
+    global _lock_handle, _lock_path
+    if _lock_handle is None:
+        return
+    try:
+        if os.name == "nt":
+            import msvcrt
+            try:
+                _lock_handle.seek(0)
+                msvcrt.locking(_lock_handle.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+        else:
+            import fcntl
+            try:
+                fcntl.flock(_lock_handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        try:
+            _lock_handle.close()
+        except OSError:
+            pass
+    finally:
+        _lock_handle = None
+        _lock_path = None
 
 
 def _default_db_dir() -> Path:
