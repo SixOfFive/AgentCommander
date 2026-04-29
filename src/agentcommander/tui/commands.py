@@ -347,18 +347,139 @@ def cmd_new(ctx: CommandContext, args: list[str]) -> None:
 
 def _build_registry() -> dict[str, SlashCommand]:
     cmds = [
-        SlashCommand("/help", ("/?",), "list commands", cmd_help),
-        SlashCommand("/quit", ("/exit",), "exit AgentCommander", cmd_quit),
-        SlashCommand("/clear", (), "clear the screen", cmd_clear),
-        SlashCommand("/workdir", ("/wd",), "set or show the working directory", cmd_workdir),
-        SlashCommand("/providers", ("/p",), "manage providers (add/rm/test/list)", cmd_providers),
-        SlashCommand("/models", ("/m",), "list installed models on a provider", cmd_models),
-        SlashCommand("/roles", ("/r",), "manage role → model assignments", cmd_roles),
-        SlashCommand("/typecast", ("/tc",), "TypeCast catalog (status/refresh/autoconfigure)", cmd_typecast),
-        SlashCommand("/agents", (), "list the 19 agents + prompt status", cmd_agents),
-        SlashCommand("/tools", (), "list registered tools", cmd_tools),
-        SlashCommand("/history", (), "recent conversations", cmd_history),
-        SlashCommand("/new", (), "start a new conversation: /new <title>", cmd_new),
+        SlashCommand(
+            name="/help", aliases=("/?",),
+            summary="list commands or show detailed help for one",
+            handler=cmd_help,
+            usage="/help            # list every command\n"
+                  "/help <command>  # detailed help for a specific command",
+            examples=("/help", "/help providers", "/help /typecast"),
+        ),
+        SlashCommand(
+            name="/quit", aliases=("/exit",),
+            summary="exit AgentCommander",
+            handler=cmd_quit,
+            usage="/quit",
+            details="Closes the SQLite connection and returns to the shell. "
+                    "Ctrl-D / EOF behaves the same. Ctrl-C aborts an in-progress "
+                    "pipeline run but does not exit the TUI.",
+        ),
+        SlashCommand(
+            name="/clear", aliases=(),
+            summary="clear the screen",
+            handler=cmd_clear,
+            usage="/clear",
+            details="ANSI screen-clear; conversation history is preserved in SQLite.",
+        ),
+        SlashCommand(
+            name="/workdir", aliases=("/wd",),
+            summary="set or show the working directory",
+            handler=cmd_workdir,
+            usage="/workdir              # show current\n"
+                  "/workdir <path>       # set to <path>",
+            details="The working directory is the sandbox boundary for every "
+                    "filesystem and execute action. Without it, file/code tools "
+                    "refuse to run. Path is persisted across sessions.",
+            examples=("/workdir ~/code/scratch", "/workdir D:\\projects\\demo"),
+        ),
+        SlashCommand(
+            name="/providers", aliases=("/p",),
+            summary="manage LLM providers",
+            handler=cmd_providers,
+            usage="/providers                                       # list\n"
+                  "/providers add <id> <type> <name> <endpoint>     # add\n"
+                  "/providers test <id>                             # health check\n"
+                  "/providers rm <id>                               # remove",
+            details="Supported types: ollama, llamacpp.\n"
+                    "Endpoints + ids are stored in the SQLite DB at "
+                    "$XDG_DATA_HOME/agentcommander/agentcommander.sqlite (gitignored). "
+                    "After add/rm, the in-memory provider registry is rebuilt automatically.",
+            examples=(
+                "/providers add ollama-local ollama \"Local Ollama\" http://127.0.0.1:11434",
+                "/providers add llama llamacpp \"llama-server\" http://127.0.0.1:8080",
+                "/providers test ollama-local",
+            ),
+        ),
+        SlashCommand(
+            name="/models", aliases=("/m",),
+            summary="list installed models on a provider",
+            handler=cmd_models,
+            usage="/models <provider_id>",
+            details="Hits the provider's listing endpoint (Ollama: /api/tags, "
+                    "llama.cpp: /v1/models). Used by /typecast autoconfigure to "
+                    "filter the TypeCast catalog to what's actually installed.",
+            examples=("/models ollama-local",),
+        ),
+        SlashCommand(
+            name="/roles", aliases=("/r",),
+            summary="manage role → (provider, model) assignments",
+            handler=cmd_roles,
+            usage="/roles                                           # show all assignments\n"
+                  "/roles set <role> <provider_id> <model>          # per-role override\n"
+                  "/roles assign-all <provider_id> <model>          # assign all 19 roles",
+            details="The 19 agent roles are listed by /agents. The default flow is "
+                    "\"one model, all roles\" via /roles assign-all. Use /roles set "
+                    "for per-role specialization (e.g. send only the coder role to "
+                    "a code-tuned model). /typecast autoconfigure picks both the "
+                    "default and the overrides for you.",
+            examples=(
+                "/roles assign-all ollama-local qwen3:8b",
+                "/roles set coder ollama-local qwen3:30b",
+            ),
+        ),
+        SlashCommand(
+            name="/typecast", aliases=("/tc",),
+            summary="TypeCast catalog: status / refresh / autoconfigure",
+            handler=cmd_typecast,
+            usage="/typecast                  # show source + model count\n"
+                  "/typecast refresh          # force re-fetch from GitHub\n"
+                  "/typecast autoconfigure    # pick best installed model + per-role overrides",
+            details="The TypeCast catalog (github.com/SixOfFive/TypeCast) scores "
+                    "every published local model on each of the 17 roles in the "
+                    "TypeCast schema. AgentCommander pulls a fresh copy every "
+                    "startup and falls back to the local cache on network failure. "
+                    "autoconfigure picks one well-rounded default model that fits "
+                    "your VRAM, then suggests per-role overrides where another "
+                    "model meaningfully outscores it.",
+            examples=("/typecast", "/typecast autoconfigure"),
+        ),
+        SlashCommand(
+            name="/agents", aliases=(),
+            summary="list the 19 agents + prompt status",
+            handler=cmd_agents,
+            usage="/agents",
+            details="Shows every role's category (router/controller/producer/media/meta), "
+                    "output contract (freeform vs strict JSON), whether a system-prompt "
+                    "markdown file exists in resources/prompts/, and whether the role "
+                    "is required or optional for the pipeline to run.",
+        ),
+        SlashCommand(
+            name="/tools", aliases=(),
+            summary="list registered tools",
+            handler=cmd_tools,
+            usage="/tools",
+            details="Lists every action verb the orchestrator can dispatch — "
+                    "read_file, write_file, execute, fetch, etc. \"priv\" means the "
+                    "tool requires extra safety checks (the EC admin-gated set).",
+        ),
+        SlashCommand(
+            name="/history", aliases=(),
+            summary="show recent conversations",
+            handler=cmd_history,
+            usage="/history",
+            details="Top 20 most-recent conversations from SQLite. Stored in "
+                    "$XDG_DATA_HOME/agentcommander/agentcommander.sqlite.",
+        ),
+        SlashCommand(
+            name="/new", aliases=(),
+            summary="start a new conversation",
+            handler=cmd_new,
+            usage="/new [<title>]",
+            details="Creates a new conversation row and switches the active context "
+                    "to it. The first message you send afterward is logged under the "
+                    "new conversation. Title is optional; defaults to \"New conversation\".",
+            examples=("/new", "/new Bug repro for fetch timeout"),
+        ),
     ]
     out: dict[str, SlashCommand] = {}
     for c in cmds:
