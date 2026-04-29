@@ -15,13 +15,15 @@ CREATE TABLE IF NOT EXISTS config (
 );
 
 -- Provider config (Ollama, llama.cpp, OpenRouter, Anthropic, Google).
--- IMPORTANT: this project does NOT persist endpoints or API keys.
--- Endpoints and credentials are read at runtime from environment variables
--- (see providers/base.py:resolve_provider_endpoint / resolve_provider_api_key).
+-- The endpoint and api_key live ONLY in this SQLite file, which is stored
+-- in the OS user-data directory (XDG_DATA_HOME / %APPDATA% / Application Support)
+-- and is gitignored so it never ships with the source tree.
 CREATE TABLE IF NOT EXISTS providers (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL,
   name TEXT NOT NULL,
+  endpoint TEXT,
+  api_key TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL
 );
