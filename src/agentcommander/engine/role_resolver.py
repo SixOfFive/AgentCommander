@@ -24,6 +24,10 @@ class ResolvedRole:
     provider_id: str
     model: str
     kind: str  # "override" | "auto"
+    # When set, the provider should call the model with this num_ctx instead
+    # of its built-in default. Persisted in `role_assignments` for overrides
+    # set via `/autoconfig --mincontext N`. None means "use provider default".
+    context_window_tokens: int | None = None
 
 
 # In-memory map populated by the startup autoconfigure step.
