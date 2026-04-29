@@ -48,6 +48,10 @@ class StatusState:
     pipeline_running: bool = False
     workdir: str | None = None
     diff_picks: dict[str, str] = field(default_factory=dict)
+    # When a pipeline is running, the REPL hands us the user's in-flight typing
+    # so the bar can keep it visible on the input row across redraws. None ==
+    # idle (no pre-typed buffer to display).
+    pending_input: str | None = None
 
 
 class StatusBar:
