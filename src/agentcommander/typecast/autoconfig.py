@@ -221,31 +221,32 @@ def apply_autoconfigure(
     *,
     providers: list,
     get_role_assignment_fn,
-    set_role_assignment_fn,
     audit_fn=None,
 ) -> AutoconfigApplied:
-    """Run TypeCast best-fit and write non-override role assignments to the DB.
+    """Run TypeCast best-fit and return an in-memory map. Does NOT write the DB.
 
     Args:
       providers: list of active provider instances (must expose .id and .list_models()).
-      get_role_assignment_fn: db.repos.get_role_assignment.
-      set_role_assignment_fn: db.repos.set_role_assignment.
+      get_role_assignment_fn: db.repos.get_role_assignment — used only to
+        identify roles the user has overridden (so we know to skip them).
       audit_fn: optional db.repos.audit for telemetry.
 
     Behavior:
-      - Skips any role with `is_override=True` in the DB (user pinned manually).
-      - Picks one default model from TypeCast that scores positive on the most roles.
-      - For each role, assigns either a TypeCast diff-pick (if it beats the
+      - Calls each provider's list_models() to discover what's installed.
+      - Picks one TypeCast-best-fit default that scores positively on the most roles.
+      - For each role, picks either a TypeCast diff-pick (when it beats the
         default by ≥30) or the default model.
-      - Writes `is_override=False` for every assignment it makes.
+      - Roles with a DB override are skipped — the override wins at resolve time.
+      - Returns an in-memory map of (role -> (provider, model)). The caller is
+        expected to feed that into engine.role_resolver.set_autoconfig.
 
-    Returns AutoconfigApplied with details about what was assigned + preserved.
+    Recomputed every startup so a newly-pulled or removed model is reflected
+    automatically without DB writes.
     """
     installed, model_to_provider = _gather_installed(providers)
     if not installed:
         return AutoconfigApplied(
             default_model=None, provider_id=None,
-            role_picks={}, user_overrides={}, diff_picks={},
             skipped_reason="no installed models found across active providers",
         )
 
@@ -253,21 +254,17 @@ def apply_autoconfigure(
     if suggestion.default_model is None:
         return AutoconfigApplied(
             default_model=None, provider_id=None,
-            role_picks={}, user_overrides={}, diff_picks={},
             skipped_reason=("no installed model has a positive TypeCast score "
                             "(or none fits available VRAM)"),
         )
 
     default_model = suggestion.default_model.model_id
     provider_id = model_to_provider.get(default_model)
-    # Fall back to the first provider listed if the model→provider lookup failed
-    # for any reason (very unusual — e.g. listing changed between calls).
     if not provider_id and providers:
         provider_id = providers[0].id
     if not provider_id:
         return AutoconfigApplied(
             default_model=default_model, provider_id=None,
-            role_picks={}, user_overrides={}, diff_picks={},
             skipped_reason="no provider id resolvable for the chosen default model",
         )
 
@@ -275,7 +272,7 @@ def apply_autoconfigure(
         o.role.value: o.model_id or default_model for o in suggestion.overrides
     }
 
-    role_picks: dict[str, str] = {}
+    role_picks: dict[str, tuple[str, str]] = {}
     user_overrides: dict[str, str] = {}
     for role in ALL_ROLES:
         existing = get_role_assignment_fn(role)
@@ -284,8 +281,7 @@ def apply_autoconfigure(
             continue
         target_model = diff_pick_models.get(role.value, default_model)
         target_provider = model_to_provider.get(target_model, provider_id)
-        set_role_assignment_fn(role, target_provider, target_model, is_override=False)
-        role_picks[role.value] = target_model
+        role_picks[role.value] = (target_provider, target_model)
 
     if audit_fn is not None:
         try:
