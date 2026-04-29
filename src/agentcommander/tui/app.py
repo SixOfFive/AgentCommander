@@ -163,7 +163,7 @@ def _print_role_assignments() -> None:
     for role in ALL_ROLES:
         a = existing.get(role.value)
         if a is None:
-            rows.append([role.value, "—", style("warn", "unset"), ""])
+            rows.append([role.value, "—", "—", style("warn", "unset")])
         else:
             kind = "override" if a["is_override"] else "auto"
             rows.append([role.value, a["model"], a["provider_id"], kind])
