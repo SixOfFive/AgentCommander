@@ -61,14 +61,13 @@ _LOGO = """\
 
 
 def render_banner(*, version: str, providers_count: int, models_count: int,
-                  vram_gb: float, working_dir: str | None) -> None:
+                  working_dir: str | None) -> None:
     writeln()
     for line in _LOGO.rstrip().split("\n"):
         writeln(style("accent", line))
     writeln()
     writeln(style("muted", f"  v{version}  ·  {providers_count} provider(s)  ·  "
-                            f"{models_count} model(s) in TypeCast catalog  ·  "
-                            f"VRAM {vram_gb:g} GB"))
+                            f"{models_count} model(s) in TypeCast catalog"))
     if working_dir:
         writeln(style("muted", f"  workdir: {working_dir}"))
     else:
