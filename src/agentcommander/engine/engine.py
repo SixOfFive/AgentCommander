@@ -427,7 +427,8 @@ class PipelineRun:
                             user_input=scratchpad_text or self.opts.user_message,
                             scratchpad_text=scratchpad_text,
                             json_mode=True,
-                            on_finish=_capture)
+                            on_finish=_capture,
+                            should_cancel=self.is_cancelled)
             try:
                 parsed = json.loads(raw)
                 decision = OrchestratorDecision.from_dict(parsed)
