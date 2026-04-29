@@ -480,7 +480,8 @@ class PipelineRun:
                                scratchpad_text=compact_scratchpad(self.state.scratchpad),
                                conversation_id=opts.conversation_id,
                                on_delta=on_delta,
-                               on_finish=on_finish)
+                               on_finish=on_finish,
+                               should_cancel=self.is_cancelled)
         except (ProviderError, RoleNotAssigned) as exc:
             push_nudge(self.state.scratchpad, iteration, f"{role.value}_failed",
                        f"Role {role.value} call failed: {exc}")
