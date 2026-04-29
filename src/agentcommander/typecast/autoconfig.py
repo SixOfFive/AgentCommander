@@ -1,18 +1,38 @@
 """Autoconfig — pick a model for a role using TypeCast scores + VRAM fit.
 
-The user's stated norm is "one computer, one LLM, one army of agents" — so
-the *primary* affordance is `pick_default_model(installed)` which returns
-one well-rounded model that scores positively on the most roles.
-`pick_per_role(role, installed)` is the advanced override.
+Per-role assignment logic (current):
+  For each role, pick the best-scoring installed model that fits VRAM and
+  isn't on the entry's `avoid_for` list. Frame the decision as a descending
+  threshold cascade — start at 100, drop by 10 each round down to
+  ``ROLE_SCORE_MIN_THRESHOLD`` (10). The cascade is documentation: in code
+  it collapses to "best pick if its score >= MIN_THRESHOLD, else unset"
+  because TypeCast scores are coarse multiples of 20 (20/40/60/80/100/null).
+
+  A role left unset after threshold 10 means no installed model can fill it
+  (typical for vision/audio/image_gen on a text-only stack). Those rows show
+  as `unset` in /roles and the user is expected to either install a capable
+  model or assign one manually with /roles set.
+
+`pick_default_model` / `pick_per_role` / `suggest_config` remain in the
+public API for callers and tests, but the live `apply_autoconfigure` path
+no longer uses them.
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
 from agentcommander.typecast.catalog import get_catalog
 from agentcommander.typecast.vram import detect_vram
 from agentcommander.types import ALL_ROLES, Role
+
+
+# Lowest TypeCast role-score that will still earn a role assignment.
+# Scores below this leave the role unset for the user to fill with /roles set.
+ROLE_SCORE_MIN_THRESHOLD = 10
+ROLE_SCORE_MAX_THRESHOLD = 100
+ROLE_SCORE_THRESHOLD_STEP = 10
 
 
 # ─── Mapping: AC Role enum ↔ TypeCast role names ───────────────────────────
