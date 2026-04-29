@@ -246,6 +246,159 @@ class PipelineRun:
                 replaced_message_ids=r["replaced_message_ids"],
             ))
 
+    # ── Scratchpad compaction ─────────────────────────────────────────────
+    #
+    # When the cross-turn scratchpad gets large enough that compact_scratchpad
+    # would crowd out the system prompt + user message + response budget,
+    # we summarize the oldest entries via the summarizer role and replace
+    # them with one synthetic entry. Originals stay in the DB (is_replaced=1)
+    # so /history and audit views can still show full fidelity. The user-view
+    # `messages` table is never touched.
+    #
+    # Trigger: scratchpad text length > _compaction_budget_chars(). Keep the
+    # most recent COMPACTION_KEEP_TAIL entries verbatim — they're the live
+    # working context the orchestrator needs. Older entries fold into one
+    # summary.
+
+    COMPACTION_KEEP_TAIL: int = 6
+    COMPACTION_TRIGGER_FRACTION: float = 0.5  # of session context window
+    COMPACTION_DEFAULT_NUM_CTX: int = 8192    # fallback when no ceiling set
+
+    def _compaction_budget_chars(self) -> int:
+        """Char budget for the prompt-side scratchpad. Roughly 50% of the
+        session context window expressed as chars (4 chars/token estimate)."""
+        from agentcommander.db.repos import get_config
+        raw = get_config("session_ceiling_tokens", None)
+        try:
+            tokens = int(raw) if raw else self.COMPACTION_DEFAULT_NUM_CTX
+        except (TypeError, ValueError):
+            tokens = self.COMPACTION_DEFAULT_NUM_CTX
+        return int(tokens * 4 * self.COMPACTION_TRIGGER_FRACTION)
+
+    def _summarize_rows_for_compaction(self, rows: list[dict]) -> str | None:
+        """Summarize old scratchpad rows via the summarizer role.
+
+        Returns the summary text (stripped), or ``None`` on any failure
+        (summarizer unassigned, network error, empty reply). Caller falls
+        back to "no compaction" — better to keep originals than to lose
+        context to a botched summary.
+        """
+        if not rows:
+            return None
+        lines: list[str] = []
+        for r in rows:
+            inp = (r.get("input") or "")[:400]
+            out = (r.get("output") or "")[:800]
+            prefix = f"step {r['step']} {r['role']}/{r['action']}: "
+            if inp:
+                lines.append(f"{prefix}in={inp} out={out}")
+            else:
+                lines.append(f"{prefix}out={out}")
+        body = "\n".join(lines)
+        prompt = (
+            "Compress this prior conversation history into a concise summary "
+            "(under 800 words). Preserve: user's stated goals, key facts and "
+            "results from tool calls, decisions made, unresolved questions. "
+            "Plain text only — no markdown headers, no JSON.\n\n"
+            + body
+        )
+        try:
+            summary = call_role(
+                Role.SUMMARIZER,
+                user_input=prompt,
+                json_mode=False,
+                should_cancel=self.is_cancelled,
+            )
+        except (ProviderError, RoleNotAssigned):
+            return None
+        except Exception as exc:  # noqa: BLE001
+            audit("compaction.summarizer_failed",
+                  {"error": f"{type(exc).__name__}: {exc}"})
+            return None
+        if not summary or not summary.strip():
+            return None
+        return summary.strip()
+
+    def _maybe_compact_scratchpad(self) -> Iterator[PipelineEvent]:
+        """Replace oldest scratchpad entries with a summary if the prompt
+        text would exceed the budget. Yields a guard event so the user sees
+        the compaction happen instead of just a long pause."""
+        if len(self.state.scratchpad) <= self.COMPACTION_KEEP_TAIL:
+            return
+        text = compact_scratchpad(self.state.scratchpad,
+                                  tail=len(self.state.scratchpad))
+        budget = self._compaction_budget_chars()
+        if len(text) <= budget:
+            return
+
+        # Pull the same rows from DB — we need their ids to flag is_replaced.
+        from agentcommander.db.repos import (
+            list_scratchpad_entries, mark_scratchpad_replaced,
+        )
+        rows = list_scratchpad_entries(self.opts.conversation_id)
+        if len(rows) <= self.COMPACTION_KEEP_TAIL:
+            return  # safety: in-memory and DB views disagreed; skip
+        old_rows = rows[: -self.COMPACTION_KEEP_TAIL]
+        old_ids = [r["id"] for r in old_rows]
+        if not old_ids:
+            return
+
+        yield PipelineEvent(
+            type="guard", family="compaction",
+            reason=(f"compacting {len(old_ids)} prior scratchpad entr"
+                    f"{'y' if len(old_ids) == 1 else 'ies'} via summarizer "
+                    f"(prompt was {len(text)} chars, budget {budget})"),
+        )
+
+        summary = self._summarize_rows_for_compaction(old_rows)
+        if summary is None:
+            yield PipelineEvent(
+                type="guard", family="compaction",
+                reason="summarizer unavailable / failed — keeping originals",
+            )
+            return
+
+        # Insert synthetic compaction entry, flag the originals, and rebuild
+        # the in-memory scratchpad. The DB's is_replaced=1 hides the
+        # originals from future hydrate calls but keeps them queryable for
+        # audit / /history paths.
+        from agentcommander.db.repos import insert_scratchpad_entry
+        synth_id = insert_scratchpad_entry(
+            conversation_id=self.opts.conversation_id,
+            run_id=self.run_id,
+            step=0,
+            role="system",
+            action="compacted",
+            input_text=f"compacted {len(old_ids)} entries",
+            output_text=summary,
+            timestamp=time.time(),
+            replaced_message_ids=old_ids,
+        )
+        mark_scratchpad_replaced(old_ids)
+        audit("compaction.applied", {
+            "summary_id": synth_id,
+            "replaced_count": len(old_ids),
+            "original_chars": len(text),
+            "summary_chars": len(summary),
+        })
+
+        # Rebuild state.scratchpad: synthetic summary first, then the
+        # untouched tail (which already exists in the in-memory list).
+        keep = self.state.scratchpad[-self.COMPACTION_KEEP_TAIL:]
+        self.state.scratchpad.clear()
+        self.state.scratchpad.append(ScratchpadEntry(
+            step=0, role="system", action="compacted",
+            input="", output=summary, timestamp=time.time(),
+            replaced_message_ids=old_ids,
+        ))
+        self.state.scratchpad.extend(keep)
+
+        yield PipelineEvent(
+            type="guard", family="compaction",
+            reason=(f"compacted into {len(summary)} char summary "
+                    f"(scratchpad now {self.COMPACTION_KEEP_TAIL + 1} entries)"),
+        )
+
     def events(self) -> Iterator[PipelineEvent]:
         """Yield events from the pipeline run. Synchronous generator."""
         opts = self.opts
