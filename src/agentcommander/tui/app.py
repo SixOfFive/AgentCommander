@@ -88,8 +88,8 @@ def _ensure_conversation(state: dict) -> str:
 
 
 def _default_model() -> str | None:
-    a = get_role_assignment(Role.ORCHESTRATOR)
-    return a["model"] if a else None
+    rr = resolve_role(Role.ORCHESTRATOR)
+    return rr.model if rr else None
 
 
 # ─── REPL ──────────────────────────────────────────────────────────────────
