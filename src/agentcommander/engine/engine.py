@@ -549,9 +549,13 @@ class PipelineRun:
         only the router classification and/or system nudges. Used to detect
         the "trivial chat" case where falling back to ``build_final_output``
         would echo the router's category as the answer.
+
+        Real tool calls (execute, write_file, fetch, …) and any non-router
+        role output count as content — only the router entry and any system
+        nudges are skipped, so a successful tool run is NOT treated as bare.
         """
         for e in self.state.scratchpad:
-            if e.role in ("router", "tool"):
+            if e.role == "router":
                 continue
             if e.action == "system_nudge":
                 continue
