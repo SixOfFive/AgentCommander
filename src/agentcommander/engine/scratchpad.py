@@ -101,6 +101,18 @@ def build_final_output(scratchpad: Iterable[ScratchpadEntry]) -> str:
               if (("Error" in (e.output or "")) or ("failed" in (e.output or "")))
               and e.action != "system_nudge"]
 
+    # 3b. Other successful tool outputs that still carry a meaningful answer.
+    # list_dir, read_file, and fetch all return useful content the user
+    # asked for; without these, a question like "list files in this dir"
+    # would fall through to the step-by-step echo of the router entry,
+    # forcing the chat fallback to compensate (extra model call).
+    successful_tool_outputs = [
+        e for e in pad
+        if e.role == "tool"
+        and e.action in ("list_dir", "read_file", "fetch")
+        and "successfully" in (e.output or "").lower()
+    ]
+
     parts: list[str] = []
     if successful_execs:
         last_exec = successful_execs[-1]
@@ -112,12 +124,37 @@ def build_final_output(scratchpad: Iterable[ScratchpadEntry]) -> str:
         parts.append(f"**Files created:** {', '.join(f.input for f in files)}")
     if successful_execs:
         parts.append(f"**Successful executions:** {len(successful_execs)}")
+    if successful_tool_outputs:
+        # Surface the most-recent tool output as the actual answer body.
+        last = successful_tool_outputs[-1]
+        m = re.search(r"successfully[^:]*:\n([\s\S]+)", last.output or "",
+                      re.IGNORECASE)
+        body = _clean_for_user((m.group(1) if m else (last.output or "")).strip())
+        # Fetch outputs are often raw HTML/JSON — cap aggressively. list_dir
+        # / read_file are usually short and we want them in full (capped 3k).
+        if last.action == "fetch":
+            body = body[:1500] + ("\n…[truncated]" if len(body) > 1500 else "")
+        else:
+            body = body[:3000]
+        if body:
+            label = {"list_dir": "Directory listing",
+                     "read_file": "File contents",
+                     "fetch": "Fetched content"}.get(last.action, last.action)
+            input_hint = (last.input or "").strip()
+            header = f"**{label}**"
+            if input_hint:
+                header += f" ({input_hint[:120]})"
+            parts.append(f"{header}:\n```\n{body}\n```")
     if errors:
         parts.append(f"**Errors encountered:** {len(errors)}")
 
-    # 4. Step-by-step fallback (deduped)
+    # 4. Step-by-step fallback (deduped). Note: tool outputs we already
+    # surfaced above don't need to repeat in the step list.
+    surfaced_actions = {"execute", "write_file", "list_dir", "read_file", "fetch"}
     meaningful = [e for e in pad
-                  if (e.role != "tool" or e.action == "execute")
+                  if (e.role != "tool"
+                      or e.action == "execute"
+                      or (parts == [] and e.action in surfaced_actions))
                   and e.role != "debugger"
                   and e.action != "system_nudge"][-6:]
     deduped: list[ScratchpadEntry] = []
