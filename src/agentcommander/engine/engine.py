@@ -574,6 +574,46 @@ class PipelineRun:
             return False
         return True
 
+    def _scratchpad_context_block(self, max_chars: int = 6000) -> str:
+        """Compress the scratchpad into a context block the chat fallback can
+        feed to the model.
+
+        Skips router classifications and system_nudges (they only describe
+        flow, not data). Strips the engine's ``successfully completed:\\n``
+        wrapper that the tool dispatcher adds. Truncates each entry to fit
+        ``max_chars`` total so a giant fetched HTML doesn't blow the context
+        window.
+
+        Returns ``""`` when the scratchpad has nothing worth telling the
+        model about — in that case the fallback just chats with the user
+        message alone.
+        """
+        parts: list[str] = []
+        used = 0
+        for e in self.state.scratchpad:
+            if e.role == "router":
+                continue
+            if e.action == "system_nudge":
+                continue
+            out = (e.output or "").strip()
+            if not out:
+                continue
+            out = re.sub(r"^successfully completed:\s*\n", "", out, count=1).strip()
+            if not out:
+                continue
+            avail = max_chars - used
+            if avail <= 200:
+                break
+            head = f"[{e.role}/{e.action}]"
+            inp = (e.input or "").strip()
+            if inp:
+                head += f" input={inp[:200]}"
+            snippet = (out if len(out) <= avail
+                       else out[:avail].rstrip() + "\n...[truncated]")
+            parts.append(f"{head}\n{snippet}")
+            used += len(snippet) + len(head) + 2
+        return "\n\n".join(parts)
+
     def _is_router_echo(self, text: str) -> bool:
         """True when ``text`` is essentially the router's classification
         leaking out as the answer — either the bare category word
