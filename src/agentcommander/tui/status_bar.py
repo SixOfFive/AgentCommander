@@ -277,6 +277,24 @@ def get_status_bar() -> StatusBar:
 # ─── Bottom-anchored input ────────────────────────────────────────────────
 
 
+# In-process input history. Ring-bounded so a long session doesn't grow
+# without bound. Most-recent entry is at index -1.
+_HISTORY_MAX = 200
+_history: list[str] = []
+
+
+def _record_history(line: str) -> None:
+    """Append ``line`` to the input history, skipping consecutive duplicates."""
+    line = line.strip()
+    if not line:
+        return
+    if _history and _history[-1] == line:
+        return
+    _history.append(line)
+    if len(_history) > _HISTORY_MAX:
+        del _history[: len(_history) - _HISTORY_MAX]
+
+
 def _paint_input_row(prompt_text: str, buffer: str, cols: int, input_row: int) -> None:
     """Repaint the input row with prompt + current buffer, leaving the cursor
     parked just after the buffer's last character.
