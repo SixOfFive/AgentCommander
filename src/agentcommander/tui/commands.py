@@ -504,17 +504,27 @@ def _build_registry() -> dict[str, SlashCommand]:
             name="/roles", aliases=("/r",),
             summary="manage role → (provider, model) assignments",
             handler=cmd_roles,
-            usage="/roles                                           # show all assignments\n"
-                  "/roles set <role> <provider_id> <model>          # per-role override\n"
-                  "/roles assign-all <provider_id> <model>          # assign all 19 roles",
-            details="The 19 agent roles are listed by /agents. The default flow is "
-                    "\"one model, all roles\" via /roles assign-all. Use /roles set "
-                    "for per-role specialization (e.g. send only the coder role to "
-                    "a code-tuned model). /typecast autoconfigure picks both the "
-                    "default and the overrides for you.",
+            usage="/roles                                           # table of all assignments\n"
+                  "/roles <role>                                    # show one role's assignment\n"
+                  "/roles set <role> <provider_id> <model>          # set a per-role override\n"
+                  "/roles unset <role>                              # remove the override\n"
+                  "/roles auto                                      # re-run TypeCast autoconfig\n"
+                  "/roles assign-all <provider_id> <model>          # assign all 19 roles flat",
+            details="The 19 agent roles are listed by /agents.\n"
+                    "Two kinds of assignments live in the DB:\n"
+                    "  · 'auto'      — picked by TypeCast (best-fit per role)\n"
+                    "  · 'override'  — set by you with /roles set; never overwritten by /roles auto.\n"
+                    "Workflow: at startup the program calls TypeCast to pick a default\n"
+                    "model + per-role stronger picks. You can override any role with\n"
+                    "/roles set <role> ... and the override survives subsequent /roles auto runs.\n"
+                    "Use /roles unset <role> to clear an override and let TypeCast re-pick.",
             examples=(
-                "/roles assign-all ollama-local qwen3:8b",
-                "/roles set coder ollama-local qwen3:30b",
+                "/roles                              # show all 19 roles",
+                "/roles coder                        # show just the coder binding",
+                "/roles set coder ollama-default qwen3-coder:30b",
+                "/roles unset coder",
+                "/roles auto                         # re-run autoconfig (respects overrides)",
+                "/roles assign-all ollama-default qwen3:8b",
             ),
         ),
         SlashCommand(
