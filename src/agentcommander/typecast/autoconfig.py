@@ -7,7 +7,7 @@ one well-rounded model that scores positively on the most roles.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from agentcommander.typecast.catalog import get_catalog
