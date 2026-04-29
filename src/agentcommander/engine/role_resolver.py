@@ -67,6 +67,7 @@ def resolve(role: Role | str) -> ResolvedRole | None:
             provider_id=a["provider_id"],
             model=a["model"],
             kind="override",
+            context_window_tokens=a.get("context_window_tokens"),
         )
 
     # 2. In-memory autoconfig
