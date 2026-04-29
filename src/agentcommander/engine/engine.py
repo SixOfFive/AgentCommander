@@ -312,12 +312,20 @@ class PipelineRun:
             def on_delta(delta: str, _role: str = role.value) -> None:
                 opts.on_role_delta(_role, delta)
 
+        # Capture real token counts from the provider's final chunk.
+        usage_holder: dict[str, int | None] = {"prompt": None, "completion": None}
+
+        def on_finish(prompt_tokens: int | None, completion_tokens: int | None) -> None:
+            usage_holder["prompt"] = prompt_tokens
+            usage_holder["completion"] = completion_tokens
+
         try:
             output = call_role(role,
                                user_input=decision.input or opts.user_message,
                                scratchpad_text=compact_scratchpad(self.state.scratchpad),
                                conversation_id=opts.conversation_id,
-                               on_delta=on_delta)
+                               on_delta=on_delta,
+                               on_finish=on_finish)
         except (ProviderError, RoleNotAssigned) as exc:
             push_nudge(self.state.scratchpad, iteration, f"{role.value}_failed",
                        f"Role {role.value} call failed: {exc}")
@@ -329,13 +337,13 @@ class PipelineRun:
             yield PipelineEvent(type="error", role=role.value, error=str(exc))
             return
 
-        # on_role_end — token counts come back through audit_log; for now
-        # we approximate from the scratchpad output length (chars/4) until
-        # we plumb usage all the way through. Better: track from call_role
-        # via a return tuple. TODO: refactor call_role to return usage.
         if opts.on_role_end is not None:
             try:
-                opts.on_role_end(role.value, model_name, 0, len(output) // 4)
+                opts.on_role_end(
+                    role.value, model_name,
+                    usage_holder["prompt"] or 0,
+                    usage_holder["completion"] or 0,
+                )
             except Exception:  # noqa: BLE001
                 pass
 
