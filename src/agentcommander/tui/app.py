@@ -155,6 +155,59 @@ def _handle_input(state: dict, line: str) -> None:
     _run_pipeline(state, line)
 
 
+def _print_role_assignments() -> None:
+    """Show the active role → (provider, model) bindings as a 3-column table."""
+    from agentcommander.db.repos import list_role_assignments
+    existing = {a["role"]: a for a in list_role_assignments()}
+    rows: list[list[str]] = []
+    for role in ALL_ROLES:
+        a = existing.get(role.value)
+        if a is None:
+            rows.append([role.value, "—", style("warn", "unset"), ""])
+        else:
+            kind = "override" if a["is_override"] else "auto"
+            rows.append([role.value, a["model"], a["provider_id"], kind])
+    render_system_line("Role → model assignments:")
+    render_table(["role", "model", "provider", "kind"], rows)
+
+
+def _run_startup_autoconfigure() -> None:
+    """After provider setup, pick best-fit models from TypeCast and assign
+    them to all non-override roles. Print the result."""
+    from agentcommander.db.repos import audit, get_role_assignment as _gra, set_role_assignment as _sra
+    from agentcommander.providers.base import list_active
+
+    providers = list_active()
+    if not providers:
+        return
+
+    applied = apply_autoconfigure(
+        providers=providers,
+        get_role_assignment_fn=_gra,
+        set_role_assignment_fn=_sra,
+        audit_fn=audit,
+    )
+
+    if applied.skipped_reason:
+        render_system_line(style("warn", f"autoconfigure skipped: {applied.skipped_reason}"))
+        return
+
+    n_auto = len(applied.role_picks)
+    n_overrides = len(applied.user_overrides)
+    n_diff = len(applied.diff_picks)
+    msg = (f"autoconfigured {n_auto} role(s) → default model "
+           f'{style("accent", applied.default_model or "?")}'
+           f' on {applied.provider_id}')
+    render_system_line(msg)
+    if n_diff:
+        render_system_line(f"  + {n_diff} role(s) got a stronger TypeCast pick:")
+        for role_name, model in applied.diff_picks.items():
+            render_system_line(f"    {role_name} → {model}")
+    if n_overrides:
+        render_system_line(f"  preserved {n_overrides} user override(s) "
+                           f"(use /roles unset <role> to release)")
+
+
 def run_tui() -> int:
     """Entry point — runs the REPL until /quit or EOF."""
     _bootstrap()
@@ -176,9 +229,17 @@ def run_tui() -> int:
         working_dir=state["working_dir"],
     )
 
-    if not list_providers():
-        render_system_line("No providers configured. Add one to start:")
-        render_system_line("  /providers add ollama-local ollama \"Local Ollama\" http://127.0.0.1:11434")
+    # First-run flow: ask for the Ollama endpoint and persist it.
+    if needs_first_run_setup():
+        if not first_run_wizard():
+            render_error("setup did not complete; you can configure manually with /providers add")
+            # Continue into the REPL anyway so the user can recover.
+
+    # After first-run setup, attempt to auto-assign roles using TypeCast scores.
+    # Existing per-role overrides (is_override=1) are preserved.
+    if list_providers():
+        _run_startup_autoconfigure()
+        _print_role_assignments()
 
     if not get_role_assignment(Role.ORCHESTRATOR):
         render_system_line("Orchestrator role unassigned. After adding a provider:")
