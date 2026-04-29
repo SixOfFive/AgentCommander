@@ -505,11 +505,9 @@ def unwritten_file_guard(scratchpad: list[ScratchpadEntry], iteration: int,
     file exists — no ``write_file`` for that path ever ran. Push the
     orchestrator back to do the write before finishing.
 
-    Only fires when:
-      - user_message references a specific filename (not a vague "write
-        some code")
-      - no write_file in scratchpad has that filename in its input
-      - we still have iterations to spare
+    Fires AT MOST ONCE per run. If the orchestrator ignores the first
+    nudge, we don't keep blocking — better to let the run finish with a
+    less-than-ideal output than to lock the orchestrator in a loop.
     """
     matches = _USER_REQUESTED_FILE_RX.findall(user_message or "")
     if not matches:
@@ -518,13 +516,23 @@ def unwritten_file_guard(scratchpad: list[ScratchpadEntry], iteration: int,
     requested = {r for r in requested if r}
     if not requested:
         return GuardVerdict(action="pass")
+
+    # Already-fired check: if we previously pushed an unwritten_file
+    # nudge, don't fire again. The model gets one chance to respond; if
+    # it can't, looping wastes iterations and burns the user's patience.
+    already_fired = any(
+        e.role == "tool" and e.action == "system_nudge"
+        and e.input == "unwritten_file"
+        for e in scratchpad
+    )
+    if already_fired:
+        return GuardVerdict(action="pass")
+
     written: set[str] = set()
     for e in scratchpad:
         if e.action == "write_file" and "Successfully" in (e.output or ""):
-            # Check if any requested filename appears in the write_file path
             inp = (e.input or "")
             for r in list(requested):
-                # Match by basename for cross-platform path comparison
                 if r.replace("\\", "/").lower() in inp.replace("\\", "/").lower():
                     written.add(r)
     missing = requested - written
