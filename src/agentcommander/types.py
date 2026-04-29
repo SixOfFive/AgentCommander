@@ -46,11 +46,17 @@ ProviderType = Literal["ollama", "llamacpp", "openrouter", "anthropic", "google"
 
 @dataclass
 class ProviderConfig:
+    """Per-provider config persisted to SQLite.
+
+    Deliberately does NOT store endpoint or api_key — those are read from
+    environment variables at runtime (see providers/base.py:resolve_endpoint
+    and resolve_api_key). The project never writes addresses or credentials
+    to disk.
+    """
+
     id: str
     type: ProviderType
     name: str
-    endpoint: str | None = None
-    api_key: str | None = None
     enabled: bool = True
 
     def to_dict(self) -> dict[str, Any]:
@@ -62,8 +68,6 @@ class ProviderConfig:
             id=d["id"],
             type=d["type"],
             name=d["name"],
-            endpoint=d.get("endpoint"),
-            api_key=d.get("api_key"),
             enabled=bool(d.get("enabled", True)),
         )
 
