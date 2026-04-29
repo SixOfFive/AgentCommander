@@ -166,4 +166,14 @@ def write(s: str = "") -> None:
 
 
 def writeln(s: str = "") -> None:
-    write(s + "\n")
+    """Write ``s`` followed by a newline, clearing any residual characters
+    past the cursor on the current line first.
+
+    Without ``\\x1b[K`` (erase in line, from cursor to end), when a new
+    line is shorter than the content that was previously at that screen
+    row (e.g. a streaming chunk overwriting a wider row that scrolled into
+    place), the trailing characters of the old content remain visible on
+    the right. This was producing the "iter 1 → done" + old-table-tail
+    interleaving in the rendered output.
+    """
+    write(s + "\x1b[K\n")
