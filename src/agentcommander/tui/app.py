@@ -73,7 +73,21 @@ except ImportError:
 
 def _bootstrap() -> None:
     enable_ansi()
-    init_db()
+    try:
+        init_db()
+    except Exception as exc:  # noqa: BLE001
+        # Prefer a friendly message over a stack trace for the lock case.
+        # DBAlreadyOpen lives in db.connection but we type-check by name to
+        # avoid an import-time circular for unrelated callers.
+        if type(exc).__name__ == "DBAlreadyOpen":
+            sys.stderr.write(
+                f"\nAgentCommander is already running against this DB.\n"
+                f"  {exc}\n"
+                "Close the other process and try again, or run from a "
+                "different working directory (each project has its own DB).\n\n"
+            )
+            sys.exit(2)
+        raise
     bootstrap_tools()
     bootstrap_providers()
     # Per spec: every startup, fetch latest TypeCast catalog. Failure = use cache.
