@@ -805,6 +805,7 @@ def run_done_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         lambda: multi_step_guard(scratchpad, iteration, user_message, decision),
         lambda: plan_without_code_guard(scratchpad, decision),
         lambda: terse_done_guard(scratchpad, iteration, max_iter, decision, user_message),
+        lambda: unwritten_file_guard(scratchpad, iteration, max_iter, decision, user_message),
         lambda: hallucinated_file_guard(scratchpad, decision),
         lambda: missing_results_guard(scratchpad, decision),
         lambda: incomplete_code_block_guard(decision),
