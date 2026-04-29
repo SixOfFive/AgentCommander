@@ -52,7 +52,33 @@ class SlashCommand:
 # ─── Built-in commands ─────────────────────────────────────────────────────
 
 
-def cmd_help(ctx: CommandContext, _args: list[str]) -> None:
+def cmd_help(ctx: CommandContext, args: list[str]) -> None:
+    if args:
+        # Detailed help for a specific command — accept both `/help foo` and `/help /foo`.
+        target = args[0]
+        if not target.startswith("/"):
+            target = "/" + target
+        cmd = COMMANDS.get(target)
+        if cmd is None:
+            render_system_line(f"unknown command: {target}  (try /help)")
+            return
+        render_system_line(f"{cmd.name}  —  {cmd.summary}")
+        if cmd.aliases:
+            render_system_line(f"  aliases: {', '.join(cmd.aliases)}")
+        if cmd.usage:
+            render_system_line("  usage:")
+            for ln in cmd.usage.split("\n"):
+                render_system_line(f"    {ln}")
+        if cmd.details:
+            render_system_line("  details:")
+            for ln in cmd.details.rstrip().split("\n"):
+                render_system_line(f"    {ln}")
+        if cmd.examples:
+            render_system_line("  examples:")
+            for ex in cmd.examples:
+                render_system_line(f"    {ex}")
+        return
+
     render_system_line("Available commands:")
     seen: set[int] = set()
     rows: list[list[str]] = []
@@ -63,6 +89,8 @@ def cmd_help(ctx: CommandContext, _args: list[str]) -> None:
         aliases = (" / " + ", ".join(c.aliases)) if c.aliases else ""
         rows.append([c.name + aliases, c.summary])
     render_table(["command", "summary"], rows)
+    render_system_line("")
+    render_system_line("Use  /help <command>  for detailed help on any of the above.")
 
 
 def cmd_quit(ctx: CommandContext, _args: list[str]) -> None:
