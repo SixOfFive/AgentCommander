@@ -14,7 +14,8 @@ from typing import Callable
 
 from agentcommander.agents import get_agent, get_role_prompt
 from agentcommander.agents.manifest import OutputContract
-from agentcommander.db.repos import audit, get_role_assignment, insert_token_usage
+from agentcommander.db.repos import audit, insert_token_usage
+from agentcommander.engine.role_resolver import resolve as resolve_role
 from agentcommander.providers.base import ChatMessage, ProviderError, resolve
 from agentcommander.types import Role
 
