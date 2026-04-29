@@ -398,7 +398,8 @@ class PipelineRun:
 
         try:
             raw = call_role(Role.ROUTER, user_input=user_message,
-                            json_mode=True, on_finish=_capture)
+                            json_mode=True, on_finish=_capture,
+                            should_cancel=self.is_cancelled)
             parsed = json.loads(raw)
             result = str(parsed.get("category", "question"))
         except (ProviderError, RoleNotAssigned, ValueError, json.JSONDecodeError):
