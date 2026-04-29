@@ -113,13 +113,20 @@ class StatusBar:
         self.redraw()
 
     def uninstall(self) -> None:
-        """Restore the full screen as the scroll region; clear the reserved rows."""
+        """Restore the full screen as the scroll region; clear the reserved rows.
+
+        Parks the cursor at the bottom row so the parent shell's prompt
+        appears below the rendered content instead of overwriting it.
+        """
         if not self._enabled or not self._installed:
             return
         self._set_scroll_region(1, self._rows)
         for r in (self.rule_row(), self.status_row(), self.input_row()):
             write(f"\x1b[{r};1H\x1b[2K")
-        write(f"\x1b[{1};1H")
+        # Park at the last visible row, not row 1. The exit "goodbye." line
+        # then lands at the very bottom and the shell prompt wraps naturally
+        # below it instead of overwriting whatever was on rows 1-2.
+        write(f"\x1b[{self._rows};1H")
         self._installed = False
 
     def park_cursor(self) -> None:
