@@ -175,13 +175,28 @@ def _run_pipeline(state: dict, user_message: str) -> None:
 
     def _on_role_start(role: str, model: str, num_ctx: int | None = None) -> None:
         # Display cap precedence:
-        #   1. Explicit num_ctx from `/autoconfig --mincontext N` — what the
-        #      provider is actually being told to use.
-        #   2. The catalog's contextLength for this model — the model's
-        #      trained max, derived live from TypeCast.
-        #   3. None — bar omits the cap (shows "ctx N" only).
+        #   1. Explicit num_ctx from /context override or
+        #      /autoconfig --mincontext — what the provider is actually
+        #      being told to use.
+        #   2. The autoconfig session ceiling = min(contextLength) across
+        #      picked models. This is the same number the startup banner
+        #      announces, so the bar matches.
+        #   3. The current model's catalog contextLength — last-resort
+        #      fallback when no ceiling has been computed (e.g. no
+        #      autoconfig has run this session).
+        #   4. None — bar omits the cap (shows "ctx N" only).
         # Provider behavior is unaffected; this only sets the display cap.
         display_cap = num_ctx
+        if display_cap is None:
+            from agentcommander.db.repos import get_config as _gc
+            ceiling = _gc("session_ceiling_tokens", None)
+            if isinstance(ceiling, (int, str)):
+                try:
+                    n = int(ceiling)
+                    if n > 0:
+                        display_cap = n
+                except (TypeError, ValueError):
+                    pass
         if display_cap is None and model:
             catalog = get_catalog()
             if catalog is not None:
