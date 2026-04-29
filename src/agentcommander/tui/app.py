@@ -12,6 +12,7 @@ import shlex
 import sys
 import threading
 import traceback
+from contextlib import contextmanager
 
 from agentcommander import __version__
 from agentcommander.db.connection import init_db
