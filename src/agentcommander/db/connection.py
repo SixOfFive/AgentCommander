@@ -63,6 +63,23 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
         except sqlite3.OperationalError:
             pass
 
+    # Idempotent backfill: derive scannable conversation titles from the
+    # first user message for conversations still on the legacy default
+    # title ("Conversation" / "New conversation"). Runs once per DB until
+    # every legacy row gets a real title, then becomes a no-op.
+    try:
+        conn.execute(
+            "UPDATE conversations SET title = trim(substr("
+            "  (SELECT m.content FROM messages m WHERE m.conversation_id = conversations.id"
+            "   AND m.role = 'user' ORDER BY m.created_at ASC LIMIT 1),"
+            "  1, 60)) "
+            "WHERE title IN ('Conversation', 'New conversation', '') "
+            "AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = conversations.id "
+            "            AND m.role = 'user')"
+        )
+    except sqlite3.OperationalError:
+        pass
+
     _db = conn
     _db_path = target
     return conn
