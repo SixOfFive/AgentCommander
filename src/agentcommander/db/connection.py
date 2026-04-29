@@ -86,6 +86,42 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
         # integrity issue with actionable detail.
         pass
 
+    # Auto integrity check + REINDEX repair attempt. SQLite's quick_check
+    # is fast (much faster than integrity_check) and catches the common
+    # 'malformed' cases. When it fails we run REINDEX — that rebuilds
+    # every index from the underlying tables, which fixes the common
+    # "index out of sync with table" corruption without losing any rows.
+    # If REINDEX clears the issue, startup proceeds silently. If it
+    # doesn't, we leave a log entry the user can see in the audit trail
+    # and they can try /db check + /db vacuum + /db reset manually.
+    try:
+        row = conn.execute("PRAGMA quick_check").fetchone()
+        ok = bool(row) and (row[0] == "ok")
+        if not ok:
+            try:
+                conn.execute("REINDEX")
+                row2 = conn.execute("PRAGMA quick_check").fetchone()
+                ok2 = bool(row2) and (row2[0] == "ok")
+                # Audit so the user can see in the audit log even if the
+                # startup output got pushed off-screen.
+                conn.execute(
+                    "INSERT INTO audit_log (event_type, details, created_at) "
+                    "VALUES (?, ?, ?)",
+                    ("db.auto_repair",
+                     json.dumps({
+                         "before": row[0] if row else "?",
+                         "after": row2[0] if row2 else "?",
+                         "fixed": ok2,
+                     }),
+                     int(time.time() * 1000)),
+                )
+            except sqlite3.DatabaseError:
+                pass
+    except sqlite3.DatabaseError:
+        # Even quick_check failed — file is badly damaged. Don't block
+        # startup; the user can /db reset.
+        pass
+
     _db = conn
     _db_path = target
     return conn
