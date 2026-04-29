@@ -122,6 +122,10 @@ class OllamaProvider(ProviderBase):
             "model": model,
             "messages": [m.to_dict() for m in messages],
             "stream": True,
+            # Keep the model resident for KEEP_ALIVE_IDLE after this call,
+            # then auto-unload. Sent on every request so the timer resets
+            # whenever a role uses the model — exactly what we want.
+            "keep_alive": KEEP_ALIVE_IDLE,
         }
         if options:
             body["options"] = options
