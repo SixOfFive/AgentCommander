@@ -491,8 +491,8 @@ def repeated_execute_failure_guard(input_: _Input) -> dict[str, Any]:
     # pulling repos in tests that don't init the DB).
     debugger_configured = False
     try:
-        from agentcommander.db.repos import get_role_assignment
-        debugger_configured = get_role_assignment("debugger") is not None
+        from agentcommander.engine.role_resolver import resolve as _resolve
+        debugger_configured = _resolve("debugger") is not None
     except Exception:  # noqa: BLE001
         debugger_configured = False
 
