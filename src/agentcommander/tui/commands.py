@@ -97,6 +97,19 @@ def cmd_quit(ctx: CommandContext, _args: list[str]) -> None:
     ctx.state["should_exit"] = True
 
 
+def cmd_stop(ctx: CommandContext, _args: list[str]) -> None:
+    cancel = ctx.state.get("active_cancel")
+    if cancel is None:
+        render_system_line("(no active pipeline run)")
+        return
+    try:
+        cancel.set()
+    except AttributeError:
+        render_system_line("(cancel signal not available)")
+        return
+    render_system_line(style("warn", "halting the active pipeline…"))
+
+
 def cmd_clear(ctx: CommandContext, _args: list[str]) -> None:
     from agentcommander.tui.ansi import CLEAR_SCREEN, write
     write(CLEAR_SCREEN)
