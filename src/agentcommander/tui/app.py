@@ -100,14 +100,13 @@ def _default_model() -> str | None:
 
 
 def _read_line() -> str | None:
-    """Read one line from the user. Returns None on Ctrl-D / EOF."""
+    """Read one line from the user, anchored to the bottom row.
+
+    Returns None on EOF, "" on Ctrl-C (interrupt without exit).
+    """
     try:
-        prompt = style("user_label", "❯ ") if sys.stdout.isatty() else ""
-        return input(prompt)
-    except EOFError:
-        return None
+        return read_line_at_bottom("❯ ")
     except KeyboardInterrupt:
-        # Ctrl-C interrupts the current input but doesn't exit.
         writeln()
         return ""
 
