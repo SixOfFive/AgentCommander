@@ -251,14 +251,22 @@ class PipelineRun:
         opts = self.opts
         insert_pipeline_run(self.run_id, opts.conversation_id)
 
+        # Cross-turn memory: rehydrate scratchpad from prior turns of this
+        # conversation before any role/router call goes out, so they see
+        # full context. Replaced (compacted) entries are filtered out.
+        self._hydrate_scratchpad_from_db()
+
         try:
             category = self._classify_category(opts.user_message, opts)
             self._max_iterations = CATEGORY_MAX_ITERATIONS.get(category, 20)
             yield PipelineEvent(type="iteration", iteration=0, extra={"category": category})
 
-            self.state.scratchpad.append(ScratchpadEntry(
+            # Router/classify entry. Tagged with the user's `messages.id`
+            # (when supplied) so the model-view links back to the user-view.
+            self._push_entry(ScratchpadEntry(
                 step=0, role="router", action="classify",
                 input=opts.user_message, output=category, timestamp=time.time(),
+                message_id=opts.user_message_id,
             ))
 
             for iteration in range(1, self._max_iterations + 1):
