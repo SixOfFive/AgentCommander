@@ -341,6 +341,53 @@ def _humanize(n: int | None) -> str:
     return f"{n / 1_000_000:.1f}m"
 
 
+def _render_ctx_bar(now: int, cap: int, cells: int = 8) -> tuple[str, str]:
+    """Render a tiny fill-bar for the ``ctx N/M`` segment.
+
+    Returns ``(plain, styled)``:
+      - plain  — used for right-align width math; visible char count only
+      - styled — ANSI-wrapped: filled cells colored by fill ratio
+                 (green < 60% < yellow < 85% < red), empty cells dim grey
+
+    Falls back to ASCII ``[####----]`` when the terminal can't do color so
+    the bar still shows fill, just without the visual heat-map.
+
+    Returns ``("", "")`` when there's nothing meaningful to draw (cap unset
+    or context_now is zero) — the caller drops the bar.
+    """
+    if cap <= 0 or now <= 0:
+        return "", ""
+    ratio = min(1.0, now / cap)
+    filled = int(round(ratio * cells))
+    if filled == 0 and ratio > 0:
+        filled = 1  # always show at least one cell of fill
+    if filled > cells:
+        filled = cells
+    empty = cells - filled
+
+    if not supports_color():
+        plain = "[" + ("#" * filled) + ("-" * empty) + "]"
+        return plain, plain
+
+    full_block = "█" * filled
+    empty_block = "░" * empty
+    plain = "[" + full_block + empty_block + "]"
+
+    if ratio >= 0.85:
+        full_color = "\x1b[91m"   # bright red — running out
+    elif ratio >= 0.60:
+        full_color = "\x1b[93m"   # bright yellow — half full+
+    else:
+        full_color = "\x1b[92m"   # bright green — comfortable
+    empty_color = fg256(238)      # dim grey — matches the rule color
+
+    styled = (
+        "[" + full_color + full_block + RESET
+        + empty_color + empty_block + RESET + "]"
+    )
+    return plain, styled
+
+
 def _humanize_duration_ms(ms: int | None) -> str:
     """Format a duration in milliseconds as ``0:05`` / ``1:23`` / ``1:23:45``."""
     if ms is None or ms < 0:
