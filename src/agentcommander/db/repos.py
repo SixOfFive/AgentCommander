@@ -113,21 +113,19 @@ def set_config(key: str, value: Any) -> None:
 
 def list_providers() -> list[ProviderConfig]:
     rows = get_db().execute(
-        "SELECT id, type, name, endpoint, api_key, enabled FROM providers ORDER BY name"
+        "SELECT id, type, name, enabled FROM providers ORDER BY name"
     ).fetchall()
     return [ProviderConfig(id=r["id"], type=r["type"], name=r["name"],
-                           endpoint=r["endpoint"], api_key=r["api_key"],
                            enabled=bool(r["enabled"])) for r in rows]
 
 
 def upsert_provider(p: ProviderConfig) -> None:
     get_db().execute(
-        "INSERT INTO providers (id, type, name, endpoint, api_key, enabled, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "INSERT INTO providers (id, type, name, enabled, created_at) "
+        "VALUES (?, ?, ?, ?, ?) "
         "ON CONFLICT(id) DO UPDATE SET "
-        "  type = excluded.type, name = excluded.name, endpoint = excluded.endpoint, "
-        "  api_key = excluded.api_key, enabled = excluded.enabled",
-        (p.id, p.type, p.name, p.endpoint, p.api_key, 1 if p.enabled else 0, _now_ms()),
+        "  type = excluded.type, name = excluded.name, enabled = excluded.enabled",
+        (p.id, p.type, p.name, 1 if p.enabled else 0, _now_ms()),
     )
 
 
@@ -137,13 +135,12 @@ def delete_provider(provider_id: str) -> None:
 
 def get_provider(provider_id: str) -> ProviderConfig | None:
     row = get_db().execute(
-        "SELECT id, type, name, endpoint, api_key, enabled FROM providers WHERE id = ?",
+        "SELECT id, type, name, enabled FROM providers WHERE id = ?",
         (provider_id,),
     ).fetchone()
     if row is None:
         return None
     return ProviderConfig(id=row["id"], type=row["type"], name=row["name"],
-                          endpoint=row["endpoint"], api_key=row["api_key"],
                           enabled=bool(row["enabled"]))
 
 
