@@ -478,8 +478,12 @@ def run_tui() -> int:
     """Entry point — runs the REPL until /quit or EOF."""
     _bootstrap()
 
+    # Working directory: a persisted setting wins (set via /workdir), but
+    # otherwise default to the directory the launcher was invoked from. We
+    # don't persist the cwd default — moving the program elsewhere should
+    # follow the new cwd, not pin the old one.
     state: dict = {
-        "working_dir": get_config("working_directory", None),
+        "working_dir": get_config("working_directory", None) or os.getcwd(),
         "conversation_id": None,
         "should_exit": False,
         "debug": False,
