@@ -50,24 +50,56 @@ def autoconfig_table() -> dict[Role, tuple[str, str]]:
     return dict(_autoconfig)
 
 
+SESSION_CONTEXT_OVERRIDE_KEY = "context_override_tokens"
+
+
+def _session_context_override() -> int | None:
+    """Read the session-wide num_ctx override (set by ``/context <N>``).
+
+    Stored as an integer-valued JSON in the ``config`` table. Returns None
+    when unset or unparseable. This override beats per-role
+    ``context_window_tokens`` so a single ``/context 32k`` re-pins every
+    role at once without touching their persisted bindings.
+    """
+    from agentcommander.db.repos import get_config  # lazy: avoid circulars
+    raw = get_config(SESSION_CONTEXT_OVERRIDE_KEY, None)
+    if raw is None:
+        return None
+    try:
+        n = int(raw)
+        return n if n > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def resolve(role: Role | str) -> ResolvedRole | None:
     """Look up the (provider, model) bound to a role. Override beats autoconfig.
 
     Returns None if neither tier has a binding.
+
+    ``context_window_tokens`` precedence:
+      1. session override from ``/context <N>`` — applies uniformly to every
+         role this session
+      2. per-role override persisted on ``role_assignments`` (set by
+         ``/autoconfig --mincontext`` or by ``/roles set`` with a context)
+      3. None — provider falls back to its built-in default
     """
     from agentcommander.db.repos import get_role_assignment  # lazy: avoid circulars
 
     role_enum = Role(role) if isinstance(role, str) else role
+    session_ctx = _session_context_override()
 
     # 1. DB override (user-set)
     a = get_role_assignment(role_enum)
     if a is not None:
+        per_role_ctx = a.get("context_window_tokens")
+        ctx = session_ctx if session_ctx is not None else per_role_ctx
         return ResolvedRole(
             role=role_enum,
             provider_id=a["provider_id"],
             model=a["model"],
             kind="override",
-            context_window_tokens=a.get("context_window_tokens"),
+            context_window_tokens=ctx,
         )
 
     # 2. In-memory autoconfig
@@ -78,6 +110,7 @@ def resolve(role: Role | str) -> ResolvedRole | None:
             provider_id=pair[0],
             model=pair[1],
             kind="auto",
+            context_window_tokens=session_ctx,
         )
 
     return None
