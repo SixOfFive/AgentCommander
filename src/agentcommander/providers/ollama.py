@@ -154,6 +154,69 @@ class OllamaProvider(ProviderBase):
         except urllib.error.URLError as exc:
             raise ProviderError(f"Ollama /api/chat failed: {exc}") from exc
 
+    # ── Unload (Ollama-specific; llama.cpp serves one model per process and
+    #    should never be told to unload — only the Ollama subclass overrides
+    #    these). ──
+
+    def list_loaded(self) -> list[str]:
+        """Model IDs currently resident in Ollama's memory (per /api/ps).
+
+        Returns an empty list on transport failure or if the daemon doesn't
+        support /api/ps. Used by `unload_all_loaded` so we only POST to
+        models that are actually loaded — avoids spurious requests against
+        models we never used this session.
+        """
+        try:
+            data = _get_json(f"{self.endpoint}/api/ps", timeout=3.0)
+        except (urllib.error.URLError, OSError, ValueError):
+            return []
+        if not isinstance(data, dict):
+            return []
+        models = data.get("models", []) or []
+        out: list[str] = []
+        for m in models:
+            if not isinstance(m, dict):
+                continue
+            name = m.get("name") or m.get("model")
+            if isinstance(name, str) and name:
+                out.append(name)
+        return out
+
+    def unload(self, model: str) -> bool:
+        """Tell Ollama to evict this model from memory immediately.
+
+        Posts ``{"model": <name>, "keep_alive": 0}`` to /api/generate with
+        no prompt — the daemon treats this as "load with zero retention",
+        which unloads any resident copy. Returns True on success, False if
+        the request fails (best-effort; we don't want exit cleanup to throw).
+        """
+        body = {"model": model, "keep_alive": 0}
+        url = f"{self.endpoint}/api/generate"
+        try:
+            data = json.dumps(body).encode("utf-8")
+            req = urllib.request.Request(
+                url=url, data=data, method="POST",
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=15.0) as resp:
+                resp.read()
+            return True
+        except (urllib.error.URLError, OSError, ValueError):
+            return False
+
+    def unload_all_loaded(self) -> int:
+        """Unload every model currently resident on this Ollama daemon.
+
+        Returns the count of successful unloads. Called at app exit so the
+        user's VRAM is freed cleanly without waiting for the 5-minute idle
+        timer.
+        """
+        count = 0
+        for model_id in self.list_loaded():
+            if self.unload(model_id):
+                count += 1
+        return count
+
 
 @provider_factory("ollama")
 def _ollama_factory(p: ProviderConfig) -> ProviderBase:
