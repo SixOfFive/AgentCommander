@@ -8,8 +8,10 @@ are idempotent so it's safe to call repeatedly.
 """
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
+import time
 from pathlib import Path
 
 _db: sqlite3.Connection | None = None
