@@ -61,6 +61,14 @@ class StatusState:
     # so the bar can keep it visible on the input row across redraws. None ==
     # idle (no pre-typed buffer to display).
     pending_input: str | None = None
+    # Run timer — wall-clock duration of the current pipeline run. While
+    # running, `redraw()` recomputes `run_elapsed_ms` from `run_started_at`
+    # so the displayed value tracks the clock without an explicit tick.
+    # When a run ends, the final duration is added to `total_elapsed_ms`
+    # (session-cumulative) and `run_started_at` is cleared.
+    run_started_at: float | None = None
+    run_elapsed_ms: int = 0
+    total_elapsed_ms: int = 0
 
 
 class StatusBar:
