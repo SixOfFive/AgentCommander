@@ -59,6 +59,7 @@ class _ProviderImpl(Protocol):
         max_tokens: int | None = None,
         num_ctx: int | None = None,
         json_mode: bool = False,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> Iterable[ChatChunk]: ...
 
 
