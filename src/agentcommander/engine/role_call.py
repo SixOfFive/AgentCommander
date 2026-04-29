@@ -54,6 +54,13 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
     model = resolved.model
     system_prompt = get_role_prompt(role_enum)
 
+    # If the caller didn't pin a context size, fall back to whatever was
+    # persisted on the role assignment (set by `/autoconfig --mincontext N`).
+    # That ensures the configured num_ctx actually reaches the provider
+    # instead of the runtime defaulting silently.
+    if num_ctx is None:
+        num_ctx = resolved.context_window_tokens
+
     messages: list[ChatMessage] = [ChatMessage(role="system", content=system_prompt)]
     if scratchpad_text:
         messages.append(ChatMessage(role="user", content=scratchpad_text))
