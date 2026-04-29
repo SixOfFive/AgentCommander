@@ -28,6 +28,11 @@ from agentcommander.types import ProviderConfig
 
 _DEFAULT_ENDPOINT = "http://127.0.0.1:11434"
 
+# Idle-unload window for loaded models. Ollama's own default is also 5
+# minutes — we send it explicitly so behavior doesn't drift if the daemon
+# default ever changes. To unload immediately use 0 (see `unload()`).
+KEEP_ALIVE_IDLE = "5m"
+
 
 def _post_stream(url: str, body: dict[str, Any], timeout: float = 600.0) -> Iterator[dict[str, Any]]:
     """POST a JSON body and yield each newline-delimited JSON object from the stream."""
