@@ -88,7 +88,12 @@ def _format_prompt(abs_path: str, op: Operation) -> str:
     except OSError:
         pass
 
-    verb_color = {"read": fg256(75), "write": fg256(214), "delete": fg256(204)}.get(op, "")
+    verb_color = {
+        "read": fg256(75),       # blue — passive
+        "write": fg256(214),     # orange — modifying
+        "delete": fg256(204),    # red — destructive
+        "execute": fg256(208),   # bright orange — running code
+    }.get(op, "")
     verb = f"{verb_color}{op}{RESET}" if verb_color else op
     return (f"  permission requested: {verb}  {style('accent', rel)}\n"
             f"    [{style('warn', 'd')}] Deny      "
