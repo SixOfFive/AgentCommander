@@ -630,7 +630,17 @@ def read_line_at_bottom(prompt_text: str = "❯ ") -> str | None:
                     if evt.kind == EVT_TAB:
                         if matches:
                             history_idx = None
-                            buffer = matches[selected_idx].name
+                            # Replace only the trailing whitespace-separated
+                            # token so sub-command completion preserves the
+                            # leading command (`/autoconfig cle` → `/autoconfig clear`).
+                            # When there's no whitespace yet, this still
+                            # replaces the entire buffer (top-level case).
+                            last_ws = max(buffer.rfind(" "),
+                                          buffer.rfind("\t"))
+                            if last_ws >= 0:
+                                buffer = buffer[: last_ws + 1] + matches[selected_idx].name
+                            else:
+                                buffer = matches[selected_idx].name
                             buffer_changed = True
                         continue
                     if evt.kind == EVT_UP:
