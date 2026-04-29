@@ -112,11 +112,23 @@ def _run_pipeline(state: dict, user_message: str) -> None:
     conv_id = _ensure_conversation(state)
     append_message(conv_id, "user", user_message)
 
+    bar = get_status_bar()
+    bar.reset_run()
+    bar.set_running(True)
+
+    def _on_role_start(role: str, model: str) -> None:
+        bar.set_role(role, model)
+
+    def _on_role_end(role: str, model: str, prompt_tokens: int, completion_tokens: int) -> None:
+        bar.add_tokens(prompt=prompt_tokens, completion=completion_tokens)
+
     opts = RunOptions(
         conversation_id=conv_id,
         user_message=user_message,
         working_directory=state.get("working_dir"),
         on_role_delta=render_role_delta,  # live typewriter streaming
+        on_role_start=_on_role_start,
+        on_role_end=_on_role_end,
     )
     run = PipelineRun(opts)
 
