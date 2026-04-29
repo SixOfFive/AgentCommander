@@ -240,13 +240,42 @@ def _gather_installed(providers: list) -> tuple[set[str], dict[str, str]]:
     return installed_ids, model_to_provider
 
 
+def _best_pick_for_role(
+    role: Role,
+    candidates: list[ModelCandidate],
+) -> tuple[ModelCandidate | None, float]:
+    """Return ``(best_candidate, best_score)`` for this role, or ``(None, 0)``.
+
+    Filters: must fit available VRAM, must not be in the entry's ``avoid_for``
+    list. The "best" candidate is the one with the highest TypeCast score on
+    this role; ties are broken by iteration order (which mirrors the catalog).
+    """
+    tc = _AC_TO_TYPECAST.get(role)
+    if not tc:
+        return None, 0.0
+    best: ModelCandidate | None = None
+    best_score = -1.0
+    for cand in candidates:
+        if not fits_available_vram(cand.entry):
+            continue
+        if _avoids(cand.entry, tc):
+            continue
+        s = _role_score(cand.entry, tc)
+        if s > best_score:
+            best_score = s
+            best = cand
+    if best is None or best_score <= 0:
+        return None, 0.0
+    return best, best_score
+
+
 def apply_autoconfigure(
     *,
     providers: list,
     get_role_assignment_fn,
     audit_fn=None,
 ) -> AutoconfigApplied:
-    """Run TypeCast best-fit and return an in-memory map. Does NOT write the DB.
+    """Run TypeCast best-fit per role and return an in-memory map. Does NOT write the DB.
 
     Args:
       providers: list of active provider instances (must expose .id and .list_models()).
@@ -256,12 +285,21 @@ def apply_autoconfigure(
 
     Behavior:
       - Calls each provider's list_models() to discover what's installed.
-      - Picks one TypeCast-best-fit default that scores positively on the most roles.
-      - For each role, picks either a TypeCast diff-pick (when it beats the
-        default by ≥30) or the default model.
-      - Roles with a DB override are skipped — the override wins at resolve time.
+      - For each role, walks a descending threshold cascade
+        (``ROLE_SCORE_MAX_THRESHOLD`` → ``ROLE_SCORE_MIN_THRESHOLD``,
+        step = ``ROLE_SCORE_THRESHOLD_STEP``). The first round at which some
+        installed model meets the threshold for that role wins it.
+      - Roles where no installed model scores at or above
+        ``ROLE_SCORE_MIN_THRESHOLD`` end up in ``unset_roles`` — typically
+        vision/audio/image_gen on a text-only stack. The user fills those in
+        manually with ``/roles set <role> <provider> <model>``.
+      - Roles with a DB override are preserved as-is; the override wins at
+        resolve time.
       - Returns an in-memory map of (role -> (provider, model)). The caller is
         expected to feed that into engine.role_resolver.set_autoconfig.
+      - The summary fields ``default_model`` / ``diff_picks`` describe the
+        most-common model across role_picks (the "primary") and which roles
+        diverged from it — used only for the boot-line summary.
 
     Recomputed every startup so a newly-pulled or removed model is reflected
     automatically without DB writes.
@@ -273,46 +311,72 @@ def apply_autoconfigure(
             skipped_reason="no installed models found across active providers",
         )
 
-    suggestion = suggest_config(installed)
-    if suggestion.default_model is None:
+    candidates = build_candidates(installed)
+    if not candidates:
         return AutoconfigApplied(
             default_model=None, provider_id=None,
-            skipped_reason=("no installed model has a positive TypeCast score "
-                            "(or none fits available VRAM)"),
+            skipped_reason="no installed model is in the TypeCast catalog",
         )
-
-    default_model = suggestion.default_model.model_id
-    provider_id = model_to_provider.get(default_model)
-    if not provider_id and providers:
-        provider_id = providers[0].id
-    if not provider_id:
-        return AutoconfigApplied(
-            default_model=default_model, provider_id=None,
-            skipped_reason="no provider id resolvable for the chosen default model",
-        )
-
-    diff_pick_models: dict[str, str] = {
-        o.role.value: o.model_id or default_model for o in suggestion.overrides
-    }
 
     role_picks: dict[str, tuple[str, str]] = {}
     user_overrides: dict[str, str] = {}
+    unset_roles: list[str] = []
+
+    # Threshold cascade — pick a model for each role at the first round where
+    # some installed model meets the threshold. Equivalent to "best-pick gated
+    # at MIN_THRESHOLD" (TypeCast scores fall on multiples of 20), but the
+    # explicit walk matches the user-facing description and makes future
+    # threshold tweaks (e.g. adding a stricter modality filter at high
+    # thresholds) a one-line change.
     for role in ALL_ROLES:
         existing = get_role_assignment_fn(role)
         if existing and existing.get("is_override"):
             user_overrides[role.value] = existing["model"]
             continue
-        target_model = diff_pick_models.get(role.value, default_model)
-        target_provider = model_to_provider.get(target_model, provider_id)
-        role_picks[role.value] = (target_provider, target_model)
+        best, best_score = _best_pick_for_role(role, candidates)
+        assigned = False
+        if best is not None:
+            for threshold in range(
+                ROLE_SCORE_MAX_THRESHOLD,
+                ROLE_SCORE_MIN_THRESHOLD - 1,
+                -ROLE_SCORE_THRESHOLD_STEP,
+            ):
+                if best_score >= threshold:
+                    provider_id = model_to_provider.get(best.model_id) or providers[0].id
+                    role_picks[role.value] = (provider_id, best.model_id)
+                    assigned = True
+                    break
+        if not assigned:
+            unset_roles.append(role.value)
+
+    # "primary" model = the one used by the most roles; used only for the
+    # one-line boot summary. With "one army of agents" this is usually the
+    # default a user thinks of, but with the per-role picker it's just a label.
+    counts = Counter(m for (_, m) in role_picks.values())
+    if counts:
+        default_model = counts.most_common(1)[0][0]
+        provider_id = next(
+            (p for (p, m) in role_picks.values() if m == default_model),
+            None,
+        )
+    else:
+        default_model = None
+        provider_id = None
+
+    diff_picks: dict[str, str] = {}
+    if default_model:
+        for role_value, (_, m) in role_picks.items():
+            if m != default_model:
+                diff_picks[role_value] = m
 
     if audit_fn is not None:
         try:
             audit_fn("typecast.autoconfigure", {
                 "default_model": default_model,
                 "provider_id": provider_id,
-                "diff_picks": diff_pick_models,
+                "role_picks": {k: m for k, (_, m) in role_picks.items()},
                 "preserved_overrides": list(user_overrides.keys()),
+                "unset_roles": unset_roles,
             })
         except Exception:  # noqa: BLE001
             pass
@@ -322,5 +386,6 @@ def apply_autoconfigure(
         provider_id=provider_id,
         role_picks=role_picks,
         user_overrides=user_overrides,
-        diff_picks={k: v for k, v in diff_pick_models.items() if v != default_model},
+        diff_picks=diff_picks,
+        unset_roles=unset_roles,
     )
