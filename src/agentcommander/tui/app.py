@@ -422,6 +422,91 @@ def _run_startup_autoconfigure() -> None:
         render_system_line(f"  preserved {n_overrides} user override(s) "
                            f"(use /roles unset <role> to release)")
 
+    _print_session_context_summary(applied)
+
+
+def _humanize_tokens(n: int | None) -> str:
+    """Compact integer-token display: 4096 → '4096', 32768 → '32k', 131072 → '128k'."""
+    if n is None or n <= 0:
+        return "?"
+    if n < 1024:
+        return str(n)
+    if n < 1024 * 1024:
+        v = n / 1024
+        return f"{v:.0f}k" if abs(v - round(v)) < 0.05 else f"{v:.1f}k"
+    v = n / (1024 * 1024)
+    return f"{v:.0f}m" if abs(v - round(v)) < 0.05 else f"{v:.1f}m"
+
+
+def _picked_model_contexts(role_picks: dict[str, tuple[str, str]]) -> list[tuple[str, str, int]]:
+    """Walk ``role_picks`` against the catalog. Returns
+    ``[(role_value, model, contextLength), ...]`` for models with a known
+    contextLength. Used to compute the session ceiling and to find offenders
+    when ``/context N`` exceeds a model's training cap.
+    """
+    catalog_result = get_catalog()
+    if catalog_result is None:
+        return []
+    cat = catalog_result.catalog
+    out: list[tuple[str, str, int]] = []
+    for role_value, (_pid, model) in role_picks.items():
+        entry = cat.get(model) if isinstance(cat, dict) else None
+        if not isinstance(entry, dict):
+            continue
+        raw = entry.get("contextLength")
+        if not isinstance(raw, (int, float)) or raw <= 0:
+            continue
+        out.append((role_value, model, int(raw)))
+    return out
+
+
+def _print_session_context_summary(applied) -> None:
+    """Show the autoconfig-determined session context ceiling and any
+    user-set override (``/context``).
+
+    Ceiling = min(contextLength) across distinct picked models. The display
+    name is the model that hit that minimum — if you set ``/context`` above
+    this value, that model will be the offender that gets warned about.
+    """
+    from agentcommander.db.repos import get_config
+
+    if not applied.role_picks:
+        return
+
+    rows = _picked_model_contexts(applied.role_picks)
+    if not rows:
+        render_system_line(style("muted",
+            "  session max context: unknown "
+            "(no catalog contextLength for picked models)"))
+        return
+
+    # Smallest training context across distinct picked models — the ceiling
+    # at which all roles are guaranteed to be inside their training window.
+    by_model: dict[str, int] = {}
+    for _r, m, ctx in rows:
+        if m not in by_model or ctx < by_model[m]:
+            by_model[m] = ctx
+    smallest_ctx = min(by_model.values())
+    smallest_models = sorted(m for m, c in by_model.items() if c == smallest_ctx)
+    label = smallest_models[0] if len(smallest_models) == 1 else (
+        f"{smallest_models[0]} +{len(smallest_models) - 1} other(s)"
+    )
+    render_system_line(
+        f'  session max context: {style("accent", _humanize_tokens(smallest_ctx))} '
+        f'(lowest training ctx, set by {label})'
+    )
+
+    raw_override = get_config("context_override_tokens", None)
+    if isinstance(raw_override, (int, str)):
+        try:
+            override_tokens = int(raw_override)
+        except (TypeError, ValueError):
+            override_tokens = 0
+        if override_tokens > 0:
+            render_system_line(style("muted",
+                f"  /context override active: {_humanize_tokens(override_tokens)} "
+                "(beats per-role context_window_tokens)"))
+
 
 def run_tui() -> int:
     """Entry point — runs the REPL until /quit or EOF."""
