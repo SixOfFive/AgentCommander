@@ -577,7 +577,73 @@ def cmd_autoconfig(ctx: CommandContext, args: list[str]) -> None:
         prompt_for_ollama_endpoint,
     )
     from agentcommander.typecast import apply_autoconfigure
+    from agentcommander.typecast.autoconfig import (
+        get_banned_models,
+        set_banned_models,
+    )
     from agentcommander.types import ProviderConfig, Role
+
+    # Subcommand: bans → list the banned set
+    if args and args[0] == "bans":
+        banned = sorted(get_banned_models())
+        if not banned:
+            render_system_line("autoconfig ban list: " + style("muted", "(empty)"))
+            render_system_line(style("muted",
+                "  add with /autoconfig ban <model_id>"))
+        else:
+            render_system_line(f"autoconfig ban list ({len(banned)} model(s)):")
+            for m in banned:
+                render_system_line(f"  - {m}")
+            render_system_line(style("muted",
+                "  remove with /autoconfig unban <model_id>"))
+        return
+
+    # Subcommand: ban → add a model, then re-run autoconfigure so the
+    # banned model drops out of role assignments immediately.
+    if args and args[0] == "ban":
+        if len(args) < 2:
+            render_system_line(
+                "usage: /autoconfig ban <model_id>   "
+                "(banned models are excluded from autoconfig picks)"
+            )
+            return
+        target = args[1].strip()
+        if not target:
+            render_system_line("model_id is empty")
+            return
+        banned = get_banned_models()
+        if target in banned:
+            render_system_line(f"already banned: {target}")
+            return
+        banned.add(target)
+        set_banned_models(banned)
+        audit("autoconfig.ban", {"model": target, "size": len(banned)})
+        render_system_line(
+            f"banned {style('accent', target)} from autoconfigure  "
+            + style("muted", f"({len(banned)} model(s) now banned)")
+        )
+        # Fall through to autoconfigure path so the user sees the new picks
+        # without having to type a second command.
+        args = []  # noqa: F841 — intentionally drop into default flow
+
+    # Subcommand: unban → remove a model, then re-run autoconfigure
+    if args and args[0] == "unban":
+        if len(args) < 2:
+            render_system_line("usage: /autoconfig unban <model_id>")
+            return
+        target = args[1].strip()
+        banned = get_banned_models()
+        if target not in banned:
+            render_system_line(f"not in ban list: {target}")
+            return
+        banned.discard(target)
+        set_banned_models(banned)
+        audit("autoconfig.unban", {"model": target, "size": len(banned)})
+        render_system_line(
+            f"unbanned {style('accent', target)}  "
+            + style("muted", f"({len(banned)} model(s) still banned)")
+        )
+        args = []  # noqa: F841 — fall through to default autoconfigure
 
     # Subcommand: clear → wipe DB role assignments, re-prompt for the Ollama
     # endpoint (rescanning against the new server if it changed), then fall
