@@ -40,3 +40,7 @@ credentials.json
 .idea/
 .vscode/
 *.log
+
+# Local sandbox the user runs the agent against — never commit anything
+# the program wrote into its working directory.
+AgentTesting/
