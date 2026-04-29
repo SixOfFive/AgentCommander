@@ -655,7 +655,7 @@ class PipelineRun:
         scratch_output = (f"successfully completed:\n{output_text}"
                           if result.ok else (result.error or "failed"))
 
-        self.state.scratchpad.append(ScratchpadEntry(
+        self._push_entry(ScratchpadEntry(
             step=iteration, role="tool", action=decision.action,
             input=scratch_input, output=scratch_output,
             timestamp=time.time(),
