@@ -148,6 +148,18 @@ class PipelineRun:
         self.state = LoopState()
         self._max_iterations = 20
         self._guards = _try_import_guards()
+        # External cancel signal — TUI sets this when the user types /stop.
+        # Engine checks it at iteration boundaries and before each dispatch.
+        self.cancel_event: Any | None = None
+
+    def is_cancelled(self) -> bool:
+        ce = self.cancel_event
+        if ce is None:
+            return False
+        try:
+            return bool(ce.is_set())
+        except AttributeError:
+            return False
 
     def events(self) -> Iterator[PipelineEvent]:
         """Yield events from the pipeline run. Synchronous generator."""
