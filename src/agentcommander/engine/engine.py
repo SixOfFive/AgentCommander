@@ -769,7 +769,7 @@ class PipelineRun:
             user_text = user_message
 
         messages = [
-            ChatMessage(role="system", content=CHAT_FALLBACK_SYSTEM_PROMPT),
+            ChatMessage(role="system", content=system_content),
             ChatMessage(role="user", content=user_text),
         ]
         collected: list[str] = []
