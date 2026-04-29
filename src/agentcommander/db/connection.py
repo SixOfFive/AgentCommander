@@ -29,13 +29,30 @@ def last_auto_repair() -> dict | None:
 
 
 def _default_db_dir() -> Path:
-    """OS-appropriate user-data directory."""
+    """OS-appropriate user-data directory.
+
+    Used for **shared / cross-project** state (catalog cache, etc.) — NOT
+    the conversation DB. The DB lives project-locally now (see
+    ``_project_db_dir``) so different working directories keep separate
+    history, role assignments, and provider configs.
+    """
     if os.name == "nt":
         base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
         return Path(base) / "AgentCommander"
     if "darwin" in os.sys.platform:  # type: ignore[attr-defined]
         return Path.home() / "Library" / "Application Support" / "AgentCommander"
     return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "agentcommander"
+
+
+def _project_db_dir() -> Path:
+    """Project-local data directory: ``<cwd>/.agentcommander/``.
+
+    Each working directory gets its own SQLite DB so a project's
+    conversations / role-assignments / providers don't leak into
+    unrelated projects. Add ``.agentcommander/`` to .gitignore at the
+    project root to keep credentials out of source control.
+    """
+    return Path.cwd() / ".agentcommander"
 
 
 def get_db() -> sqlite3.Connection:
