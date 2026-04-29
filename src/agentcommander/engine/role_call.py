@@ -96,6 +96,15 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
     model = resolved.model
     system_prompt = get_role_prompt(role_enum)
 
+    # Self-introspection: the orchestrator drives action choice, so it should
+    # know which tools are actually registered right now (not just what the
+    # static prompt template documents). This makes "what tools do you have
+    # access to?" answer-able from the live registry instead of stale docs.
+    if role_enum is Role.ORCHESTRATOR:
+        appendix = tool_registry_appendix()
+        if appendix:
+            system_prompt = system_prompt.rstrip() + "\n" + appendix + "\n"
+
     # If the caller didn't pin a context size, fall back to whatever was
     # persisted on the role assignment (set by `/autoconfig --mincontext N`).
     # That ensures the configured num_ctx actually reaches the provider
