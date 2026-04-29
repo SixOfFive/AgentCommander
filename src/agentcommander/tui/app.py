@@ -116,8 +116,10 @@ def _poll_stdin_chunk() -> str:
     """Non-blocking read of whatever the user has typed so far.
 
     Returns a (possibly empty) string. Cross-platform:
-      - Windows: msvcrt.kbhit / msvcrt.getwch
-      - POSIX:   select.select on stdin
+      - Windows: msvcrt.kbhit / msvcrt.getwch — already char-at-a-time, no echo.
+      - POSIX:   select.select + os.read — char-at-a-time when the terminal
+                 is in cbreak mode (see `_pipeline_input_mode`). Falls back to
+                 line-buffered reads if cbreak isn't active.
     """
     if not sys.stdin.isatty():
         return ""
@@ -127,25 +129,100 @@ def _poll_stdin_chunk() -> str:
         except ImportError:
             return ""
         out: list[str] = []
-        # Drain everything currently buffered.
+        # Drain everything currently buffered so a fast typist doesn't lose
+        # keystrokes between polls.
         while msvcrt.kbhit():
             try:
                 ch = msvcrt.getwch()
             except OSError:
                 break
             out.append(ch)
-            if ch in "\r\n":
-                break
         return "".join(out)
-    # POSIX
     try:
+        import os
         import select
         ready, _, _ = select.select([sys.stdin], [], [], 0)
         if not ready:
             return ""
-        return sys.stdin.readline()
+        fd = sys.stdin.fileno()
+        return os.read(fd, 256).decode("utf-8", errors="replace")
     except (OSError, ValueError):
         return ""
+
+
+@contextmanager
+def _pipeline_input_mode():
+    """Switch the terminal into cbreak + no-echo for the duration of a run.
+
+    Yields True when char-at-a-time input with self-managed echo is available
+    (so the caller can paint typed characters onto the input row themselves).
+    Yields False on Windows non-tty / POSIX without termios / piped stdin —
+    the caller should fall back to line-mode and accept that mid-run typing
+    won't render until Enter.
+
+    On Windows we don't need to touch the terminal: msvcrt.getwch is already
+    char-at-a-time and doesn't echo.
+    """
+    if not sys.stdin.isatty():
+        yield False
+        return
+    if sys.platform == "win32":
+        yield True
+        return
+    try:
+        import termios
+        import tty
+    except ImportError:
+        yield False
+        return
+    fd = sys.stdin.fileno()
+    old_attrs = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        new_attrs = termios.tcgetattr(fd)
+        # Disable terminal echo so we don't double-render keystrokes (the bar
+        # paints them on the input row; the OS would otherwise also echo them
+        # wherever the cursor happens to be parked).
+        new_attrs[3] = new_attrs[3] & ~termios.ECHO  # type: ignore[index]
+        termios.tcsetattr(fd, termios.TCSANOW, new_attrs)
+        yield True
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+
+
+def _consume_input_chunk(buffer: str, chunk: str) -> tuple[str, tuple[str, str] | None]:
+    """Apply a chunk of typed characters to the in-flight buffer.
+
+    Returns ``(new_buffer, action)``. ``action`` is ``("submit", line)`` when
+    the user pressed Enter (line is the buffer contents at submit time, with
+    surrounding whitespace stripped), otherwise ``None``.
+
+    Backspace (DEL or BS) edits in place. Other control bytes are dropped so
+    arrow keys and escape sequences don't pollute the buffer. Windows special-
+    key prefixes (\\x00 / \\xe0) consume the following byte too.
+    """
+    new_buf = buffer
+    i = 0
+    while i < len(chunk):
+        ch = chunk[i]
+        # Windows special-key prefix — skip the next byte (arrow / F-key code).
+        if ch in ("\x00", "\xe0"):
+            i += 2
+            continue
+        i += 1
+        if ch in ("\r", "\n"):
+            line = new_buf.strip()
+            return "", ("submit", line)
+        if ch in ("\x7f", "\x08"):
+            new_buf = new_buf[:-1]
+            continue
+        if ord(ch) < 32:
+            # Drop bare control bytes (escape, tab, etc.) so they don't end up
+            # in the queued line. Ctrl-C still raises KeyboardInterrupt because
+            # cbreak preserves ISIG.
+            continue
+        new_buf += ch
+    return new_buf, None
 
 
 def _run_pipeline(state: dict, user_message: str) -> None:
