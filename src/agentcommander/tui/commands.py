@@ -410,6 +410,140 @@ def _parse_token_count(s: str) -> int | None:
     return n if n > 0 else None
 
 
+def _humanize_tokens_short(n: int | None) -> str:
+    """Compact display: 4096 → '4096', 32768 → '32k', 131072 → '128k'."""
+    if n is None or n <= 0:
+        return "?"
+    if n < 1024:
+        return str(n)
+    if n < 1024 * 1024:
+        v = n / 1024
+        return f"{v:.0f}k" if abs(v - round(v)) < 0.05 else f"{v:.1f}k"
+    v = n / (1024 * 1024)
+    return f"{v:.0f}m" if abs(v - round(v)) < 0.05 else f"{v:.1f}m"
+
+
+def cmd_context(ctx: CommandContext, args: list[str]) -> None:
+    """`/context` — show, set, or clear the session-wide num_ctx override.
+
+    Set with ``/context 32k`` (suffix k = 1024 tokens, m = 1024². Raw integers
+    also accepted). Clear with ``/context off`` / ``/context clear``.
+
+    The override beats per-role ``context_window_tokens`` and is sent to every
+    provider call as ``num_ctx`` for the rest of the session. If the chosen
+    value exceeds any picked model's catalog ``contextLength``, every offender
+    is listed as a warning, but the override is applied anyway — the user is
+    in charge.
+    """
+    from agentcommander.db.repos import audit, get_config, set_config
+    from agentcommander.engine.role_resolver import (
+        SESSION_CONTEXT_OVERRIDE_KEY,
+        resolve as resolve_role,
+    )
+    from agentcommander.tui.status_bar import get_status_bar
+    from agentcommander.types import ALL_ROLES
+    from agentcommander.typecast.catalog import get_catalog
+
+    bar = get_status_bar()
+
+    if not args:
+        current = get_config(SESSION_CONTEXT_OVERRIDE_KEY, None)
+        if current is None:
+            render_system_line("session context override: " + style("muted", "(unset)"))
+            render_system_line(style("muted",
+                "  set with /context <N>  (e.g. /context 32k or /context 65536)"))
+            return
+        try:
+            n = int(current)
+        except (TypeError, ValueError):
+            n = 0
+        if n > 0:
+            render_system_line(
+                f"session context override: {style('accent', _humanize_tokens_short(n))} "
+                + style("muted", f"({n} tokens)")
+            )
+            render_system_line(style("muted", "  clear with /context off"))
+        else:
+            render_system_line("session context override: " + style("muted", "(unset)"))
+        return
+
+    head = args[0].lower()
+    if head in ("off", "clear", "none", "unset"):
+        existing = get_config(SESSION_CONTEXT_OVERRIDE_KEY, None)
+        # Best path here is just to remove the row entirely so /context with
+        # no args reports it as unset.
+        from agentcommander.db.connection import get_db
+        get_db().execute(
+            "DELETE FROM config WHERE key = ?",
+            (SESSION_CONTEXT_OVERRIDE_KEY,),
+        )
+        audit("context.clear", {"previous": existing})
+        bar.set_context(cap_min=0)  # 0 hides the cap; redraws immediately
+        bar.state.context_cap_min = None  # set_context(0) leaves 0; coerce to None
+        bar.redraw()
+        render_system_line("cleared session context override " + style("muted",
+            "(roles fall back to per-role context_window_tokens / provider default)"))
+        return
+
+    parsed = _parse_token_count(args[0])
+    if parsed is None:
+        render_system_line(f'could not parse: "{args[0]}"')
+        render_system_line(style("muted",
+            "  usage: /context <N>   (32k, 128K, 65536, 1.5m, …)"))
+        render_system_line(style("muted",
+            "         /context off   (clear the override)"))
+        return
+
+    # Persist the override
+    set_config(SESSION_CONTEXT_OVERRIDE_KEY, parsed)
+    audit("context.set", {"tokens": parsed})
+
+    # Surface offenders: roles whose model's catalog contextLength is below
+    # the override. We use the live resolver so /roles set + /autoconfig
+    # picks are both reflected.
+    offenders: list[tuple[str, str, int]] = []
+    catalog_result = get_catalog()
+    cat = catalog_result.catalog if catalog_result else {}
+    seen: set[tuple[str, str]] = set()
+    for role in ALL_ROLES:
+        rr = resolve_role(role)
+        if rr is None:
+            continue
+        key = (role.value, rr.model)
+        if key in seen:
+            continue
+        seen.add(key)
+        entry = cat.get(rr.model) if isinstance(cat, dict) else None
+        if not isinstance(entry, dict):
+            continue
+        raw = entry.get("contextLength")
+        if not isinstance(raw, (int, float)) or raw <= 0:
+            continue
+        if parsed > int(raw):
+            offenders.append((role.value, rr.model, int(raw)))
+
+    # Update the bar's displayed cap immediately. The next role call will
+    # also pick up the new override via resolve_role.
+    bar.set_context(cap_min=parsed)
+
+    render_system_line(
+        f"session context override: {style('accent', _humanize_tokens_short(parsed))} "
+        + style("muted", f"({parsed} tokens)")
+    )
+
+    if offenders:
+        render_system_line(style("warn",
+            f"  WARNING: {len(offenders)} role(s) use a model with a "
+            "smaller training context than the override:"))
+        for role_name, model, model_ctx in offenders:
+            render_system_line(style("warn",
+                f"    {role_name} → {model}  "
+                f"(training {_humanize_tokens_short(model_ctx)} < {_humanize_tokens_short(parsed)})"))
+        render_system_line(style("muted",
+            "  override applied anyway; the model may truncate or refuse "
+            "prompts that exceed its training window."))
+
+
 def cmd_autoconfig(ctx: CommandContext, args: list[str]) -> None:
     """`/autoconfig [--mincontext N] | /autoconfig clear`.
 
