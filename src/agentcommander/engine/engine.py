@@ -27,7 +27,11 @@ from agentcommander.engine.actions import (
     ROLE_ACTIONS,
     TOOL_ACTIONS,
 )
-from agentcommander.engine.role_call import RoleNotAssigned, call_role
+from agentcommander.engine.role_call import (
+    RoleNotAssigned,
+    call_role,
+    tool_registry_appendix,
+)
 from agentcommander.engine.role_resolver import resolve as resolve_role
 from agentcommander.engine.scratchpad import build_final_output, compact_scratchpad, push_nudge
 from agentcommander.providers.base import (
