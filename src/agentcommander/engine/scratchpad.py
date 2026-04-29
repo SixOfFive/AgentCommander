@@ -148,14 +148,15 @@ def build_final_output(scratchpad: Iterable[ScratchpadEntry]) -> str:
     if errors:
         parts.append(f"**Errors encountered:** {len(errors)}")
 
-    # 4. Step-by-step fallback (deduped). Note: tool outputs we already
-    # surfaced above don't need to repeat in the step list.
-    surfaced_actions = {"execute", "write_file", "list_dir", "read_file", "fetch"}
+    # 4. Step-by-step fallback (deduped). Skip:
+    #   - router/classify: internal scaffolding, never useful as final output
+    #     (and surfacing it triggers _is_router_echo, forcing chat fallback)
+    #   - tool entries other than execute (their content is surfaced above
+    #     when applicable; otherwise omit rather than dump raw scratchpad)
+    #   - debugger / system_nudge: orchestration noise
     meaningful = [e for e in pad
-                  if (e.role != "tool"
-                      or e.action == "execute"
-                      or (parts == [] and e.action in surfaced_actions))
-                  and e.role != "debugger"
+                  if (e.role != "tool" or e.action == "execute")
+                  and e.role not in ("router", "debugger")
                   and e.action != "system_nudge"][-6:]
     deduped: list[ScratchpadEntry] = []
     for e in meaningful:
