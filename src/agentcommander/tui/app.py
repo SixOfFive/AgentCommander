@@ -632,6 +632,22 @@ def run_tui() -> int:
         working_dir=state["working_dir"],
     )
 
+    # Surface auto-repair result so the user sees that REINDEX fired (and
+    # whether it cleared the integrity issue). Silent when quick_check
+    # passed at startup, which is the common path.
+    from agentcommander.db.connection import last_auto_repair as _last_repair
+    repair = _last_repair()
+    if repair is not None:
+        if repair.get("fixed"):
+            render_system_line(style("muted",
+                f"  db auto-repair: REINDEX cleared a quick_check issue "
+                f"(was {repair['before']!r})"))
+        else:
+            render_system_line(style("warn",
+                f"  db integrity issue: {repair.get('before')!r} → {repair.get('after')!r}"))
+            render_system_line(style("muted",
+                "    try /db check, then /db reindex / /db vacuum / /db reset"))
+
     # First-run flow: ask for the Ollama endpoint and persist it.
     if needs_first_run_setup():
         if not first_run_wizard():
