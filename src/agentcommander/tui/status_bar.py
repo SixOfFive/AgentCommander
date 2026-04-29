@@ -408,6 +408,42 @@ def read_line_at_bottom(prompt_text: str = "❯ ") -> str | None:
     interrupted = False
     eof = False
 
+    # History-navigation state. ``history_idx`` is None when the buffer
+    # represents the user's live draft; otherwise it indexes into
+    # ``_history`` from the end (0 = most recent). ``saved_draft`` holds
+    # whatever the user had typed before they entered history mode so we
+    # can restore it when they navigate past the newest entry.
+    history_idx: int | None = None
+    saved_draft: str = ""
+
+    def _history_up() -> bool:
+        """Move toward older history. Returns True if the buffer changed."""
+        nonlocal history_idx, saved_draft, buffer
+        if not _history:
+            return False
+        if history_idx is None:
+            saved_draft = buffer
+            history_idx = 0
+        elif history_idx + 1 < len(_history):
+            history_idx += 1
+        else:
+            return False  # already at the oldest entry
+        buffer = _history[-(history_idx + 1)]
+        return True
+
+    def _history_down() -> bool:
+        """Move toward newer history (or back to the live draft)."""
+        nonlocal history_idx, buffer
+        if history_idx is None:
+            return False
+        if history_idx == 0:
+            history_idx = None
+            buffer = saved_draft
+            return True
+        history_idx -= 1
+        buffer = _history[-(history_idx + 1)]
+        return True
+
     try:
         with raw_mode() as raw_ok:
             if not raw_ok:
@@ -440,16 +476,21 @@ def read_line_at_bottom(prompt_text: str = "❯ ") -> str | None:
                         submitted = buffer
                         break
                     if evt.kind == EVT_BACKSPACE:
+                        # Editing leaves history-nav mode — the buffer is now
+                        # the user's live draft regardless of where it came from.
+                        history_idx = None
                         if buffer:
                             buffer = buffer[:-1]
                             buffer_changed = True
                         continue
                     if evt.kind == EVT_CHAR:
+                        history_idx = None
                         buffer += evt.data or ""
                         buffer_changed = True
                         continue
                     if evt.kind == EVT_TAB:
                         if matches:
+                            history_idx = None
                             buffer = matches[selected_idx].name
                             buffer_changed = True
                         continue
@@ -457,11 +498,15 @@ def read_line_at_bottom(prompt_text: str = "❯ ") -> str | None:
                         if matches:
                             selected_idx = (selected_idx - 1) % len(matches)
                             popup_only_change = True
+                        elif _history_up():
+                            buffer_changed = True
                         continue
                     if evt.kind == EVT_DOWN:
                         if matches:
                             selected_idx = (selected_idx + 1) % len(matches)
                             popup_only_change = True
+                        elif _history_down():
+                            buffer_changed = True
                         continue
                     if evt.kind == EVT_ESCAPE:
                         if popup_height > 0:
