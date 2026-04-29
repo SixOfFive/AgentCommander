@@ -174,10 +174,23 @@ def _run_pipeline(state: dict, user_message: str) -> None:
     bar.set_running(True)
 
     def _on_role_start(role: str, model: str, num_ctx: int | None = None) -> None:
-        # Pass num_ctx through so the bar's "ctx N/M" line shows the actual
-        # configured cap (set by /autoconfig --mincontext) instead of falling
-        # back to a stale value from a previous role.
-        bar.set_role(role, model, num_ctx=num_ctx)
+        # Display cap precedence:
+        #   1. Explicit num_ctx from `/autoconfig --mincontext N` — what the
+        #      provider is actually being told to use.
+        #   2. The catalog's contextLength for this model — the model's
+        #      trained max, derived live from TypeCast.
+        #   3. None — bar omits the cap (shows "ctx N" only).
+        # Provider behavior is unaffected; this only sets the display cap.
+        display_cap = num_ctx
+        if display_cap is None and model:
+            catalog = get_catalog()
+            if catalog is not None:
+                entry = catalog.catalog.get(model)
+                if isinstance(entry, dict):
+                    raw = entry.get("contextLength")
+                    if isinstance(raw, (int, float)) and raw > 0:
+                        display_cap = int(raw)
+        bar.set_role(role, model, num_ctx=display_cap)
 
     def _on_role_end(role: str, model: str, prompt_tokens: int, completion_tokens: int) -> None:
         bar.add_tokens(prompt=prompt_tokens, completion=completion_tokens)
