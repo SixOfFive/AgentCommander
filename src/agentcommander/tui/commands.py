@@ -1532,7 +1532,8 @@ def _build_registry() -> dict[str, SlashCommand]:
                   "/db check              # full integrity_check report\n"
                   "/db reindex            # rebuild every index (fast, often clears corruption)\n"
                   "/db vacuum             # rebuild the file (slower, fully defragments)\n"
-                  "/db backup <path>      # write a copy via sqlite backup API\n"
+                  "/db backup <path>      # byte-copy via sqlite backup API\n"
+                  "/db salvage <path>     # row-by-row export to a fresh DB (recovers from corruption)\n"
                   "/db reset              # DESTRUCTIVE: archive corrupt DB + start fresh",
             details=(
                 "Most 'database disk image is malformed' errors come from a\n"
