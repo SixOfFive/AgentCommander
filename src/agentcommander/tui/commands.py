@@ -478,8 +478,9 @@ def cmd_context(ctx: CommandContext, args: list[str]) -> None:
             (SESSION_CONTEXT_OVERRIDE_KEY,),
         )
         audit("context.clear", {"previous": existing})
-        bar.set_context(cap_min=0)  # 0 hides the cap; redraws immediately
-        bar.state.context_cap_min = None  # set_context(0) leaves 0; coerce to None
+        # Clear the bar's cap directly — set_context(cap_min=...) only writes
+        # truthy values, so we go through state for the explicit None.
+        bar.state.context_cap_min = None
         bar.redraw()
         render_system_line("cleared session context override " + style("muted",
             "(roles fall back to per-role context_window_tokens / provider default)"))
