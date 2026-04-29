@@ -39,7 +39,8 @@
       "Bash(cmd.exe //c \".\\\\ac.bat --help\")",
       "Bash(cmd.exe //c \".\\\\ac.bat\")",
       "Bash(py -3.14 -m unittest discover tests -v)",
-      "Bash(py -3.14 -m unittest discover tests)"
+      "Bash(py -3.14 -m unittest discover tests)",
+      "Bash(curl -fsS --max-time 3 http://127.0.0.1:11434/api/tags)"
     ]
   }
 }
