@@ -281,6 +281,11 @@ def run_tui() -> int:
         render_system_line("  /models <provider_id>          # see available models")
         render_system_line("  /roles assign-all <provider_id> <model>   # one-shot setup")
 
+    # Install the persistent bottom status bar.
+    bar = get_status_bar()
+    bar.set_workdir(state.get("working_dir"))
+    bar.install()
+
     while not state["should_exit"]:
         line = _read_line()
         if line is None:
