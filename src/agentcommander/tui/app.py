@@ -173,8 +173,11 @@ def _run_pipeline(state: dict, user_message: str) -> None:
     bar.reset_run()
     bar.set_running(True)
 
-    def _on_role_start(role: str, model: str) -> None:
-        bar.set_role(role, model)
+    def _on_role_start(role: str, model: str, num_ctx: int | None = None) -> None:
+        # Pass num_ctx through so the bar's "ctx N/M" line shows the actual
+        # configured cap (set by /autoconfig --mincontext) instead of falling
+        # back to a stale value from a previous role.
+        bar.set_role(role, model, num_ctx=num_ctx)
 
     def _on_role_end(role: str, model: str, prompt_tokens: int, completion_tokens: int) -> None:
         bar.add_tokens(prompt=prompt_tokens, completion=completion_tokens)
