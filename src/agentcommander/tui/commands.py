@@ -992,6 +992,148 @@ def cmd_vram(ctx: CommandContext, _args: list[str]) -> None:
         "num_ctx will be higher than the catalog figure."))
 
 
+def cmd_db(ctx: CommandContext, args: list[str]) -> None:
+    """Inspect and repair the SQLite store.
+
+    /db                 # show DB path + integrity status
+    /db check           # run PRAGMA integrity_check / quick_check, list issues
+    /db vacuum          # rebuild the file (defragments, can recover from light corruption)
+    /db reindex         # rebuild every index (often clears 'database disk image is malformed')
+    /db backup <path>   # write a copy of the DB to <path> (uses sqlite backup API)
+    /db reset           # DESTRUCTIVE: rename the DB out of the way and re-init a fresh one
+    """
+    import os
+    import shutil
+    import sqlite3
+    import time
+    from agentcommander.db.connection import get_db, _db_path, init_db, close_db
+
+    sub = (args[0] if args else "").lower()
+
+    if sub in ("", "status", "info"):
+        path = str(_db_path or "?")
+        size = "?"
+        try:
+            size_bytes = os.path.getsize(path)
+            size = f"{size_bytes / 1024:.1f} KB" if size_bytes < 1024 * 1024 else f"{size_bytes / 1024 / 1024:.1f} MB"
+        except OSError:
+            pass
+        render_system_line(f"DB path: {style('accent', path)}")
+        render_system_line(style("muted", f"  size: {size}"))
+        # Light health check
+        try:
+            row = get_db().execute("PRAGMA quick_check").fetchone()
+            ok = bool(row) and (row[0] == "ok")
+            if ok:
+                render_system_line("  integrity: " + style("accent", "ok") +
+                                   " (quick_check)")
+            else:
+                render_system_line(style("warn", f"  integrity: {row[0] if row else 'unknown'}"))
+                render_system_line(style("muted",
+                    "  run /db check for the full report, then /db reindex or /db vacuum"))
+        except sqlite3.DatabaseError as exc:
+            render_system_line(style("warn", f"  integrity: ERROR — {exc}"))
+            render_system_line(style("muted",
+                "  the DB is corrupted. Try: /db reindex, then /db vacuum, then /db backup, "
+                "and as a last resort /db reset"))
+        return
+
+    if sub == "check":
+        try:
+            rows = get_db().execute("PRAGMA integrity_check").fetchall()
+        except sqlite3.DatabaseError as exc:
+            render_system_line(style("warn", f"integrity_check failed: {exc}"))
+            return
+        if rows and rows[0][0] == "ok":
+            render_system_line("integrity_check: " + style("accent", "ok"))
+        else:
+            render_system_line(style("warn",
+                f"integrity_check found {len(rows)} issue(s):"))
+            for r in rows[:30]:
+                render_system_line(f"  {r[0]}")
+            if len(rows) > 30:
+                render_system_line(style("muted",
+                    f"  …and {len(rows) - 30} more"))
+            render_system_line(style("muted",
+                "  Try: /db reindex (often resolves index corruption), "
+                "then /db vacuum if issues remain"))
+        return
+
+    if sub == "vacuum":
+        try:
+            get_db().execute("VACUUM")
+            render_system_line("VACUUM: " + style("accent", "complete"))
+        except sqlite3.DatabaseError as exc:
+            render_system_line(style("warn", f"VACUUM failed: {exc}"))
+        return
+
+    if sub == "reindex":
+        try:
+            get_db().execute("REINDEX")
+            render_system_line("REINDEX: " + style("accent", "complete"))
+        except sqlite3.DatabaseError as exc:
+            render_system_line(style("warn", f"REINDEX failed: {exc}"))
+        return
+
+    if sub == "backup":
+        if len(args) < 2:
+            render_system_line("usage: /db backup <path-to-new-file>")
+            return
+        target = args[1]
+        if os.path.exists(target):
+            render_system_line(style("warn",
+                f"refusing to overwrite existing file: {target}"))
+            return
+        try:
+            with sqlite3.connect(target) as dst:
+                get_db().backup(dst)
+            size_kb = os.path.getsize(target) / 1024
+            render_system_line(f"backup written: {style('accent', target)} "
+                               + style("muted", f"({size_kb:.1f} KB)"))
+        except (sqlite3.DatabaseError, OSError) as exc:
+            render_system_line(style("warn", f"backup failed: {exc}"))
+        return
+
+    if sub == "reset":
+        # DESTRUCTIVE — rename the corrupt DB out of the way (don't delete,
+        # so the user can still try recovery later) and re-init a fresh one.
+        path = str(_db_path or "")
+        if not path or not os.path.exists(path):
+            render_system_line(style("warn", "no DB path resolved"))
+            return
+        ts = int(time.time())
+        archived = f"{path}.corrupt-{ts}"
+        # Close + rename + reopen
+        close_db()
+        try:
+            shutil.move(path, archived)
+            for ext in (".db-wal", ".db-shm", "-wal", "-shm",
+                        "-journal", ".db-journal"):
+                # Move journal/WAL companions out of the way too
+                for candidate in (path + ext, path[:-len(".sqlite")] + ext if path.endswith(".sqlite") else None):
+                    if candidate and os.path.exists(candidate):
+                        try:
+                            shutil.move(candidate, candidate + f".corrupt-{ts}")
+                        except OSError:
+                            pass
+            init_db()
+            render_system_line(f"old DB archived to: {style('muted', archived)}")
+            render_system_line("  fresh DB initialized — restart AgentCommander to fully reload")
+            render_system_line(style("muted",
+                "  to recover data: copy the archived file into a new SQLite tool "
+                "and run .recover, then re-import salvageable rows"))
+        except OSError as exc:
+            render_system_line(style("warn", f"reset failed: {exc}"))
+            try:
+                init_db()  # re-open the corrupt DB so the TUI keeps working
+            except Exception:  # noqa: BLE001
+                pass
+        return
+
+    render_system_line(f"unknown sub-command: /db {sub}")
+    render_system_line("  try: /db, /db check, /db vacuum, /db reindex, /db backup <path>, /db reset")
+
+
 def cmd_history(ctx: CommandContext, _args: list[str]) -> None:
     from agentcommander.db.repos import list_conversations
     convs = list_conversations()
