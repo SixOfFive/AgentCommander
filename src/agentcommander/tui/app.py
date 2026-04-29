@@ -7,6 +7,7 @@ non-blocking and react to `/stop`.
 """
 from __future__ import annotations
 
+import os
 import queue
 import shlex
 import sys
