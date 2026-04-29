@@ -178,14 +178,23 @@ def suggest_config(installed_model_ids: set[str]) -> AutoconfigSuggestion:
 
 @dataclass
 class AutoconfigApplied:
-    """Result of applying autoconfig — what changed and what was preserved."""
+    """Result of applying autoconfig — what got picked + what was preserved.
+
+    The picks here are NOT persisted to the DB. They are loaded into the
+    in-memory `engine.role_resolver._autoconfig` table so they're effective
+    for the current run and recomputed every launch. Only user overrides
+    (set via /roles set ...) live in the DB.
+    """
 
     default_model: str | None
     provider_id: str | None
-    role_picks: dict[str, str]              # role.value -> model assigned by autoconfig
-    user_overrides: dict[str, str]          # role.value -> existing user-set model (untouched)
-    diff_picks: dict[str, str]              # role.value -> better-than-default model from TypeCast
-    skipped_reason: str | None = None       # set if autoconfig didn't run (no models, no providers, etc.)
+    # role.value -> (provider_id, model) chosen by autoconfig this run
+    role_picks: dict[str, tuple[str, str]] = field(default_factory=dict)
+    # role.value -> model — existing user overrides that were respected (read from DB)
+    user_overrides: dict[str, str] = field(default_factory=dict)
+    # role.value -> model — TypeCast diff picks (a stronger model than the default for that role)
+    diff_picks: dict[str, str] = field(default_factory=dict)
+    skipped_reason: str | None = None
 
 
 def _gather_installed(providers: list) -> tuple[set[str], dict[str, str]]:
