@@ -589,6 +589,32 @@ def run_tui() -> int:
     # workdir may have changed during first-run/autoconfig; re-sync the bar.
     bar.set_workdir(state.get("working_dir"))
 
+    # Seed the bar's context cap AFTER autoconfig has run, so we read this
+    # session's freshly persisted ceiling (not whatever stale value was in
+    # the DB from a previous launch). Precedence matches _on_role_start:
+    # /context override first, then the session ceiling. Without this, the
+    # idle bar would show no cap until the first role call fires.
+    seed_cap: int | None = None
+    persisted_ctx = get_config("context_override_tokens", None)
+    if isinstance(persisted_ctx, (int, str)):
+        try:
+            n = int(persisted_ctx)
+            if n > 0:
+                seed_cap = n
+        except (TypeError, ValueError):
+            pass
+    if seed_cap is None:
+        ceiling = get_config("session_ceiling_tokens", None)
+        if isinstance(ceiling, (int, str)):
+            try:
+                n = int(ceiling)
+                if n > 0:
+                    seed_cap = n
+            except (TypeError, ValueError):
+                pass
+    if seed_cap is not None:
+        bar.set_context(cap_min=seed_cap)
+
     while not state["should_exit"]:
         # Drain any prompt the user pre-typed during the previous run before
         # asking for fresh input.
