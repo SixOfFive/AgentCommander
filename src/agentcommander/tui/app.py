@@ -30,6 +30,11 @@ from agentcommander.tui.ansi import (
     write,
     writeln,
 )
+from agentcommander.engine.role_resolver import (
+    autoconfig_table as _autoconfig_table,
+    resolve as resolve_role,
+    set_autoconfig as _set_autoconfig,
+)
 from agentcommander.tui.commands import COMMANDS, CommandContext
 from agentcommander.tui.render import (
     render_assistant_message,
