@@ -387,6 +387,200 @@ def cmd_typecast(ctx: CommandContext, args: list[str]) -> None:
         render_system_line(f"unknown sub-command: /typecast {sub}")
 
 
+def _parse_token_count(s: str) -> int | None:
+    """Parse strings like '128k', '32K', '4096', '1.5m' into an integer
+    token count. Suffix 'k' multiplies by 1024, 'm' by 1024*1024 (binary
+    convention — matches the TypeCast catalog's contextLength values).
+    Returns None when the input can't be parsed or is not strictly positive.
+    """
+    if not s:
+        return None
+    raw = s.strip().lower()
+    mult = 1
+    if raw.endswith("k"):
+        mult = 1024
+        raw = raw[:-1]
+    elif raw.endswith("m"):
+        mult = 1024 * 1024
+        raw = raw[:-1]
+    try:
+        n = int(float(raw) * mult)
+    except ValueError:
+        return None
+    return n if n > 0 else None
+
+
+def cmd_autoconfig(ctx: CommandContext, args: list[str]) -> None:
+    """`/autoconfig [--mincontext N] | /autoconfig clear`.
+
+    With no flags, runs the in-memory autoconfigure (same as `/roles auto`).
+
+    With `--mincontext N`, narrows the candidate set to installed models
+    whose TypeCast `contextLength` is at least N tokens, then persists the
+    picks to `role_assignments` (with `context_window_tokens = N`) so they
+    survive restarts and the chosen num_ctx flows to every model call.
+    Prior autoconfig-persisted rows are wiped first so a higher / lower
+    threshold can re-pick; rows set by `/roles set` (no context) are kept.
+
+    With `clear`, deletes every row in `role_assignments` and then runs
+    the default in-memory autoconfigure.
+    """
+    from agentcommander.db.connection import get_db
+    from agentcommander.db.repos import (
+        audit,
+        clear_role_assignments,
+        get_role_assignment,
+        set_role_assignment,
+    )
+    from agentcommander.engine.role_resolver import set_autoconfig
+    from agentcommander.providers.base import list_active
+    from agentcommander.typecast import apply_autoconfigure
+    from agentcommander.types import Role
+
+    # Subcommand: clear → wipe DB, fall through to default autoconfigure.
+    if args and args[0] == "clear":
+        removed = clear_role_assignments()
+        audit("autoconfig.clear", {"removed_rows": removed})
+        render_system_line(style("warn",
+            f"cleared {removed} persisted role assignment(s) from the DB"))
+        args = args[1:]
+
+    # Parse --mincontext N
+    min_context = 0
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("--mincontext", "--min-context"):
+            if i + 1 >= len(args):
+                render_system_line(
+                    "usage: /autoconfig --mincontext <N>   "
+                    "(e.g. 128k, 32K, or a raw token count like 32768)"
+                )
+                return
+            parsed = _parse_token_count(args[i + 1])
+            if parsed is None:
+                render_system_line(
+                    f'could not parse mincontext value: "{args[i + 1]}"  '
+                    "(try 128k, 32K, or a raw token count)"
+                )
+                return
+            min_context = parsed
+            i += 2
+            continue
+        render_system_line(f"unknown argument to /autoconfig: {a}")
+        render_system_line(
+            "usage: /autoconfig [--mincontext <N>]   |   /autoconfig clear"
+        )
+        return
+
+    providers = list_active()
+    if not providers:
+        render_system_line("no active providers — add one with /providers add")
+        return
+
+    # When persisting with a new threshold, drop any rows the previous
+    # autoconfig persisted (they carry a non-null context_window_tokens) so
+    # this run can re-pick them. Rows from /roles set keep that column NULL
+    # and survive untouched.
+    if min_context > 0:
+        get_db().execute(
+            "DELETE FROM role_assignments WHERE context_window_tokens IS NOT NULL"
+        )
+
+    applied = apply_autoconfigure(
+        providers=providers,
+        get_role_assignment_fn=get_role_assignment,
+        audit_fn=audit,
+        min_context=min_context,
+    )
+
+    if applied.skipped_reason:
+        render_system_line(f"autoconfigure skipped: {applied.skipped_reason}")
+        set_autoconfig({})
+        return
+
+    if not applied.role_picks:
+        msg = "autoconfigure picked nothing"
+        if min_context > 0:
+            msg += (f" — no installed model has contextLength "
+                    f">= {min_context} tokens")
+        render_system_line(style("warn", msg))
+        if applied.unset_roles:
+            render_system_line(style("muted",
+                f"  unset roles: {', '.join(applied.unset_roles)}"))
+        return
+
+    # Persist when --mincontext was given. The chosen num_ctx is stored
+    # alongside each (role, provider, model) so call_role can pass it as
+    # `options.num_ctx` on every Ollama request — no silent default fallback.
+    persisted = 0
+    if min_context > 0:
+        for role_value, (pid, model) in applied.role_picks.items():
+            try:
+                role_enum = Role(role_value)
+            except ValueError:
+                continue
+            set_role_assignment(
+                role_enum, pid, model,
+                is_override=True,
+                context_window_tokens=min_context,
+            )
+            persisted += 1
+        audit("autoconfig.persist", {
+            "min_context": min_context,
+            "role_count": persisted,
+            "default_model": applied.default_model,
+        })
+
+    # Always update the in-memory autoconfig — the persisted DB rows already
+    # win at resolve time, but populating in-memory keeps `/roles` output
+    # consistent (showing kind="auto" for non-persisted picks).
+    in_memory: dict[Role, tuple[str, str]] = {}
+    for role_value, (pid, model) in applied.role_picks.items():
+        try:
+            in_memory[Role(role_value)] = (pid, model)
+        except ValueError:
+            continue
+    set_autoconfig(in_memory)
+
+    n_picks = len(applied.role_picks)
+    n_diff = len(applied.diff_picks)
+    n_unset = len(applied.unset_roles)
+    n_pre = len(applied.user_overrides)
+
+    if min_context > 0:
+        render_system_line(
+            f"autoconfigured {n_picks} role(s) at mincontext={min_context} "
+            f'→ primary {style("accent", applied.default_model or "?")} '
+            f"on {applied.provider_id}  "
+            + style("muted", f"({persisted} persisted; num_ctx={min_context} "
+                              "will be passed to every call)")
+        )
+    else:
+        render_system_line(
+            f"autoconfigured {n_picks} role(s) in memory "
+            f'→ primary {style("accent", applied.default_model or "?")} '
+            f"on {applied.provider_id}"
+        )
+    if n_diff:
+        render_system_line(f"  + {n_diff} stronger pick(s):")
+        for r, m in applied.diff_picks.items():
+            render_system_line(f"    {r} → {m}")
+    if n_unset:
+        render_system_line(style("warn",
+            f"  {n_unset} role(s) left unset (no installed model met the threshold):"))
+        render_system_line(style("muted",
+            f"    {', '.join(applied.unset_roles)}"))
+        render_system_line(style("muted",
+            "    fix with /roles set <role> <provider_id> <model>  "
+            "(or install a model that fits)"))
+    if n_pre:
+        render_system_line(
+            f"  preserved {n_pre} prior user override(s) — "
+            "use /roles unset <role> or /autoconfig clear to release"
+        )
+
+
 def cmd_agents(ctx: CommandContext, _args: list[str]) -> None:
     from agentcommander.agents import AGENTS, list_available_prompts
     available = list_available_prompts()
