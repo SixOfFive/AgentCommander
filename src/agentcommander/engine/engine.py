@@ -11,6 +11,7 @@ The engine NEVER raises to its caller — pipeline failures yield a
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
