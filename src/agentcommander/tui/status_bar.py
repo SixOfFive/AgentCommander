@@ -277,11 +277,63 @@ def get_status_bar() -> StatusBar:
 # ─── Bottom-anchored input ────────────────────────────────────────────────
 
 
-def read_line_at_bottom(prompt_text: str = "❯ ") -> str | None:
-    """Position the cursor on the input row, prompt, read a line, restore.
-
-    Returns the line, or None on EOF / Ctrl-D. Re-raises KeyboardInterrupt.
+def _paint_input_row(prompt_text: str, buffer: str, cols: int, input_row: int) -> None:
+    """Repaint the input row with prompt + current buffer, leaving the cursor
+    parked just after the buffer's last character.
     """
+    write(f"\x1b[{input_row};1H\x1b[2K")
+    if supports_color():
+        write(style("user_label", prompt_text))
+    else:
+        write(prompt_text)
+    visible_cap = max(0, cols - len(prompt_text) - 1)
+    if len(buffer) <= visible_cap:
+        visible = buffer
+    elif visible_cap >= 1:
+        visible = "…" + buffer[-(visible_cap - 1):]
+    else:
+        visible = ""
+    write(visible)
+    sys.stdout.flush()
+
+
+def read_line_at_bottom(prompt_text: str = "❯ ") -> str | None:
+    """Bottom-anchored, char-mode prompt with slash-command autocomplete.
+
+    Reads keystrokes one at a time, echoes them onto the input row at the
+    bottom of the terminal, and shows a popup of matching slash commands
+    just above the status-bar rule whenever the buffer starts with ``/``.
+
+      Tab          → insert the highlighted completion (does NOT submit;
+                     user is free to keep typing args).
+      Up / Down    → navigate the popup.
+      Esc          → dismiss the popup but keep the buffer.
+      Enter        → submit the line.
+      Backspace    → edit the buffer; clears the popup once buffer no
+                     longer matches.
+      Ctrl-C       → raise KeyboardInterrupt (caller decides what to do).
+      Ctrl-D / EOF → return None.
+
+    Returns the submitted line, or None on EOF.
+    """
+    # Lazy imports — keeps status_bar.py importable before the autocomplete
+    # module is loaded (and avoids any future circular concerns).
+    from agentcommander.tui.autocomplete import (
+        EVT_BACKSPACE,
+        EVT_CHAR,
+        EVT_DOWN,
+        EVT_ENTER,
+        EVT_ESCAPE,
+        EVT_INTERRUPT,
+        EVT_TAB,
+        EVT_UP,
+        clear_popup_rows,
+        match_commands,
+        paint_popup,
+        parse_events,
+    )
+    from agentcommander.tui.terminal_input import raw_mode, read_chars_blocking
+
     bar = get_status_bar()
     if not bar.enabled or not bar._installed:
         # Plain mode (non-TTY or no scroll region installed) — fall back to
@@ -292,30 +344,151 @@ def read_line_at_bottom(prompt_text: str = "❯ ") -> str | None:
             return None
 
     cols, rows = term_size()
-    input_row = rows  # last row
+    input_row = rows
+    rule_row = max(1, rows - 2)
 
-    # Move to input row, clear it, paint the prompt.
-    write(f"\x1b[{input_row};1H\x1b[2K")
-    write(style("user_label", prompt_text))
-    sys.stdout.flush()
+    buffer = ""
+    matches: list = []
+    selected_idx = 0
+    popup_height = 0
+
+    def _refresh_popup() -> None:
+        """Recompute matches against the current buffer and repaint the popup.
+        Clears stale rows when the popup shrinks or disappears."""
+        nonlocal matches, selected_idx, popup_height
+        new_matches = match_commands(buffer)
+        new_height = min(len(new_matches), 6)  # MAX_POPUP_HEIGHT mirrored
+
+        if new_height < popup_height:
+            clear_popup_rows(popup_height - new_height,
+                             rule_row - popup_height)
+
+        if not new_matches:
+            matches = []
+            selected_idx = 0
+            popup_height = 0
+            return
+
+        # Reset selection when the candidate set changes shape.
+        if (len(new_matches) != len(matches)
+                or (matches and new_matches[0].name != matches[0].name)):
+            selected_idx = 0
+        if selected_idx >= len(new_matches):
+            selected_idx = len(new_matches) - 1
+
+        matches = new_matches
+        popup_height = paint_popup(
+            matches, selected_idx,
+            popup_top_row=rule_row - new_height,
+            cols=cols,
+        )
+
+    _paint_input_row(prompt_text, buffer, cols, input_row)
+    _refresh_popup()
+
+    submitted: str | None = None
+    interrupted = False
+    eof = False
 
     try:
-        line = input("")
-    except EOFError:
-        # Restore cursor into the scroll region before returning None.
+        with raw_mode() as raw_ok:
+            if not raw_ok:
+                # Couldn't put the terminal into char-mode — fall back to
+                # line-mode input(). No autocomplete, but still works.
+                try:
+                    return input("")
+                except EOFError:
+                    return None
+
+            while True:
+                try:
+                    chunk = read_chars_blocking()
+                except KeyboardInterrupt:
+                    interrupted = True
+                    break
+
+                events = parse_events(chunk)
+                if not events:
+                    continue
+
+                buffer_changed = False
+                popup_only_change = False
+
+                for evt in events:
+                    if evt.kind == EVT_INTERRUPT:
+                        interrupted = True
+                        break
+                    if evt.kind == EVT_ENTER:
+                        submitted = buffer
+                        break
+                    if evt.kind == EVT_BACKSPACE:
+                        if buffer:
+                            buffer = buffer[:-1]
+                            buffer_changed = True
+                        continue
+                    if evt.kind == EVT_CHAR:
+                        buffer += evt.data or ""
+                        buffer_changed = True
+                        continue
+                    if evt.kind == EVT_TAB:
+                        if matches:
+                            buffer = matches[selected_idx].name
+                            buffer_changed = True
+                        continue
+                    if evt.kind == EVT_UP:
+                        if matches:
+                            selected_idx = (selected_idx - 1) % len(matches)
+                            popup_only_change = True
+                        continue
+                    if evt.kind == EVT_DOWN:
+                        if matches:
+                            selected_idx = (selected_idx + 1) % len(matches)
+                            popup_only_change = True
+                        continue
+                    if evt.kind == EVT_ESCAPE:
+                        if popup_height > 0:
+                            clear_popup_rows(popup_height,
+                                             rule_row - popup_height)
+                            matches = []
+                            selected_idx = 0
+                            popup_height = 0
+                        continue
+
+                if interrupted or submitted is not None:
+                    break
+
+                if buffer_changed:
+                    _paint_input_row(prompt_text, buffer, cols, input_row)
+                    _refresh_popup()
+                elif popup_only_change and matches:
+                    # Just re-highlight the popup — buffer is unchanged.
+                    paint_popup(matches, selected_idx,
+                                popup_top_row=rule_row - popup_height,
+                                cols=cols)
+    except OSError:
+        eof = True
+
+    # Tear down the popup before yielding control back to the REPL.
+    if popup_height > 0:
+        clear_popup_rows(popup_height, rule_row - popup_height)
+
+    if interrupted:
+        bar.park_cursor()
+        raise KeyboardInterrupt
+    if eof:
         bar.park_cursor()
         return None
-    except KeyboardInterrupt:
+    if submitted is None:
         bar.park_cursor()
-        raise
+        return None
 
-    # input() left the cursor wherever the terminal sent it after newline
-    # (often row+1). Pull it back inside the scroll region so subsequent
-    # output streams correctly.
+    # Move the input cursor onto a fresh line under the input row before
+    # parking — gives a clean visual break for the rendered user message.
+    write(f"\x1b[{input_row};1H\x1b[2K")
+    sys.stdout.flush()
     bar.park_cursor()
-    # Repaint status (input may have moved the cursor past where it should be)
     bar.redraw()
-    return line
+    return submitted
 
 
 # Suppress unused symbol warnings for reserved-future references.
