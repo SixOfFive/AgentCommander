@@ -142,3 +142,19 @@ CREATE TABLE IF NOT EXISTS operational_rules (
 );
 
 CREATE INDEX IF NOT EXISTS idx_oprules_action ON operational_rules(action_type, archived);
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Filesystem permission decisions — persisted "Always" choices.
+-- "Yes once" decisions live only in memory for the current run.
+-- decision is one of: 'allow' (yes from now on) | 'deny' (no from now on).
+-- ─────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS fs_permissions (
+  path TEXT NOT NULL,                -- absolute path
+  operation TEXT NOT NULL,           -- 'read' | 'write' | 'delete'
+  decision TEXT NOT NULL,            -- 'allow' | 'deny'
+  scope TEXT NOT NULL DEFAULT 'exact', -- 'exact' | 'subtree' (subtree = path + all children)
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (path, operation)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fs_permissions_path ON fs_permissions(path);
