@@ -197,17 +197,36 @@ def _consume_input_chunk(buffer: str, chunk: str) -> tuple[str, tuple[str, str] 
     the user pressed Enter (line is the buffer contents at submit time, with
     surrounding whitespace stripped), otherwise ``None``.
 
-    Backspace (DEL or BS) edits in place. Other control bytes are dropped so
-    arrow keys and escape sequences don't pollute the buffer. Windows special-
-    key prefixes (\\x00 / \\xe0) consume the following byte too.
+    Backspace (DEL or BS) edits in place. Bare control bytes are dropped, and
+    common terminal escape sequences are consumed as a unit so arrow keys and
+    function keys don't leak ``[A`` / ``OP`` etc. into the buffer:
+      - CSI: ``ESC [ <params> <final>`` where final is a letter or ``~``
+      - SS3: ``ESC O <final>`` (F1-F4 on many terminals)
+    Windows special-key prefixes (``\\x00`` / ``\\xe0``) consume the next byte too.
     """
     new_buf = buffer
     i = 0
-    while i < len(chunk):
+    n = len(chunk)
+    while i < n:
         ch = chunk[i]
         # Windows special-key prefix — skip the next byte (arrow / F-key code).
         if ch in ("\x00", "\xe0"):
             i += 2
+            continue
+        # POSIX ANSI escape — consume the whole sequence so it doesn't leak.
+        if ch == "\x1b":
+            i += 1
+            if i < n and chunk[i] == "[":
+                i += 1
+                while i < n:
+                    c2 = chunk[i]
+                    i += 1
+                    if c2 == "~" or ("A" <= c2 <= "Z") or ("a" <= c2 <= "z"):
+                        break
+            elif i < n and chunk[i] == "O":
+                # SS3: ESC O <one final byte>
+                i += 2
+            # else: lone ESC — already swallowed.
             continue
         i += 1
         if ch in ("\r", "\n"):
@@ -217,9 +236,8 @@ def _consume_input_chunk(buffer: str, chunk: str) -> tuple[str, tuple[str, str] 
             new_buf = new_buf[:-1]
             continue
         if ord(ch) < 32:
-            # Drop bare control bytes (escape, tab, etc.) so they don't end up
-            # in the queued line. Ctrl-C still raises KeyboardInterrupt because
-            # cbreak preserves ISIG.
+            # Drop other control bytes (tab, etc.). Ctrl-C still raises
+            # KeyboardInterrupt because cbreak preserves ISIG.
             continue
         new_buf += ch
     return new_buf, None
