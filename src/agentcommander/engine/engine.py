@@ -359,34 +359,87 @@ class PipelineRun:
 
     # ─────────────────────────────────────────────────────────────────────
 
-    def _classify_category(self, user_message: str) -> str:
+    def _emit_role_start(self, role: Role, opts: "RunOptions") -> tuple[str, int | None]:
+        """Fire ``opts.on_role_start`` for ``role`` so the status bar flips
+        to ``▸ <role> → <model>`` *before* the call goes out. Returns
+        ``(model_name, num_ctx)`` so the matching ``_emit_role_end`` doesn't
+        re-resolve mid-flight (the values it needs are cached here).
+        """
+        rr = resolve_role(role)
+        model_name = rr.model if rr else "?"
+        num_ctx = rr.context_window_tokens if rr else None
+        if opts.on_role_start is not None:
+            try:
+                opts.on_role_start(role.value, model_name, num_ctx)
+            except Exception:  # noqa: BLE001
+                pass
+        return model_name, num_ctx
+
+    def _emit_role_end(self, role: Role, model_name: str, opts: "RunOptions",
+                       prompt_tokens: int, completion_tokens: int) -> None:
+        if opts.on_role_end is not None:
+            try:
+                opts.on_role_end(role.value, model_name,
+                                 prompt_tokens or 0, completion_tokens or 0)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _classify_category(self, user_message: str, opts: "RunOptions") -> str:
         if resolve_role(Role.ROUTER) is None:
             return "question"
-        try:
-            raw = call_role(Role.ROUTER, user_input=user_message, json_mode=True)
-            parsed = json.loads(raw)
-            return str(parsed.get("category", "question"))
-        except (ProviderError, RoleNotAssigned, ValueError, json.JSONDecodeError):
-            return "question"
+        # Tell the bar the router is about to run, before the network call.
+        model_name, _ = self._emit_role_start(Role.ROUTER, opts)
+        prompt_tokens = completion_tokens = 0
 
-    def _orchestrate(self) -> OrchestratorDecision:
+        def _capture(p: int | None, c: int | None) -> None:
+            nonlocal prompt_tokens, completion_tokens
+            prompt_tokens = p or 0
+            completion_tokens = c or 0
+
+        try:
+            raw = call_role(Role.ROUTER, user_input=user_message,
+                            json_mode=True, on_finish=_capture)
+            parsed = json.loads(raw)
+            result = str(parsed.get("category", "question"))
+        except (ProviderError, RoleNotAssigned, ValueError, json.JSONDecodeError):
+            result = "question"
+        self._emit_role_end(Role.ROUTER, model_name, opts,
+                            prompt_tokens, completion_tokens)
+        return result
+
+    def _orchestrate(self, opts: "RunOptions") -> OrchestratorDecision:
         if resolve_role(Role.ORCHESTRATOR) is None:
             return OrchestratorDecision(action="done",
                                         reasoning="orchestrator role is not assigned to a model")
+        # Bar flips to ▸ orchestrator → <model> before we actually send.
+        model_name, _ = self._emit_role_start(Role.ORCHESTRATOR, opts)
+        prompt_tokens = completion_tokens = 0
+
+        def _capture(p: int | None, c: int | None) -> None:
+            nonlocal prompt_tokens, completion_tokens
+            prompt_tokens = p or 0
+            completion_tokens = c or 0
+
         scratchpad_text = compact_scratchpad(self.state.scratchpad)
-        raw = call_role(Role.ORCHESTRATOR,
-                        user_input=scratchpad_text or self.opts.user_message,
-                        scratchpad_text=scratchpad_text,
-                        json_mode=True)
         try:
-            parsed = json.loads(raw)
-            return OrchestratorDecision.from_dict(parsed)
-        except (json.JSONDecodeError, ValueError, TypeError):
-            return OrchestratorDecision(
-                action="done",
-                reasoning="orchestrator returned invalid JSON; halting",
-                input=build_final_output(self.state.scratchpad),
-            )
+            raw = call_role(Role.ORCHESTRATOR,
+                            user_input=scratchpad_text or self.opts.user_message,
+                            scratchpad_text=scratchpad_text,
+                            json_mode=True,
+                            on_finish=_capture)
+            try:
+                parsed = json.loads(raw)
+                decision = OrchestratorDecision.from_dict(parsed)
+            except (json.JSONDecodeError, ValueError, TypeError):
+                decision = OrchestratorDecision(
+                    action="done",
+                    reasoning="orchestrator returned invalid JSON; halting",
+                    input=build_final_output(self.state.scratchpad),
+                )
+        finally:
+            self._emit_role_end(Role.ORCHESTRATOR, model_name, opts,
+                                prompt_tokens, completion_tokens)
+        return decision
 
     def _dispatch_role(self, decision: OrchestratorDecision, iteration: int,
                        opts: RunOptions) -> Iterator[PipelineEvent]:
