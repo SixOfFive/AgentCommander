@@ -165,6 +165,54 @@ def _consume_input_chunk(buffer: str, chunk: str) -> tuple[str, tuple[str, str] 
     return new_buf, None
 
 
+def _unload_active_models() -> None:
+    """Best-effort: ask each provider to evict its loaded models. Used when
+    the user halts mid-run (/stop, /exit, /quit) so VRAM frees right away
+    instead of waiting for Ollama's 5-minute idle timer.
+    """
+    try:
+        from agentcommander.providers.base import list_active
+        for p in list_active():
+            try:
+                p.unload_all_loaded()
+            except Exception:  # noqa: BLE001
+                continue
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _handle_in_run_command(line: str, state: dict,
+                           cancel_event: threading.Event) -> None:
+    """Recognize control commands typed mid-run.
+
+    /stop          → cancel the in-flight call, halt the pipeline, unload models
+    /exit, /quit   → same as /stop, plus exit the REPL after the pipeline drains
+    anything else  → queue for the next REPL iteration (existing behavior)
+
+    Cancellation propagates through ``cancel_event`` to ``self.is_cancelled``
+    in the engine, which feeds ``should_cancel`` to the provider's chat loop
+    so the active stream closes mid-response.
+    """
+    if not line:
+        return
+    if line == "/stop":
+        cancel_event.set()
+        render_system_line(style("warn",
+            "  /stop received — halting the pipeline…"))
+        _unload_active_models()
+        return
+    if line in ("/exit", "/quit"):
+        cancel_event.set()
+        state["should_exit"] = True
+        render_system_line(style("warn",
+            f"  {line} received — halting and exiting…"))
+        _unload_active_models()
+        return
+    state["queued_next"] = line
+    render_system_line(style("muted",
+        f"  queued for after this run: {line}"))
+
+
 def _run_pipeline(state: dict, user_message: str) -> None:
     conv_id = _ensure_conversation(state)
     append_message(conv_id, "user", user_message)
