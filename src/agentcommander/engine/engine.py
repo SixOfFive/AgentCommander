@@ -249,29 +249,39 @@ class PipelineRun:
 
                 # Done branch
                 if decision.action == "done":
-                    # Bare-scratchpad fallback: when the orchestrator emits
-                    # `done` with no input and the scratchpad has only the
-                    # router classification (typical for "hello" / casual
-                    # questions), the user would otherwise see the router's
-                    # category echoed back as the "answer". Stream a direct
-                    # chat call against the orchestrator's resolved model
-                    # so they get an actual reply.
-                    if (not (decision.input or "").strip()
-                            and self._is_bare_scratchpad()):
-                        yield from self._chat_fallback_stream(
-                            opts.user_message, opts,
-                        )
-                        update_pipeline_run(
-                            self.run_id, status="done",
-                            iterations=iteration, category=category,
-                        )
-                        return
-
                     final = self._handle_done(decision, opts.user_message)
                     if final is None:
                         yield PipelineEvent(type="guard", family="done",
                                             reason="rejecting premature done")
                         continue
+
+                    # Two failure modes for trivial chat / single-line
+                    # questions, both surface here as the same symptom — the
+                    # final is a build_final_output step-by-step echo of the
+                    # router's classification ("Step 0: router/classify\n
+                    # question"). Detect that and recover:
+                    #
+                    # 1. If decision.input has a real reply that the
+                    #    done-guard runner overrode (it returns
+                    #    build_final_output ignoring decision.input — see
+                    #    done_guards.run_done_guards line 717), use it.
+                    # 2. Otherwise stream a direct chat call against the
+                    #    orchestrator's model so the user gets an actual
+                    #    response instead of the classification echoed back.
+                    if self._is_router_echo(final):
+                        decision_input = (decision.input or "").strip()
+                        if decision_input and not self._is_router_echo(decision_input):
+                            final = decision_input
+                        else:
+                            yield from self._chat_fallback_stream(
+                                opts.user_message, opts,
+                            )
+                            update_pipeline_run(
+                                self.run_id, status="done",
+                                iterations=iteration, category=category,
+                            )
+                            return
+
                     yield PipelineEvent(type="done", final=final)
                     update_pipeline_run(self.run_id, status="done",
                                         iterations=iteration, category=category)
@@ -546,9 +556,7 @@ class PipelineRun:
 
     def _is_bare_scratchpad(self) -> bool:
         """True when the scratchpad has nothing the user would want to see —
-        only the router classification and/or system nudges. Used to detect
-        the "trivial chat" case where falling back to ``build_final_output``
-        would echo the router's category as the answer.
+        only the router classification and/or system nudges.
 
         Real tool calls (execute, write_file, fetch, …) and any non-router
         role output count as content — only the router entry and any system
@@ -561,6 +569,38 @@ class PipelineRun:
                 continue
             return False
         return True
+
+    def _is_router_echo(self, text: str) -> bool:
+        """True when ``text`` is essentially the router's classification
+        leaking out as the answer — either the bare category word
+        ("question", "chat") or a build_final_output step-by-step that
+        contains nothing but the router entry.
+
+        Used after _handle_done to detect "the pipeline produced no real
+        reply" so we can fire the chat fallback. We don't rely on
+        scratchpad shape here because the runner in done_guards always
+        falls through to build_final_output, regardless of what scratchpad
+        looks like.
+        """
+        norm = (text or "").strip().lower()
+        if not norm:
+            return True
+        router_entry = next(
+            (e for e in self.state.scratchpad if e.role == "router"),
+            None,
+        )
+        if router_entry is None:
+            return False
+        cat = (router_entry.output or "").strip().lower()
+        if not cat:
+            return False
+        if norm == cat:
+            return True
+        # build_final_output step-by-step format on a bare scratchpad
+        # produces "### Step 0: router/classify\n{category}". Detect that.
+        if "router/classify" in norm and cat in norm:
+            return True
+        return False
 
     def _chat_fallback_stream(
         self, user_message: str, opts: "RunOptions",
