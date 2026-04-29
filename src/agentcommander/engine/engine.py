@@ -18,7 +18,6 @@ from typing import Any, Iterator
 
 from agentcommander.db.repos import (
     audit,
-    get_role_assignment,
     insert_pipeline_run,
     update_pipeline_run,
 )
@@ -28,6 +27,7 @@ from agentcommander.engine.actions import (
     TOOL_ACTIONS,
 )
 from agentcommander.engine.role_call import RoleNotAssigned, call_role
+from agentcommander.engine.role_resolver import resolve as resolve_role
 from agentcommander.engine.scratchpad import build_final_output, compact_scratchpad, push_nudge
 from agentcommander.providers.base import ProviderError
 from agentcommander.tools.dispatcher import invoke as invoke_tool
