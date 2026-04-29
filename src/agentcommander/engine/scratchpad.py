@@ -100,6 +100,14 @@ def build_final_output(scratchpad: Iterable[ScratchpadEntry]) -> str:
     errors = [e for e in pad
               if (("Error" in (e.output or "")) or ("failed" in (e.output or "")))
               and e.action != "system_nudge"]
+    # Failed executions specifically — different surfacing path. The user
+    # cares about exit code + stderr, not the step echo (which is what was
+    # happening pre-Bug-C-followup: just "### Step 1: tool/execute\nexit
+    # code 1" with no actionable content).
+    failed_execs = [e for e in pad
+                    if e.action == "execute"
+                    and "successfully" not in (e.output or "").lower()
+                    and (e.output or "").strip()]
 
     # 3b. Other successful tool outputs that still carry a meaningful answer.
     # list_dir, read_file, and fetch all return useful content the user
