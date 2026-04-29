@@ -42,15 +42,15 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
     role_enum = Role(role) if isinstance(role, str) else role
     agent = get_agent(role_enum)
 
-    assignment = get_role_assignment(role_enum)
-    if assignment is None:
+    resolved = resolve_role(role_enum)
+    if resolved is None:
         raise RoleNotAssigned(
             f'Role "{role_enum.value}" is not assigned to a provider/model. '
             f"Configure via the CLI: /providers add ... && /roles set {role_enum.value} ..."
         )
 
-    provider = resolve(assignment["provider_id"])
-    model = assignment["model"]
+    provider = resolve(resolved.provider_id)
+    model = resolved.model
     system_prompt = get_role_prompt(role_enum)
 
     messages: list[ChatMessage] = [ChatMessage(role="system", content=system_prompt)]
