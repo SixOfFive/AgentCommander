@@ -18,8 +18,9 @@ from urllib.parse import urlparse
 from agentcommander.db.repos import audit, list_providers, upsert_provider
 from agentcommander.providers.base import rebuild_from_db
 from agentcommander.safety.host_validator import validate_provider_host
-from agentcommander.tui.ansi import style, write, writeln
+from agentcommander.tui.ansi import style, writeln
 from agentcommander.tui.render import render_error, render_system_line
+from agentcommander.tui.status_bar import read_line_at_bottom
 from agentcommander.types import ProviderConfig
 
 DEFAULT_OLLAMA_ENDPOINT = "http://127.0.0.1:11434"
