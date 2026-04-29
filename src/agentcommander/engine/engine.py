@@ -29,9 +29,19 @@ from agentcommander.engine.actions import (
 from agentcommander.engine.role_call import RoleNotAssigned, call_role
 from agentcommander.engine.role_resolver import resolve as resolve_role
 from agentcommander.engine.scratchpad import build_final_output, compact_scratchpad, push_nudge
-from agentcommander.providers.base import ProviderError
+from agentcommander.providers.base import (
+    ChatMessage,
+    ProviderError,
+    resolve as resolve_provider,
+)
 from agentcommander.tools.dispatcher import invoke as invoke_tool
 from agentcommander.types import LoopState, OrchestratorDecision, Role, ScratchpadEntry
+
+
+CHAT_FALLBACK_SYSTEM_PROMPT = (
+    "You are a helpful assistant in a CLI. Respond directly and concisely "
+    "to the user's message. Plain text only — no JSON, no markdown headers."
+)
 
 
 CATEGORY_MAX_ITERATIONS: dict[str, int] = {
