@@ -1090,8 +1090,112 @@ def cmd_db(ctx: CommandContext, args: list[str]) -> None:
             size_kb = os.path.getsize(target) / 1024
             render_system_line(f"backup written: {style('accent', target)} "
                                + style("muted", f"({size_kb:.1f} KB)"))
+            render_system_line(style("muted",
+                "  note: backup is a byte-level copy — preserves corruption "
+                "if the source is damaged. For data recovery use /db salvage."))
         except (sqlite3.DatabaseError, OSError) as exc:
             render_system_line(style("warn", f"backup failed: {exc}"))
+        return
+
+    if sub == "salvage":
+        # Row-by-row export to a fresh DB. Unlike /db backup (byte-copy),
+        # this skips unreadable rows and preserves whatever the corrupt
+        # file can still serve, giving a working DB on the other side.
+        if len(args) < 2:
+            render_system_line("usage: /db salvage <path-to-new-file>")
+            return
+        target = args[1]
+        if os.path.exists(target):
+            render_system_line(style("warn",
+                f"refusing to overwrite existing file: {target}"))
+            return
+        try:
+            from pathlib import Path as _P
+            schema_path = _P(__file__).resolve().parents[1] / "db" / "schema.sql"
+            schema_sql = schema_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            render_system_line(style("warn", f"can't read schema: {exc}"))
+            return
+        src = get_db()
+        try:
+            dst = sqlite3.connect(target)
+        except sqlite3.DatabaseError as exc:
+            render_system_line(style("warn", f"can't create salvage file: {exc}"))
+            return
+        try:
+            dst.executescript(schema_sql)
+            # Apply the same idempotent column adds the live init does, so
+            # the salvage target has the modern schema even if the corrupt
+            # source predates a column.
+            for ddl in (
+                "ALTER TABLE role_assignments ADD COLUMN context_window_tokens INTEGER",
+            ):
+                try:
+                    dst.execute(ddl)
+                except sqlite3.OperationalError:
+                    pass
+            tables = [
+                "providers", "config", "role_assignments", "conversations",
+                "messages", "scratchpad_entries", "fs_permissions",
+                "audit_log", "token_usage", "pipeline_runs",
+                "pipeline_steps", "model_hints", "operational_rules",
+            ]
+            render_system_line(f"salvaging to {style('accent', target)} …")
+            grand_saved = 0
+            grand_failed = 0
+            for tbl in tables:
+                try:
+                    cur = src.execute(f"SELECT * FROM {tbl}")
+                    cols = [d[0] for d in cur.description]
+                except sqlite3.DatabaseError as exc:
+                    render_system_line(style("warn",
+                        f"  {tbl}: cannot SELECT — {exc}"))
+                    continue
+                placeholders = ", ".join(["?"] * len(cols))
+                col_list = ", ".join(cols)
+                insert = f"INSERT INTO {tbl} ({col_list}) VALUES ({placeholders})"
+                saved = 0
+                failed = 0
+                # Page rows in chunks via fetchmany so a corrupt page
+                # doesn't kill the entire SELECT — we keep going.
+                while True:
+                    try:
+                        rows = cur.fetchmany(200)
+                    except sqlite3.DatabaseError:
+                        failed += 1
+                        break
+                    if not rows:
+                        break
+                    for r in rows:
+                        try:
+                            dst.execute(insert, tuple(r))
+                            saved += 1
+                        except sqlite3.DatabaseError:
+                            failed += 1
+                dst.commit()
+                grand_saved += saved
+                grand_failed += failed
+                line = f"  {tbl}: salvaged {saved}"
+                if failed:
+                    line += f"  (skipped {failed} unreadable)"
+                render_system_line(line)
+            render_system_line(
+                style("muted", f"  total: {grand_saved} rows recovered, "
+                               f"{grand_failed} skipped"))
+            try:
+                final_check = dst.execute("PRAGMA integrity_check").fetchone()
+                render_system_line(style("muted",
+                    f"  salvage integrity: {final_check[0] if final_check else '?'}"))
+            except sqlite3.DatabaseError:
+                pass
+            render_system_line(style("muted",
+                "  to switch to the salvage DB: /db reset (archives the corrupt one), "
+                "then copy your salvage file over the empty one and restart"))
+        finally:
+            try:
+                dst.close()
+            except sqlite3.DatabaseError:
+                pass
         return
 
     if sub == "reset":
