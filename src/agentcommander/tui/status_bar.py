@@ -277,12 +277,26 @@ class StatusBar:
         # tally is set; "ctx —/M" when only the cap is known (e.g. between
         # the role-start signal and the first prompt-tokens reading).
         ctx_part = ""
+        # ctx N/M plus an optional fill-bar. The bar's plain form (used for
+        # right-alignment math) and styled form (with fill-level coloring)
+        # are computed together so the visible width stays consistent.
+        ctx_part = ""
+        ctx_part_styled = ""
         if s.context_now and s.context_cap_min:
-            ctx_part = f"ctx {_humanize(s.context_now)}/{_humanize(s.context_cap_min)}"
+            text = f"ctx {_humanize(s.context_now)}/{_humanize(s.context_cap_min)}"
+            bar_plain, bar_styled = _render_ctx_bar(s.context_now, s.context_cap_min)
+            ctx_part = f"{text} {bar_plain}" if bar_plain else text
+            ctx_part_styled = (
+                f"{style('muted', text)} {bar_styled}"
+                if bar_styled
+                else style("muted", text)
+            )
         elif s.context_cap_min:
             ctx_part = f"ctx —/{_humanize(s.context_cap_min)}"
+            ctx_part_styled = style("muted", ctx_part)
         elif s.context_now:
             ctx_part = f"ctx {_humanize(s.context_now)}"
+            ctx_part_styled = style("muted", ctx_part)
 
         # Run timer: live elapsed while the pipeline is active, otherwise the
         # last completed run's duration (so the user can see "that took X").
@@ -305,12 +319,11 @@ class StatusBar:
         # Re-render with ANSI so the role marker pops.
         styled_role = style("accent", role_part) if role_part else ""
         styled_tokens = style("muted", token_part)
-        styled_ctx = style("muted", ctx_part) if ctx_part else ""
         styled_run = style("muted", run_part)
         styled_total = style("muted", total_part)
 
         styled_parts = [p for p in
-                        (styled_role, styled_tokens, styled_ctx,
+                        (styled_role, styled_tokens, ctx_part_styled,
                          styled_run, styled_total) if p]
         sep = style("rule", "  ·  ")
         styled = sep.join(styled_parts)
