@@ -496,6 +496,20 @@ def run_tui() -> int:
     bar.set_workdir(state.get("working_dir"))
 
     while not state["should_exit"]:
+        # Drain any prompt the user pre-typed during the previous run before
+        # asking for fresh input.
+        queued = state.pop("queued_next", None)
+        if queued is not None:
+            try:
+                _handle_input(state, queued)
+            except KeyboardInterrupt:
+                writeln()
+            except Exception as exc:  # noqa: BLE001
+                render_error(f"{type(exc).__name__}: {exc}")
+                if state.get("debug"):
+                    traceback.print_exc()
+            continue
+
         line = _read_line()
         if line is None:
             writeln()
