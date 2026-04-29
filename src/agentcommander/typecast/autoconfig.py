@@ -358,7 +358,9 @@ def apply_autoconfigure(
         if existing and existing.get("is_override"):
             user_overrides[role.value] = existing["model"]
             continue
-        best, best_score = _best_pick_for_role(role, candidates)
+        best, best_score = _best_pick_for_role(
+            role, candidates, min_context=min_context,
+        )
         assigned = False
         if best is not None:
             for threshold in range(
