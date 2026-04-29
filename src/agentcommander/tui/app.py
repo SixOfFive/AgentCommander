@@ -215,7 +215,11 @@ def _handle_in_run_command(line: str, state: dict,
 
 def _run_pipeline(state: dict, user_message: str) -> None:
     conv_id = _ensure_conversation(state)
-    append_message(conv_id, "user", user_message)
+    # Capture the new `messages` row id so the engine can tag the
+    # router/classify scratchpad entry with it — the join key between the
+    # user-view (full-fidelity, never compacted) and the model-view
+    # (the scratchpad, which compaction can rewrite).
+    user_msg = append_message(conv_id, "user", user_message)
 
     bar = get_status_bar()
     bar.reset_run()
