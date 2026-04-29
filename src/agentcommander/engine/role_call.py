@@ -30,7 +30,8 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
               json_mode: bool | None = None,
               num_ctx: int | None = None,
               on_delta: Callable[[str], None] | None = None,
-              on_finish: Callable[[int | None, int | None], None] | None = None) -> str:
+              on_finish: Callable[[int | None, int | None], None] | None = None,
+              should_cancel: Optional[Callable[[], bool]] = None) -> str:
     """Invoke the given role through its assigned provider+model.
 
     Returns the full assistant-content string. Streams deltas through
