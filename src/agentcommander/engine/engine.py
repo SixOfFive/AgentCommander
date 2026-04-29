@@ -50,7 +50,10 @@ class RunOptions:
     working_directory: str | None = None
     # Optional live hooks. Synchronous; should not block.
     #   on_role_delta(role, delta_text) — every streamed token from the active role
-    #   on_role_start(role, model)      — fired when a role call begins
+    #   on_role_start(role, model, num_ctx) — fired when a role call begins;
+    #                                       num_ctx is the configured context
+    #                                       window for this role (None to use
+    #                                       the provider's default)
     #   on_role_end(role, model, prompt_tokens, completion_tokens) — when it finishes
     #   on_context_update(current, cap_min) — token-count of the next prompt being sent
     on_role_delta: "Any | None" = None
