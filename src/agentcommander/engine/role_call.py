@@ -10,7 +10,7 @@ adaptation.
 from __future__ import annotations
 
 import time
-from typing import Callable
+from typing import Callable, Optional
 
 from agentcommander.agents import get_agent, get_role_prompt
 from agentcommander.agents.manifest import OutputContract
