@@ -71,11 +71,42 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     target = Path(db_path) if db_path else _project_db_dir() / "db.sqlite"
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(str(target), check_same_thread=False, isolation_level=None)
+    # Single-instance lock: prevents two ac.bat processes from opening the
+    # same project DB at once. The original corruption ("Tree 21 page 40
+    # btreeInitPage error 11") came from concurrent test sessions plus a
+    # timeout kill during WAL checkpoint — exactly what this guards against.
+    # The lock auto-releases when the process exits (handle goes away).
+    _acquire_db_lock(target)
+
+    conn = sqlite3.connect(
+        str(target),
+        check_same_thread=False,
+        isolation_level=None,
+        # Block waiting up to 5s for a busy DB instead of failing immediately —
+        # important when the engine worker thread and the TUI main thread
+        # both write (e.g. user message + scratchpad entry on the same turn).
+        timeout=5.0,
+    )
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA synchronous = NORMAL")
+    # synchronous=FULL forces fsync after every commit. This is what stops
+    # WAL/checkpoint state from getting torn when the process is killed
+    # mid-write. Slightly slower than NORMAL on slow disks; on SSDs the
+    # difference is unmeasurable for our write patterns.
+    conn.execute("PRAGMA synchronous = FULL")
+    # Extra runtime corruption detection — cheap insurance.
+    try:
+        conn.execute("PRAGMA cell_size_check = ON")
+    except sqlite3.DatabaseError:
+        pass
+    # WAL autocheckpoint at 1000 pages (default) is fine. Force a checkpoint
+    # on first open so any leftover WAL from a prior crashed run gets folded
+    # back into the main DB before we touch it.
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except sqlite3.DatabaseError:
+        pass
 
     schema_path = Path(__file__).with_name("schema.sql")
     schema_sql = schema_path.read_text(encoding="utf-8")
