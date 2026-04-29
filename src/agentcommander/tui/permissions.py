@@ -52,27 +52,69 @@ _session_cache: dict[tuple[str, Operation], _Cached] = {}
 
 
 def _load_persisted(path: str, op: Operation) -> _Cached | None:
-    row = get_db().execute(
+    """Look up a persisted decision for ``(path, op)``.
+
+    Resolution order:
+      1. Exact match on ``path``  (any scope)
+      2. Subtree match on any ancestor of ``path`` whose row has
+         ``scope='subtree'`` — closest ancestor wins so a more-specific
+         subtree allow overrides a broader deny.
+
+    The subtree walk lets the user (or a setup script) say "allow write
+    everywhere under /home/me/projects/foo" with one row instead of one
+    per file.
+    """
+    db = get_db()
+    # 1. Exact path match.
+    row = db.execute(
         "SELECT decision FROM fs_permissions WHERE path = ? AND operation = ?",
         (path, op),
     ).fetchone()
-    if row is None:
-        return None
-    decision = row["decision"]
-    if decision not in ("allow", "deny"):
-        return None
-    return _Cached(decision=decision, persisted=True)
+    if row is not None and row["decision"] in ("allow", "deny"):
+        return _Cached(decision=row["decision"], persisted=True)
+
+    # 2. Subtree match — walk parents from nearest to root, return the
+    # first one with a subtree-scoped row. We don't include `path` itself
+    # again here (already matched above as exact).
+    from pathlib import Path
+    p = Path(path)
+    if not p.is_absolute():
+        p = p.resolve()
+    for ancestor in p.parents:
+        row = db.execute(
+            "SELECT decision FROM fs_permissions "
+            "WHERE path = ? AND operation = ? AND scope = 'subtree'",
+            (str(ancestor), op),
+        ).fetchone()
+        if row is not None and row["decision"] in ("allow", "deny"):
+            return _Cached(decision=row["decision"], persisted=True)
+    return None
 
 
-def _persist(path: str, op: Operation, decision: Decision) -> None:
+def _persist(path: str, op: Operation, decision: Decision,
+             scope: str = "exact") -> None:
     import time
+    if scope not in ("exact", "subtree"):
+        scope = "exact"
     get_db().execute(
         "INSERT INTO fs_permissions (path, operation, decision, scope, created_at) "
-        "VALUES (?, ?, ?, 'exact', ?) "
+        "VALUES (?, ?, ?, ?, ?) "
         "ON CONFLICT(path, operation) DO UPDATE SET "
-        "  decision = excluded.decision, created_at = excluded.created_at",
-        (path, op, decision, int(time.time() * 1000)),
+        "  decision = excluded.decision, scope = excluded.scope, "
+        "  created_at = excluded.created_at",
+        (path, op, decision, scope, int(time.time() * 1000)),
     )
+
+
+def grant_subtree(path: str, op: Operation, decision: Decision = "allow") -> None:
+    """Public helper: persist a subtree-scoped allow/deny under ``path``.
+
+    Used by setup scripts and the test harness to pre-authorize a sandbox
+    directory without an interactive prompt. Path is normalized to absolute.
+    """
+    _persist(_abs(path), op, decision, scope="subtree")
+    # Ensure cache for this exact path is consistent
+    _session_cache[(_abs(path), op)] = _Cached(decision=decision, persisted=True)
 
 
 def _abs(path: str) -> str:
