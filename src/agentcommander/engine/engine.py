@@ -562,12 +562,34 @@ class PipelineRun:
                     try:
                         yield from self._dispatch_tool(decision, iteration, opts)
                     except Exception as exc:
-                        # PermissionDenied: user said "Deny" — halt the pipe.
+                        # PermissionDenied: the user (or the non-TTY auto-deny)
+                        # said no. Halt the pipeline cleanly with a friendlier
+                        # synthesis instead of a raw error line.
                         if type(exc).__name__ == "PermissionDenied":
-                            yield PipelineEvent(
-                                type="error",
-                                error=f"halted by user: {exc}",
+                            denied_path = getattr(exc, "path", None)
+                            denied_op = getattr(exc, "operation", decision.action)
+                            target = denied_path or decision.path or decision.url or decision.input or "?"
+                            # Match the "halted: permission denied" wording —
+                            # we don't know whether the user actually said
+                            # "Deny" interactively or whether the non-TTY
+                            # auto-deny kicked in, so don't claim either.
+                            error_msg = f"halted: permission denied for {denied_op} {target}"
+                            yield PipelineEvent(type="error", error=error_msg)
+                            # Friendly final so the user sees an actual
+                            # ● AgentCommander reply rather than just the
+                            # raw error line scrolling off.
+                            final_msg = (
+                                f"I couldn't complete that — permission for "
+                                f"`{denied_op}` on `{target}` was denied "
+                                "(or auto-denied because stdin isn't an "
+                                "interactive terminal).\n\n"
+                                "Next steps:\n"
+                                f"  - run AgentCommander interactively and "
+                                f"choose [a] Always or [t] Yes once when prompted\n"
+                                f"  - or set a writable working directory "
+                                f"with `/workdir <path>`"
                             )
+                            yield PipelineEvent(type="done", final=final_msg)
                             update_pipeline_run(
                                 self.run_id, status="cancelled",
                                 iterations=iteration,
