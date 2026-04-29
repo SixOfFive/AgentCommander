@@ -72,34 +72,64 @@ def _session_context_override() -> int | None:
         return None
 
 
+def _session_ceiling_tokens() -> int | None:
+    """Read the autoconfig-derived session ceiling (smallest training
+    contextLength across picked models). Persisted in the config table by
+    ``_print_session_context_summary`` at startup. Used as the *default*
+    num_ctx when no explicit /context override or per-role binding exists,
+    so every model runs with the announced ceiling instead of falling
+    back to Ollama's 2048/4096 default.
+    """
+    from agentcommander.db.repos import get_config  # lazy: avoid circulars
+    raw = get_config("session_ceiling_tokens", None)
+    if raw is None:
+        return None
+    try:
+        n = int(raw)
+        return n if n > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def resolve(role: Role | str) -> ResolvedRole | None:
     """Look up the (provider, model) bound to a role. Override beats autoconfig.
 
     Returns None if neither tier has a binding.
 
-    ``context_window_tokens`` precedence:
-      1. session override from ``/context <N>`` — applies uniformly to every
-         role this session
+    ``context_window_tokens`` precedence (highest → lowest):
+      1. session override from ``/context <N>`` — uniform for every role
       2. per-role override persisted on ``role_assignments`` (set by
-         ``/autoconfig --mincontext`` or by ``/roles set`` with a context)
-      3. None — provider falls back to its built-in default
+         ``/autoconfig --mincontext`` or ``/roles set`` with a context)
+      3. autoconfig session ceiling — the smallest training contextLength
+         across picked models, computed at startup. Without this, the bar
+         would announce e.g. "8k" but providers would actually receive
+         num_ctx=None and fall back to Ollama's 2048/4096 default.
+      4. None — provider's built-in default (only when no autoconfig has
+         run yet, e.g. before first /providers add).
     """
     from agentcommander.db.repos import get_role_assignment  # lazy: avoid circulars
 
     role_enum = Role(role) if isinstance(role, str) else role
     session_ctx = _session_context_override()
+    ceiling = _session_ceiling_tokens()
+
+    def _pick_ctx(per_role_ctx: int | None) -> int | None:
+        if session_ctx is not None:
+            return session_ctx
+        if per_role_ctx is not None:
+            return per_role_ctx
+        return ceiling
 
     # 1. DB override (user-set)
     a = get_role_assignment(role_enum)
     if a is not None:
         per_role_ctx = a.get("context_window_tokens")
-        ctx = session_ctx if session_ctx is not None else per_role_ctx
         return ResolvedRole(
             role=role_enum,
             provider_id=a["provider_id"],
             model=a["model"],
             kind="override",
-            context_window_tokens=ctx,
+            context_window_tokens=_pick_ctx(per_role_ctx),
         )
 
     # 2. In-memory autoconfig
@@ -110,7 +140,7 @@ def resolve(role: Role | str) -> ResolvedRole | None:
             provider_id=pair[0],
             model=pair[1],
             kind="auto",
-            context_window_tokens=session_ctx,
+            context_window_tokens=_pick_ctx(None),
         )
 
     return None
