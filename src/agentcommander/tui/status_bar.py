@@ -207,6 +207,15 @@ class StatusBar:
         if not self._enabled or not self._installed:
             return
 
+        # Refresh the live run timer from the wall clock. This is why the
+        # TUI loop calls redraw() once per second during a pipeline — without
+        # that periodic call, the timer would only advance on engine events
+        # (role start/end, token chunks).
+        if self.state.pipeline_running and self.state.run_started_at is not None:
+            self.state.run_elapsed_ms = int(
+                (time.time() - self.state.run_started_at) * 1000
+            )
+
         # Resize-aware: re-pin the scroll region if the terminal changed.
         cols, rows = term_size()
         if (cols, rows) != (self._cols, self._rows):
