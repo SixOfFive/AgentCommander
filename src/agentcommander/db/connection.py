@@ -285,13 +285,68 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
 
 
 def close_db() -> None:
+    """Close the connection cleanly: WAL checkpoint, close handle, release
+    the file lock. Idempotent — safe to call multiple times.
+
+    Critical for corruption-avoidance: a process killed without checkpointing
+    can leave WAL/main-DB out of sync. close_db forces a TRUNCATE checkpoint
+    so the WAL is fully merged before the handle goes away.
+    """
     global _db, _db_path
     if _db is not None:
         try:
+            try:
+                _db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.DatabaseError:
+                pass
             _db.close()
         finally:
             _db = None
             _db_path = None
+    _release_db_lock()
+
+
+def _install_shutdown_hooks() -> None:
+    """Register handlers that close the DB on graceful AND signal-induced
+    exits. Belt-and-braces: atexit fires on normal Python shutdown; the
+    signal handlers catch the cases atexit might miss (Ctrl-C twice,
+    Windows ``timeout`` kill, parent shell teardown).
+    """
+    import atexit
+    atexit.register(close_db)
+    try:
+        import signal
+        # SIGINT and SIGTERM are the common termination signals. We
+        # re-raise after closing so Python's normal shutdown path runs
+        # (otherwise atexit handlers wouldn't fire on the same signal).
+        def _on_signal(signum, _frame):  # type: ignore[no-untyped-def]
+            try:
+                close_db()
+            finally:
+                # Restore default handler and re-raise so the process exits
+                # with the conventional status (128 + signum on POSIX).
+                try:
+                    signal.signal(signum, signal.SIG_DFL)
+                    os.kill(os.getpid(), signum)
+                except Exception:  # noqa: BLE001
+                    pass
+        for sig_name in ("SIGINT", "SIGTERM", "SIGBREAK"):
+            sig = getattr(signal, sig_name, None)
+            if sig is not None:
+                try:
+                    signal.signal(sig, _on_signal)
+                except (ValueError, OSError):
+                    # Some hosts (threaded callers, IDEs) don't allow signal
+                    # registration; fail open.
+                    pass
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# Register shutdown hooks once when the module is imported. Re-registering
+# is harmless (atexit dedupes by callable id), but importing this module
+# multiple times would only register once thanks to Python module caching.
+_install_shutdown_hooks()
 
 
 def db_path() -> Path | None:
