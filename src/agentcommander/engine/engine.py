@@ -334,11 +334,12 @@ class PipelineRun:
         # Look up resolved (provider, model) for status events.
         rr = resolve_role(role)
         model_name = rr.model if rr else "?"
+        num_ctx = rr.context_window_tokens if rr else None
 
         # on_role_start
         if opts.on_role_start is not None:
             try:
-                opts.on_role_start(role.value, model_name)
+                opts.on_role_start(role.value, model_name, num_ctx)
             except Exception:  # noqa: BLE001
                 pass
 
