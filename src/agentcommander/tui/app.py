@@ -271,40 +271,85 @@ def _run_pipeline(state: dict, user_message: str) -> None:
     worker = threading.Thread(target=_runner, daemon=True, name="ac-pipeline")
     worker.start()
 
-    typed = ""
-    render_system_line(style("muted", "  (type /stop and press Enter to halt this run)"))
+    typed_buffer = ""
+    legacy_buffer = ""  # only used when char-mode isn't available
 
-    while True:
+    with _pipeline_input_mode() as raw_ready:
+        if raw_ready:
+            bar.set_pending_input("")
+            render_system_line(style("muted",
+                "  (type your next prompt while this runs — Enter queues it · /stop halts)"))
+        else:
+            render_system_line(style("muted",
+                "  (type /stop and press Enter to halt this run)"))
+
         try:
-            kind, data = events_q.get(timeout=0.15)
-        except queue.Empty:
-            chunk = _poll_stdin_chunk()
-            if chunk:
-                typed += chunk
-                if any(ch in typed for ch in ("\n", "\r")):
-                    line = typed.replace("\r", "\n").split("\n", 1)[0].strip()
-                    typed = ""
-                    if line == "/stop":
-                        cancel_event.set()
-                        render_system_line(style("warn", "  /stop received — halting the pipeline…"))
-                    elif line:
-                        # Anything else typed mid-run is dropped with a hint.
-                        render_system_line(style("muted",
-                            f'  ignored "{line}" — only /stop is recognized while a run is active'))
-            continue
+            while True:
+                try:
+                    kind, data = events_q.get(timeout=0.05 if raw_ready else 0.15)
+                except queue.Empty:
+                    chunk = _poll_stdin_chunk()
+                    if chunk:
+                        if raw_ready:
+                            typed_buffer, action = _consume_input_chunk(typed_buffer, chunk)
+                            bar.set_pending_input(typed_buffer)
+                            if action is not None and action[0] == "submit":
+                                line = action[1]
+                                if line == "/stop":
+                                    cancel_event.set()
+                                    render_system_line(style("warn",
+                                        "  /stop received — halting the pipeline…"))
+                                elif line:
+                                    state["queued_next"] = line
+                                    render_system_line(style("muted",
+                                        f"  queued for after this run: {line}"))
+                        else:
+                            legacy_buffer += chunk
+                            if any(c in legacy_buffer for c in ("\n", "\r")):
+                                line = legacy_buffer.replace("\r", "\n").split("\n", 1)[0].strip()
+                                legacy_buffer = ""
+                                if line == "/stop":
+                                    cancel_event.set()
+                                    render_system_line(style("warn",
+                                        "  /stop received — halting the pipeline…"))
+                                elif line:
+                                    state["queued_next"] = line
+                                    render_system_line(style("muted",
+                                        f"  queued for after this run: {line}"))
+                    continue
 
-        if kind == "end":
-            break
-        if kind == "event":
-            try:
-                render_event(data)
-            except Exception as exc:  # noqa: BLE001
-                render_error(f"render error: {exc}")
-        elif kind == "error":
-            render_error(str(data))
-            if state.get("debug"):
-                traceback.print_exc()
+                if kind == "end":
+                    break
+                if kind == "event":
+                    try:
+                        render_event(data)
+                    except Exception as exc:  # noqa: BLE001
+                        render_error(f"render error: {exc}")
+                elif kind == "error":
+                    render_error(str(data))
+                    if state.get("debug"):
+                        traceback.print_exc()
+        except KeyboardInterrupt:
+            # Ctrl-C during a run: ask the pipeline to stop, then drain so the
+            # worker thread exits cleanly before we return to the REPL.
+            cancel_event.set()
+            render_system_line(style("warn", "  ^C received — halting the pipeline…"))
+            while True:
+                try:
+                    kind, _ = events_q.get(timeout=0.5)
+                except queue.Empty:
+                    break
+                if kind == "end":
+                    break
 
+    # If the user had a half-typed line buffered when the run finished but
+    # never pressed Enter, surface it once so it isn't silently lost.
+    leftover = typed_buffer.strip() if raw_ready else legacy_buffer.strip()
+    if leftover and "queued_next" not in state:
+        render_system_line(style("muted",
+            f'  unsent input dropped: "{leftover}" (re-type it at the prompt)'))
+
+    bar.set_pending_input(None)
     state.pop("active_cancel", None)
     if final_holder["final"]:
         append_message(conv_id, "assistant", final_holder["final"])
