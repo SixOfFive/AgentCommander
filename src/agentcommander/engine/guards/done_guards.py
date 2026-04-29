@@ -29,8 +29,8 @@ _NEXT_DIRECTIVE_RX = re.compile(r"\n?\[NEXT:\s[^\]]*]")
 
 def _role_configured(role: str) -> bool:
     try:
-        from agentcommander.db.repos import get_role_assignment
-        return get_role_assignment(role) is not None
+        from agentcommander.engine.role_resolver import resolve as _resolve
+        return _resolve(role) is not None
     except Exception:  # noqa: BLE001
         return False
 
