@@ -932,19 +932,20 @@ class PipelineRun:
         return "\n\n".join(parts)
 
     def _is_router_echo(self, text: str) -> bool:
-        """True when ``text`` is essentially the router's classification
-        leaking out as the answer — either the bare category word
-        ("question", "chat") or a build_final_output step-by-step that
-        contains nothing but the router entry.
+        """True when ``text`` is a non-answer the chat fallback should
+        replace — either empty, just the router's classification word, the
+        legacy step-by-step echo, or build_final_output's "no summary"
+        placeholder (which fires when the scratchpad has no surfaceable
+        content — typically just a router entry).
 
         Used after _handle_done to detect "the pipeline produced no real
-        reply" so we can fire the chat fallback. We don't rely on
-        scratchpad shape here because the runner in done_guards always
-        falls through to build_final_output, regardless of what scratchpad
-        looks like.
+        reply" so we can fire the chat fallback.
         """
         norm = (text or "").strip().lower()
         if not norm:
+            return True
+        # build_final_output's terminal fallback when nothing else surfaced.
+        if "produced no summary" in norm:
             return True
         router_entry = next(
             (e for e in self.state.scratchpad if e.role == "router"),
@@ -957,8 +958,9 @@ class PipelineRun:
             return False
         if norm == cat:
             return True
-        # build_final_output step-by-step format on a bare scratchpad
-        # produces "### Step 0: router/classify\n{category}". Detect that.
+        # Legacy: build_final_output used to leak "### Step 0: router/classify"
+        # on bare scratchpads. Step 4 now excludes router rows, so this is a
+        # safety net for cases I haven't anticipated.
         if "router/classify" in norm and cat in norm:
             return True
         return False
