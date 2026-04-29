@@ -249,6 +249,24 @@ class PipelineRun:
 
                 # Done branch
                 if decision.action == "done":
+                    # Bare-scratchpad fallback: when the orchestrator emits
+                    # `done` with no input and the scratchpad has only the
+                    # router classification (typical for "hello" / casual
+                    # questions), the user would otherwise see the router's
+                    # category echoed back as the "answer". Stream a direct
+                    # chat call against the orchestrator's resolved model
+                    # so they get an actual reply.
+                    if (not (decision.input or "").strip()
+                            and self._is_bare_scratchpad()):
+                        yield from self._chat_fallback_stream(
+                            opts.user_message, opts,
+                        )
+                        update_pipeline_run(
+                            self.run_id, status="done",
+                            iterations=iteration, category=category,
+                        )
+                        return
+
                     final = self._handle_done(decision, opts.user_message)
                     if final is None:
                         yield PipelineEvent(type="guard", family="done",
