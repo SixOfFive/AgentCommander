@@ -1246,6 +1246,30 @@ def _build_registry() -> dict[str, SlashCommand]:
                     "is required or optional for the pipeline to run.",
         ),
         SlashCommand(
+            name="/vram", aliases=(),
+            summary="show VRAM usage: detected total, loaded models (live), role estimates",
+            handler=cmd_vram,
+            usage="/vram",
+            details=(
+                "Three sections, in order:\n"
+                "  1. Detected total VRAM (nvidia-smi / wmic / Apple Silicon).\n"
+                "  2. Live loaded-model table — pulled from each provider's\n"
+                "     list_loaded_details(). For Ollama this hits /api/ps and\n"
+                "     reports the daemon's actual size_vram per model, not an\n"
+                "     estimate. The keep_alive_until column shows when the\n"
+                "     model auto-unloads (5m default — see /autoconfig docs).\n"
+                "  3. Catalog estimate for any model that's role-assigned but\n"
+                "     not currently loaded. estimatedVramGb is the model's\n"
+                "     base footprint at a small num_ctx; actual usage scales\n"
+                "     up with context size and isn't shown here.\n"
+                "\n"
+                "Useful when you're trying to figure out why something is\n"
+                "slow (model swapping in/out) or when planning a /context\n"
+                "override (\"how much headroom do I actually have?\")."
+            ),
+            examples=("/vram",),
+        ),
+        SlashCommand(
             name="/tools", aliases=(),
             summary="list registered tools",
             handler=cmd_tools,
