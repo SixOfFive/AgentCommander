@@ -24,21 +24,66 @@ MAX_OUTPUT_BYTES = 200_000
 DEFAULT_TIMEOUT_S = 60
 MAX_TIMEOUT_S = 600
 
-_RUNNERS: dict[str, tuple[str, str]] = {
-    # language → (file extension, command name)
-    "python": (".py", "python3"),
-    "py": (".py", "python3"),
-    "javascript": (".js", "node"),
-    "js": (".js", "node"),
-    "node": (".js", "node"),
-    "bash": (".sh", "bash"),
-    "sh": (".sh", "bash"),
-    "shell": (".sh", "bash"),
+_RUNNERS: dict[str, str] = {
+    # language alias → file extension
+    "python": ".py",
+    "py": ".py",
+    "javascript": ".js",
+    "js": ".js",
+    "node": ".js",
+    "bash": ".sh",
+    "sh": ".sh",
+    "shell": ".sh",
+}
+
+_LANG_FAMILY: dict[str, str] = {
+    "python": "python", "py": "python",
+    "javascript": "node", "js": "node", "node": "node",
+    "bash": "bash", "sh": "bash", "shell": "bash",
 }
 
 
-def _resolve_runner(language: str) -> tuple[str, str] | None:
-    return _RUNNERS.get(language.lower())
+def _resolve_python_cmd() -> list[str] | None:
+    """Pick a working Python interpreter prefix.
+
+    Windows: try ``py -3`` first (the Windows Python launcher), then
+    ``python``, then ``python3`` — matches ``ac.bat``'s resolution chain.
+    POSIX: ``python3`` first, then ``python``. Returns ``None`` when none
+    of them is on PATH; caller surfaces a clean error instead of letting
+    subprocess raise FileNotFoundError or, worse, exit code 9009 from a
+    Windows shell that didn't recognize the name.
+    """
+    if sys.platform == "win32":
+        py = shutil.which("py")
+        if py:
+            return [py, "-3"]
+    for name in ("python3", "python"):
+        path = shutil.which(name)
+        if path:
+            return [path]
+    return None
+
+
+def _resolve_runner(language: str) -> tuple[str, list[str]] | None:
+    """Return ``(file_extension, command_prefix)`` or None if the language
+    isn't recognized OR no interpreter is on PATH.
+    """
+    lang = language.lower()
+    ext = _RUNNERS.get(lang)
+    family = _LANG_FAMILY.get(lang)
+    if ext is None or family is None:
+        return None
+    if family == "python":
+        cmd = _resolve_python_cmd()
+        return (ext, cmd) if cmd else None
+    if family == "node":
+        node = shutil.which("node")
+        return (ext, [node]) if node else None
+    if family == "bash":
+        # Windows: Git Bash / WSL puts `bash` on PATH if installed.
+        b = shutil.which("bash")
+        return (ext, [b]) if b else None
+    return None
 
 
 def _wrap_with_prlimit(cmd: list[str]) -> list[str]:
