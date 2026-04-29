@@ -13,7 +13,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from agentcommander.providers.base import (
     ChatChunk,
