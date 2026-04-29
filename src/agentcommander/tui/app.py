@@ -372,7 +372,32 @@ def _run_pipeline(state: dict, user_message: str) -> None:
     bar.set_pending_input(None)
     state.pop("active_cancel", None)
     if final_holder["final"]:
-        append_message(conv_id, "assistant", final_holder["final"])
+        # Persist the assistant turn into the user-view (`messages`) AND
+        # drop a synthetic scratchpad entry pointing at it. The scratchpad
+        # row is what the next pipeline run picks up on hydrate, so the
+        # model sees "assistant said X" in the prior context.
+        assistant_msg = append_message(conv_id, "assistant", final_holder["final"])
+        try:
+            from agentcommander.db.repos import insert_scratchpad_entry
+            import time as _t
+            insert_scratchpad_entry(
+                conversation_id=conv_id,
+                run_id=None,
+                step=0,
+                role="assistant",
+                action="reply",
+                input_text=user_message,
+                output_text=final_holder["final"],
+                timestamp=_t.time(),
+                message_id=assistant_msg.id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            try:
+                from agentcommander.db.repos import audit
+                audit("scratchpad.assistant_persist_failed",
+                      {"error": f"{type(exc).__name__}: {exc}"})
+            except Exception:  # noqa: BLE001
+                pass
     bar.set_running(False)
 
 
