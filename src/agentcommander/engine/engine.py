@@ -544,6 +544,106 @@ class PipelineRun:
         # 'pass' — fall through (decision was mutated to a different action)
         return None
 
+    def _is_bare_scratchpad(self) -> bool:
+        """True when the scratchpad has nothing the user would want to see —
+        only the router classification and/or system nudges. Used to detect
+        the "trivial chat" case where falling back to ``build_final_output``
+        would echo the router's category as the answer.
+        """
+        for e in self.state.scratchpad:
+            if e.role in ("router", "tool"):
+                continue
+            if e.action == "system_nudge":
+                continue
+            return False
+        return True
+
+    def _chat_fallback_stream(
+        self, user_message: str, opts: "RunOptions",
+    ) -> Iterator["PipelineEvent"]:
+        """Stream a direct chat reply against the orchestrator's resolved
+        model, bypassing the orchestrator's JSON-heavy system prompt.
+
+        Used when the iteration loop reaches ``done`` with no payload AND
+        nothing meaningful in scratchpad — typical for casual greetings or
+        single-line questions that don't warrant a full pipeline.
+        """
+        rr = resolve_role(Role.ORCHESTRATOR)
+        if rr is None:
+            yield PipelineEvent(
+                type="error",
+                error="no orchestrator assigned — can't produce a reply",
+            )
+            return
+
+        model_name = rr.model
+        num_ctx = rr.context_window_tokens
+        marker_role = "chat"
+
+        if opts.on_role_start is not None:
+            try:
+                opts.on_role_start(marker_role, model_name, num_ctx)
+            except Exception:  # noqa: BLE001
+                pass
+
+        on_delta = None
+        if opts.on_role_delta is not None:
+            def on_delta(delta: str, _r: str = marker_role) -> None:
+                opts.on_role_delta(_r, delta)
+
+        provider = resolve_provider(rr.provider_id)
+        messages = [
+            ChatMessage(role="system", content=CHAT_FALLBACK_SYSTEM_PROMPT),
+            ChatMessage(role="user", content=user_message),
+        ]
+        collected: list[str] = []
+        prompt_tokens: int | None = None
+        completion_tokens: int | None = None
+        try:
+            for chunk in provider.chat(
+                model=model_name, messages=messages,
+                num_ctx=num_ctx, json_mode=False,
+            ):
+                if chunk.content:
+                    collected.append(chunk.content)
+                    if on_delta:
+                        on_delta(chunk.content)
+                if chunk.done:
+                    prompt_tokens = chunk.prompt_tokens
+                    completion_tokens = chunk.completion_tokens
+        except (ProviderError, Exception) as exc:  # noqa: BLE001
+            yield PipelineEvent(
+                type="error",
+                error=f"chat fallback failed: {type(exc).__name__}: {exc}",
+            )
+            return
+
+        if opts.on_role_end is not None:
+            try:
+                opts.on_role_end(
+                    marker_role, model_name,
+                    prompt_tokens or 0, completion_tokens or 0,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+        final = "".join(collected).strip()
+        if not final:
+            final = "(model returned no content)"
+
+        # Drop a record into the scratchpad so audits / postmortems can see
+        # that a chat-fallback fired instead of a real role chain.
+        self.state.scratchpad.append(ScratchpadEntry(
+            step=self.state.iteration,
+            role=marker_role,
+            action="reply",
+            input=user_message,
+            output=final,
+            timestamp=time.time(),
+        ))
+
+        yield PipelineEvent(type="done", final=final)
+
 
 def _decision_to_payload(decision: OrchestratorDecision, exec_code: str,
                         exec_language: str) -> dict[str, Any]:
