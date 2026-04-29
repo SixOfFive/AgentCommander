@@ -153,7 +153,8 @@ def get_provider(provider_id: str) -> ProviderConfig | None:
 def get_role_assignment(role: Role | str) -> dict[str, Any] | None:
     role_value = role.value if isinstance(role, Role) else role
     row = get_db().execute(
-        "SELECT role, provider_id, model, is_override FROM role_assignments WHERE role = ?",
+        "SELECT role, provider_id, model, is_override, context_window_tokens "
+        "FROM role_assignments WHERE role = ?",
         (role_value,),
     ).fetchone()
     if row is None:
@@ -163,31 +164,52 @@ def get_role_assignment(role: Role | str) -> dict[str, Any] | None:
         "provider_id": row["provider_id"],
         "model": row["model"],
         "is_override": bool(row["is_override"]),
+        "context_window_tokens": row["context_window_tokens"],
     }
 
 
 def set_role_assignment(role: Role | str, provider_id: str, model: str,
-                        is_override: bool = True) -> None:
+                        is_override: bool = True,
+                        context_window_tokens: int | None = None) -> None:
+    """Upsert one role's binding. ``context_window_tokens`` is the num_ctx
+    we want the provider to use; pass ``None`` to inherit the provider's
+    runtime default.
+    """
     role_value = role.value if isinstance(role, Role) else role
     get_db().execute(
-        "INSERT INTO role_assignments (role, provider_id, model, is_override, updated_at) "
-        "VALUES (?, ?, ?, ?, ?) "
+        "INSERT INTO role_assignments "
+        "  (role, provider_id, model, is_override, context_window_tokens, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(role) DO UPDATE SET "
         "  provider_id = excluded.provider_id, model = excluded.model, "
-        "  is_override = excluded.is_override, updated_at = excluded.updated_at",
-        (role_value, provider_id, model, 1 if is_override else 0, _now_ms()),
+        "  is_override = excluded.is_override, "
+        "  context_window_tokens = excluded.context_window_tokens, "
+        "  updated_at = excluded.updated_at",
+        (role_value, provider_id, model, 1 if is_override else 0,
+         context_window_tokens, _now_ms()),
     )
 
 
 def list_role_assignments() -> list[dict[str, Any]]:
     rows = get_db().execute(
-        "SELECT role, provider_id, model, is_override FROM role_assignments"
+        "SELECT role, provider_id, model, is_override, context_window_tokens "
+        "FROM role_assignments"
     ).fetchall()
     return [
         {"role": r["role"], "provider_id": r["provider_id"], "model": r["model"],
-         "is_override": bool(r["is_override"])}
+         "is_override": bool(r["is_override"]),
+         "context_window_tokens": r["context_window_tokens"]}
         for r in rows
     ]
+
+
+def clear_role_assignments() -> int:
+    """Delete every row in ``role_assignments``. Returns the number of rows
+    removed. Used by ``/autoconfig clear`` to wipe persisted picks before
+    rebuilding the in-memory autoconfig.
+    """
+    cur = get_db().execute("DELETE FROM role_assignments")
+    return cur.rowcount or 0
 
 
 # ─── Audit log ─────────────────────────────────────────────────────────────
