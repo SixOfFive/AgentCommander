@@ -881,8 +881,10 @@ class PipelineRun:
             final = "(model returned no content)"
 
         # Drop a record into the scratchpad so audits / postmortems can see
-        # that a chat-fallback fired instead of a real role chain.
-        self.state.scratchpad.append(ScratchpadEntry(
+        # that a chat-fallback fired instead of a real role chain. Persisted
+        # via _push_entry so this turn's reply is visible to the next turn's
+        # context build.
+        self._push_entry(ScratchpadEntry(
             step=self.state.iteration,
             role=marker_role,
             action="reply",
