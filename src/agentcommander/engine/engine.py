@@ -187,6 +187,65 @@ class PipelineRun:
         except AttributeError:
             return False
 
+    def _push_entry(self, entry: ScratchpadEntry) -> None:
+        """Append to in-memory scratchpad AND persist to ``scratchpad_entries``.
+
+        This is the model-view write path. The user-view (``messages``
+        table) is touched separately by the TUI; compaction operates only
+        on this side. DB persistence is best-effort — a transient SQLite
+        error must never crash the engine mid-run, so we audit + swallow.
+        """
+        self.state.scratchpad.append(entry)
+        try:
+            from agentcommander.db.repos import insert_scratchpad_entry
+            insert_scratchpad_entry(
+                conversation_id=self.opts.conversation_id,
+                run_id=self.run_id,
+                step=entry.step,
+                role=entry.role,
+                action=entry.action,
+                input_text=entry.input or "",
+                output_text=entry.output or "",
+                timestamp=entry.timestamp,
+                duration_ms=entry.duration_ms,
+                content=entry.content,
+                message_id=entry.message_id,
+                replaced_message_ids=entry.replaced_message_ids,
+            )
+        except Exception as exc:  # noqa: BLE001
+            try:
+                audit("scratchpad.persist_failed",
+                      {"error": f"{type(exc).__name__}: {exc}"})
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _hydrate_scratchpad_from_db(self) -> None:
+        """Load this conversation's prior scratchpad into ``state.scratchpad``.
+
+        Called once at the start of each run so the orchestrator/router/etc.
+        see the full conversation context when they read
+        ``compact_scratchpad`` for prompt-building. Replaced entries
+        (compaction artifacts) are filtered at the SQL layer.
+        """
+        try:
+            from agentcommander.db.repos import list_scratchpad_entries
+            rows = list_scratchpad_entries(self.opts.conversation_id)
+        except Exception:  # noqa: BLE001
+            return
+        for r in rows:
+            self.state.scratchpad.append(ScratchpadEntry(
+                step=r["step"],
+                role=r["role"],
+                action=r["action"],
+                input=r["input"] or "",
+                output=r["output"] or "",
+                timestamp=r["timestamp"],
+                duration_ms=r["duration_ms"],
+                content=r["content"],
+                message_id=r["message_id"],
+                replaced_message_ids=r["replaced_message_ids"],
+            ))
+
     def events(self) -> Iterator[PipelineEvent]:
         """Yield events from the pipeline run. Synchronous generator."""
         opts = self.opts
