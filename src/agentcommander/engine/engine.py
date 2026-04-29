@@ -680,9 +680,29 @@ class PipelineRun:
                 opts.on_role_delta(_r, delta)
 
         provider = resolve_provider(rr.provider_id)
+
+        # When the pipeline already did real work (fetch / execute / a role
+        # call) but build_final_output dropped it (because non-execute tool
+        # entries are filtered out, and the orchestrator emitted done before
+        # summarizing), surface that work to the chat model so it can
+        # actually answer using the data instead of producing a generic
+        # "I don't have access to …" reply.
+        context_block = self._scratchpad_context_block()
+        if context_block:
+            user_text = (
+                f"User asked: {user_message}\n\n"
+                f"--- Pipeline observations ---\n"
+                f"{context_block}\n"
+                f"--- End observations ---\n\n"
+                f"Answer the user's question using the data above. If the "
+                f"data is HTML or raw output, extract the answer from it."
+            )
+        else:
+            user_text = user_message
+
         messages = [
             ChatMessage(role="system", content=CHAT_FALLBACK_SYSTEM_PROMPT),
-            ChatMessage(role="user", content=user_message),
+            ChatMessage(role="user", content=user_text),
         ]
         collected: list[str] = []
         prompt_tokens: int | None = None
