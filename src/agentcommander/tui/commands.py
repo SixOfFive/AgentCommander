@@ -924,6 +924,39 @@ def _build_registry() -> dict[str, SlashCommand]:
             examples=("/typecast", "/typecast autoconfigure"),
         ),
         SlashCommand(
+            name="/context", aliases=("/ctx",),
+            summary="show / set / clear the session-wide num_ctx override",
+            handler=cmd_context,
+            usage="/context              # show current override\n"
+                  "/context <N>          # set the override (e.g. 32k, 128K, 65536)\n"
+                  "/context off          # clear (roles fall back to their own setting)",
+            details=(
+                "The session override is the num_ctx value sent to the provider on\n"
+                "every call this session. It beats per-role context_window_tokens\n"
+                "(set by /autoconfig --mincontext or /roles set), so a single\n"
+                "/context 32k re-pins every role at once without touching their\n"
+                "persisted bindings.\n"
+                "\n"
+                "Suffixes: k = 1024 tokens, m = 1024² (binary, matches the TypeCast\n"
+                "catalog's contextLength).\n"
+                "\n"
+                "If the value exceeds any picked model's training contextLength\n"
+                "from the catalog, every offending role/model is printed as a\n"
+                "warning. The override is still applied — your call. Beyond a\n"
+                "model's training window the provider may truncate the prompt or\n"
+                "refuse the request.\n"
+                "\n"
+                "Persistence: stored in the config table, survives restarts. The\n"
+                "startup banner reports it under \"/context override active\"."
+            ),
+            examples=(
+                "/context",
+                "/context 32k",
+                "/context 65536",
+                "/context off",
+            ),
+        ),
+        SlashCommand(
             name="/autoconfig", aliases=("/ac",),
             summary="run TypeCast autoconfigure with optional context-window filter",
             handler=cmd_autoconfig,
