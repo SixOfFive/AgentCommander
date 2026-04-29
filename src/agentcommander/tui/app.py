@@ -229,7 +229,7 @@ def _run_pipeline(state: dict, user_message: str) -> None:
                 try:
                     kind, data = events_q.get(timeout=0.05 if raw_ready else 0.15)
                 except queue.Empty:
-                    chunk = _poll_stdin_chunk()
+                    chunk = poll_chars()
                     if chunk:
                         if raw_ready:
                             typed_buffer, action = _consume_input_chunk(typed_buffer, chunk)
