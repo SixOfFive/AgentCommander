@@ -579,7 +579,7 @@ class PipelineRun:
             except Exception:  # noqa: BLE001
                 pass
 
-        self.state.scratchpad.append(ScratchpadEntry(
+        self._push_entry(ScratchpadEntry(
             step=iteration, role=role.value, action=decision.action,
             input=decision.input or "", output=output,
             timestamp=time.time(),
