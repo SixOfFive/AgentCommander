@@ -44,3 +44,9 @@ credentials.json
 # Local sandbox the user runs the agent against — never commit anything
 # the program wrote into its working directory.
 AgentTesting/
+
+# Project-local AgentCommander state (DB, fs permissions, etc).
+# Each working directory has its own .agentcommander/db.sqlite — keeps
+# providers, role assignments, and conversation history isolated per
+# project. The DB carries endpoints + api_keys; never commit it.
+.agentcommander/
