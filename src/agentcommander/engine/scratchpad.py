@@ -190,8 +190,16 @@ def build_final_output(scratchpad: Iterable[ScratchpadEntry]) -> str:
         if deduped and _same_head(deduped[-1].output or "", e.output or ""):
             continue
         deduped.append(e)
+    surfaced_already = bool(parts and (
+        parts[0].startswith("**Execution Output")
+        or any(p.startswith("**Execution failed") for p in parts)
+    ))
     for e in deduped[-3:]:
-        if e.action == "execute" and "successfully" in (e.output or "") and parts and parts[0].startswith("**Execution Output"):
+        # Skip the execute entry from the step echo when we already
+        # surfaced the success / failure block above. Without this, a
+        # failed execute would be shown twice — once as the formatted
+        # "Execution failed" block and once as a raw step echo.
+        if e.action == "execute" and surfaced_already:
             continue
         parts.append(f"### Step {e.step}: {e.role}/{e.action}\n"
                      f"{_clean_for_user(e.output or '')[:3000]}")
