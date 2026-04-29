@@ -71,15 +71,21 @@ def first_run_wizard() -> bool:
     else:
         attempts = 0
         endpoint: str | None = None
+        # Hint visible above the input row.
+        render_system_line(style("muted",
+            f"  Enter Ollama server URL (or press Enter for default {DEFAULT_OLLAMA_ENDPOINT}):"))
         while attempts < 3:
             attempts += 1
-            write(style("user_label", f"  Ollama server URL [default {DEFAULT_OLLAMA_ENDPOINT}]: "))
             try:
-                raw = input().strip()
-            except (EOFError, KeyboardInterrupt):
+                raw_or_none = read_line_at_bottom("ollama url ❯ ")
+            except KeyboardInterrupt:
                 writeln()
                 render_error("setup cancelled")
                 return False
+            if raw_or_none is None:
+                render_error("setup cancelled (EOF)")
+                return False
+            raw = raw_or_none.strip()
             if not raw:
                 endpoint = DEFAULT_OLLAMA_ENDPOINT
                 break
