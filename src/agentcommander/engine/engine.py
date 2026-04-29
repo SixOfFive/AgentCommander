@@ -41,7 +41,10 @@ from agentcommander.types import LoopState, OrchestratorDecision, Role, Scratchp
 
 CHAT_FALLBACK_SYSTEM_PROMPT = (
     "You are a helpful assistant in a CLI. Respond directly and concisely "
-    "to the user's message. Plain text only — no JSON, no markdown headers."
+    "to the user's message. Plain text only — no JSON, no markdown headers. "
+    "If the user message contains pipeline observations (raw HTML, JSON, "
+    "tool output), extract the answer from that data — do not claim you "
+    "lack access to information that is right there in the prompt."
 )
 
 
