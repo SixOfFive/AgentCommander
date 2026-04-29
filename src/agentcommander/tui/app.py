@@ -561,17 +561,30 @@ def run_tui() -> int:
     bar.set_workdir(state["working_dir"])
     bar.install()
 
-    # Pre-seed the bar's context cap from the persisted /context override
-    # (if any) so it shows on screen before any role call fires. The cap
-    # is also refreshed per-role at on_role_start.
+    # Pre-seed the bar's context cap so it shows on screen before any role
+    # call fires. Precedence matches _on_role_start: /context override
+    # first, otherwise the session ceiling computed at autoconfig time.
+    # Refreshed per-role at on_role_start using the same precedence.
+    seed_cap: int | None = None
     persisted_ctx = get_config("context_override_tokens", None)
     if isinstance(persisted_ctx, (int, str)):
         try:
-            persisted_int = int(persisted_ctx)
-            if persisted_int > 0:
-                bar.set_context(cap_min=persisted_int)
+            n = int(persisted_ctx)
+            if n > 0:
+                seed_cap = n
         except (TypeError, ValueError):
             pass
+    if seed_cap is None:
+        ceiling = get_config("session_ceiling_tokens", None)
+        if isinstance(ceiling, (int, str)):
+            try:
+                n = int(ceiling)
+                if n > 0:
+                    seed_cap = n
+            except (TypeError, ValueError):
+                pass
+    if seed_cap is not None:
+        bar.set_context(cap_min=seed_cap)
 
     catalog = get_catalog()
     render_banner(
