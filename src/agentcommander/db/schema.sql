@@ -35,6 +35,11 @@ CREATE TABLE IF NOT EXISTS role_assignments (
   provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
   model TEXT NOT NULL,
   is_override INTEGER NOT NULL DEFAULT 0,
+  -- Configured num_ctx for the provider (Ollama "options.num_ctx", etc.).
+  -- NULL = let the provider use its built-in default. Set by
+  -- `/autoconfig --mincontext N` so the agent uses the chosen context size
+  -- instead of whatever the runtime defaults to.
+  context_window_tokens INTEGER,
   updated_at INTEGER NOT NULL
 );
 
