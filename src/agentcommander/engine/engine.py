@@ -741,6 +741,14 @@ class PipelineRun:
 
         provider = resolve_provider(rr.provider_id)
 
+        # The chat fallback also gets the live tool registry appended so a
+        # user asking "what tools do you have?" via casual chat gets an
+        # honest answer rather than a hallucinated or generic list.
+        system_content = CHAT_FALLBACK_SYSTEM_PROMPT
+        appendix = tool_registry_appendix()
+        if appendix:
+            system_content = system_content.rstrip() + "\n" + appendix + "\n"
+
         # When the pipeline already did real work (fetch / execute / a role
         # call) but build_final_output dropped it (because non-execute tool
         # entries are filtered out, and the orchestrator emitted done before
