@@ -486,6 +486,60 @@ def terse_done_guard(scratchpad: list[ScratchpadEntry], iteration: int, max_iter
     return GuardVerdict(action="pass")
 
 
+_USER_REQUESTED_FILE_RX = re.compile(
+    r"\b(?:write|create|make|save|put|generate)(?:\s+a)?\s+(?:file\s+)?"
+    r"(?:called|named|at\s+|to\s+)?\s*"
+    r"['\"`]?([a-zA-Z0-9_\-/\\.]+\.(?:py|js|ts|html|css|json|sh|txt|csv|md|yaml|yml|toml))['\"`]?",
+    re.IGNORECASE,
+)
+
+
+def unwritten_file_guard(scratchpad: list[ScratchpadEntry], iteration: int,
+                           max_iter: int, decision: OrchestratorDecision,
+                           user_message: str) -> GuardVerdict:
+    """Catch the "execute-instead-of-write" pattern.
+
+    When the user explicitly names a file to write (``"write fizzbuzz.py"``,
+    ``"create config.json"``, etc.) but the orchestrator goes straight to
+    ``execute`` (which uses a tempfile) and emits ``done`` claiming the
+    file exists — no ``write_file`` for that path ever ran. Push the
+    orchestrator back to do the write before finishing.
+
+    Only fires when:
+      - user_message references a specific filename (not a vague "write
+        some code")
+      - no write_file in scratchpad has that filename in its input
+      - we still have iterations to spare
+    """
+    matches = _USER_REQUESTED_FILE_RX.findall(user_message or "")
+    if not matches:
+        return GuardVerdict(action="pass")
+    requested = {(m if isinstance(m, str) else m[0]).strip() for m in matches}
+    requested = {r for r in requested if r}
+    if not requested:
+        return GuardVerdict(action="pass")
+    written: set[str] = set()
+    for e in scratchpad:
+        if e.action == "write_file" and "Successfully" in (e.output or ""):
+            # Check if any requested filename appears in the write_file path
+            inp = (e.input or "")
+            for r in list(requested):
+                # Match by basename for cross-platform path comparison
+                if r.replace("\\", "/").lower() in inp.replace("\\", "/").lower():
+                    written.add(r)
+    missing = requested - written
+    if not missing or iteration >= max_iter - 2:
+        return GuardVerdict(action="pass")
+    files_str = ", ".join(sorted(missing))
+    push_system_nudge(scratchpad, iteration, "unwritten_file",
+                      f"STOP: the user asked for {files_str} to be written, but "
+                      f"no write_file action created {'them' if len(missing) > 1 else 'it'}. "
+                      f"Use write_file with the exact filename "
+                      f"{'(' + next(iter(missing)) + ')' if len(missing) == 1 else ''} "
+                      f"BEFORE finishing. Don't claim success without doing the write.")
+    return GuardVerdict(action="continue")
+
+
 def hallucinated_file_guard(scratchpad: list[ScratchpadEntry],
                               decision: OrchestratorDecision) -> GuardVerdict:
     text = decision.input or ""
