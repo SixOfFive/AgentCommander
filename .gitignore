@@ -15,12 +15,26 @@ dist/
 htmlcov/
 .tox/
 
-# AgentCommander runtime data
+# AgentCommander runtime data — never commit any of these.
+# Endpoints + API keys live in the SQLite DB inside the user-data dir
+# (XDG_DATA_HOME / %APPDATA% / Application Support); these patterns are
+# defence-in-depth for the case where someone points the DB at the repo.
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+agentcommander_data/
 typecast_cache/
+typecast/models-catalog.json
+.env
+.env.local
+.env.*.local
+secrets.json
+credentials.json
 
 .DS_Store
 .idea/
