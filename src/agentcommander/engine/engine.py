@@ -66,6 +66,11 @@ class RunOptions:
     conversation_id: str
     user_message: str
     working_directory: str | None = None
+    # ID of the row this user_message lives at in the `messages` table.
+    # When set, the engine tags the router/classify scratchpad entry with
+    # this id so the model-view (scratchpad) and user-view (messages) stay
+    # joined. None for runs not initiated through the REPL.
+    user_message_id: str | None = None
     # Optional live hooks. Synchronous; should not block.
     #   on_role_delta(role, delta_text) — every streamed token from the active role
     #   on_role_start(role, model, num_ctx) — fired when a role call begins;
