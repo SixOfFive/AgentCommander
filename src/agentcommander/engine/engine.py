@@ -205,7 +205,7 @@ class PipelineRun:
                 yield PipelineEvent(type="iteration", iteration=iteration)
 
                 try:
-                    decision = self._orchestrate()
+                    decision = self._orchestrate(opts)
                 except (ProviderError, RoleNotAssigned) as exc:
                     yield PipelineEvent(type="error", error=str(exc))
                     update_pipeline_run(self.run_id, status="failed",
