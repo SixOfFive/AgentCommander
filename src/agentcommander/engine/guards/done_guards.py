@@ -748,7 +748,7 @@ def run_done_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         lambda: asking_permission_guard(scratchpad, iteration, max_iter, decision, user_message),
         lambda: code_execution_guard(scratchpad, decision, user_message),
         lambda: file_readback_guard(scratchpad, decision, user_message),
-        lambda: multi_step_guard(scratchpad, iteration, user_message),
+        lambda: multi_step_guard(scratchpad, iteration, user_message, decision),
         lambda: plan_without_code_guard(scratchpad, decision),
         lambda: terse_done_guard(scratchpad, iteration, max_iter, decision, user_message),
         lambda: hallucinated_file_guard(scratchpad, decision),
