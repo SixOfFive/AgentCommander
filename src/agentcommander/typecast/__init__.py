@@ -11,8 +11,10 @@ return an empty catalog.
 """
 
 from agentcommander.typecast.autoconfig import (
+    AutoconfigApplied,
     AutoconfigSuggestion,
     ModelCandidate,
+    apply_autoconfigure,
     build_candidates,
     fits_available_vram,
     pick_default_model,
