@@ -118,10 +118,17 @@ def fits_available_vram(entry: dict[str, Any]) -> bool:
 
 
 def build_candidates(installed_model_ids: set[str]) -> list[ModelCandidate]:
-    """Build candidate list from the loaded catalog, filtered to installed models."""
+    """Build candidate list from the loaded catalog, filtered to installed models.
+
+    Banned models (per ``/autoconfig ban``) are dropped here so they're
+    invisible to every downstream picker — the default election, per-role
+    scoring, the threshold cascade. The user can still call them directly
+    via ``/roles set`` if they want.
+    """
     result = get_catalog()
     if result is None:
         return []
+    banned = get_banned_models()
     out: list[ModelCandidate] = []
     for model_id, entry in result.catalog.items():
         if model_id == "_meta":
@@ -129,6 +136,8 @@ def build_candidates(installed_model_ids: set[str]) -> list[ModelCandidate]:
         if not isinstance(entry, dict):
             continue
         if model_id not in installed_model_ids:
+            continue
+        if model_id in banned:
             continue
         out.append(ModelCandidate(model_id=model_id, entry=entry))
     return out
