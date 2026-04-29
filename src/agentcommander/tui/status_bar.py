@@ -228,14 +228,12 @@ class StatusBar:
             cap = f"[{_humanize(s.context_cap_min)}]" if s.context_cap_min else ""
             ctx_part = f"ctx {_humanize(s.context_now)} {cap}".strip()
 
-        wd_part = ""
-        if s.workdir:
-            wd = s.workdir
-            if len(wd) > 40:
-                wd = "…" + wd[-39:]
-            wd_part = f"[{wd}]"
+        # Working directory deliberately lives in the top banner, not here —
+        # the bottom row is reserved for run-time data (role, tokens, context)
+        # that changes during a pipeline. Keeping static info up top leaves
+        # room for future status fields without crowding.
 
-        plain_parts = [p for p in (role_part, token_part, ctx_part, wd_part) if p]
+        plain_parts = [p for p in (role_part, token_part, ctx_part) if p]
         plain = "  ·  ".join(plain_parts)
         # Right-align: pad with spaces on the left.
         pad = max(0, cols - len(plain))
@@ -247,9 +245,8 @@ class StatusBar:
         styled_role = style("accent", role_part) if role_part else ""
         styled_tokens = style("muted", token_part)
         styled_ctx = style("muted", ctx_part) if ctx_part else ""
-        styled_wd = style("muted", wd_part) if wd_part else ""
 
-        styled_parts = [p for p in (styled_role, styled_tokens, styled_ctx, styled_wd) if p]
+        styled_parts = [p for p in (styled_role, styled_tokens, styled_ctx) if p]
         sep = style("rule", "  ·  ")
         styled = sep.join(styled_parts)
 
