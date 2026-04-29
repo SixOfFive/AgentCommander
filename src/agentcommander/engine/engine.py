@@ -767,6 +767,7 @@ class PipelineRun:
             for chunk in provider.chat(
                 model=model_name, messages=messages,
                 num_ctx=num_ctx, json_mode=False,
+                should_cancel=self.is_cancelled,
             ):
                 if chunk.content:
                     collected.append(chunk.content)
