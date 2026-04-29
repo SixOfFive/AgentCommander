@@ -134,14 +134,25 @@ class StatusBar:
 
     # ── State updates ──────────────────────────────────────────────────────
 
-    def set_role(self, role: str | None, model: str | None) -> None:
+    def set_role(self, role: str | None, model: str | None,
+                 num_ctx: int | None = None) -> None:
+        """Mark which (role, model) is active. ``num_ctx`` updates the
+        displayed context-window cap when provided (so the bar shows
+        ``ctx N/M`` against the actual limit configured for this role)."""
         self.state.role = role
         self.state.model = model
+        if num_ctx is not None:
+            self.state.context_cap_min = num_ctx
         self.redraw()
 
     def add_tokens(self, *, prompt: int = 0, completion: int = 0) -> None:
         self.state.tokens_in += max(0, prompt)
         self.state.tokens_out += max(0, completion)
+        # Show the most recent call's prompt size as "current context use".
+        # Each role call ships its own input window, so the latest reading
+        # is the meaningful one — not a sum across calls.
+        if prompt > 0:
+            self.state.context_now = prompt
         self.redraw()
 
     def reset_run(self) -> None:
@@ -151,10 +162,22 @@ class StatusBar:
         self.state.tokens_out = 0
         self.state.context_now = 0
         self.state.pipeline_running = False
+        self.state.run_started_at = None
+        self.state.run_elapsed_ms = 0
         self.redraw()
 
     def set_running(self, running: bool) -> None:
+        was_running = self.state.pipeline_running
         self.state.pipeline_running = running
+        if running and not was_running:
+            self.state.run_started_at = time.time()
+            self.state.run_elapsed_ms = 0
+        elif not running and was_running:
+            if self.state.run_started_at is not None:
+                final_ms = int((time.time() - self.state.run_started_at) * 1000)
+                self.state.run_elapsed_ms = final_ms
+                self.state.total_elapsed_ms += final_ms
+            self.state.run_started_at = None
         self.redraw()
 
     def set_context(self, *, now: int | None = None, cap_min: int | None = None) -> None:
