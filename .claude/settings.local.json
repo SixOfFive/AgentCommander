@@ -42,7 +42,8 @@
       "Bash(py -3.14 -m unittest discover tests)",
       "Bash(curl -fsS --max-time 3 http://127.0.0.1:11434/api/tags)",
       "Bash(git push *)",
-      "Bash(git check-ignore *)"
+      "Bash(git check-ignore *)",
+      "Bash(awk '{print NR\": \"$0}')"
     ]
   }
 }

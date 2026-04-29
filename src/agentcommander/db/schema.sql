@@ -128,6 +128,50 @@ CREATE TABLE IF NOT EXISTS pipeline_steps (
 
 CREATE INDEX IF NOT EXISTS idx_pipeline_steps_run ON pipeline_steps(run_id, iteration);
 
+-- ─────────────────────────────────────────────────────────────────────────
+-- Scratchpad — the model-facing memory.
+--
+-- Every router/orchestrator decision, role call, and tool result becomes a
+-- row here. The user-view comes from `messages`; the model-view (what gets
+-- sent as the next prompt) is built from this table. Crucially:
+--
+--   * The user-view (`messages`) is NEVER touched by compaction. The user
+--     can scroll back and see every turn in full fidelity.
+--   * The model-view IS compactable: when the prompt would exceed num_ctx,
+--     the engine writes a synthetic "compacted summary" entry whose
+--     `replaced_message_ids` JSON-array points at the originals. The
+--     originals stay in the DB (replay/inspection), but the engine filters
+--     them out of the next prompt build.
+--
+-- `message_id` is the link between the two views: when an entry is the
+-- user's input or the assistant's final reply, this column holds the
+-- corresponding `messages.id`. For intermediate engine entries (router
+-- classification, tool calls, role outputs that aren't the final reply)
+-- it's NULL — those are model-view only.
+-- ─────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS scratchpad_entries (
+  id TEXT PRIMARY KEY,                                -- UUID per entry
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  run_id TEXT,                                        -- which pipeline run; NULL for backfilled
+  step INTEGER NOT NULL,
+  role TEXT NOT NULL,                                 -- "router" / "orchestrator" / role.value / "tool" / "system"
+  action TEXT NOT NULL,
+  input TEXT NOT NULL DEFAULT '',
+  output TEXT NOT NULL DEFAULT '',
+  duration_ms INTEGER,
+  content TEXT,                                       -- write_file content blob, when applicable
+  message_id TEXT,                                    -- FK to messages.id when this entry corresponds to a visible turn
+  replaced_message_ids TEXT,                          -- JSON array of original entry ids this row stands for (compacted summary)
+  is_replaced INTEGER NOT NULL DEFAULT 0,             -- 1 → hidden from prompt build (an earlier entry that compaction replaced)
+  timestamp REAL NOT NULL,                            -- engine-side wall-clock (matches ScratchpadEntry.timestamp)
+  created_at INTEGER NOT NULL                         -- DB insert time, ms epoch
+);
+
+CREATE INDEX IF NOT EXISTS idx_scratchpad_conv_time
+  ON scratchpad_entries(conversation_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_scratchpad_message
+  ON scratchpad_entries(message_id);
+
 -- Operational rules — feeds preflight + filled by postmortem.
 CREATE TABLE IF NOT EXISTS operational_rules (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
