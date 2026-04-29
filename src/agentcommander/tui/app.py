@@ -276,28 +276,13 @@ def _run_pipeline(state: dict, user_message: str) -> None:
                             typed_buffer, action = _consume_input_chunk(typed_buffer, chunk)
                             bar.set_pending_input(typed_buffer)
                             if action is not None and action[0] == "submit":
-                                line = action[1]
-                                if line == "/stop":
-                                    cancel_event.set()
-                                    render_system_line(style("warn",
-                                        "  /stop received — halting the pipeline…"))
-                                elif line:
-                                    state["queued_next"] = line
-                                    render_system_line(style("muted",
-                                        f"  queued for after this run: {line}"))
+                                _handle_in_run_command(action[1], state, cancel_event)
                         else:
                             legacy_buffer += chunk
                             if any(c in legacy_buffer for c in ("\n", "\r")):
                                 line = legacy_buffer.replace("\r", "\n").split("\n", 1)[0].strip()
                                 legacy_buffer = ""
-                                if line == "/stop":
-                                    cancel_event.set()
-                                    render_system_line(style("warn",
-                                        "  /stop received — halting the pipeline…"))
-                                elif line:
-                                    state["queued_next"] = line
-                                    render_system_line(style("muted",
-                                        f"  queued for after this run: {line}"))
+                                _handle_in_run_command(line, state, cancel_event)
                     continue
 
                 if kind == "end":
