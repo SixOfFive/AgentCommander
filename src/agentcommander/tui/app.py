@@ -301,6 +301,7 @@ def run_tui() -> int:
             if state.get("debug"):
                 traceback.print_exc()
 
+    bar.uninstall()
     write(SHOW_CURSOR)
     writeln(style("muted", "  goodbye."))
     return 0
