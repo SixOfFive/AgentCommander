@@ -430,19 +430,66 @@ def cmd_autoconfig(ctx: CommandContext, args: list[str]) -> None:
         audit,
         clear_role_assignments,
         get_role_assignment,
+        list_providers,
         set_role_assignment,
+        upsert_provider,
     )
     from agentcommander.engine.role_resolver import set_autoconfig
-    from agentcommander.providers.base import list_active
+    from agentcommander.providers.base import list_active, rebuild_from_db
+    from agentcommander.tui.setup import (
+        DEFAULT_PROVIDER_ID,
+        DEFAULT_PROVIDER_NAME,
+        prompt_for_ollama_endpoint,
+    )
     from agentcommander.typecast import apply_autoconfigure
-    from agentcommander.types import Role
+    from agentcommander.types import ProviderConfig, Role
 
-    # Subcommand: clear → wipe DB, fall through to default autoconfigure.
+    # Subcommand: clear → wipe DB role assignments, re-prompt for the Ollama
+    # endpoint (rescanning against the new server if it changed), then fall
+    # through to default in-memory autoconfigure.
     if args and args[0] == "clear":
         removed = clear_role_assignments()
         audit("autoconfig.clear", {"removed_rows": removed})
         render_system_line(style("warn",
             f"cleared {removed} persisted role assignment(s) from the DB"))
+
+        # Find the existing Ollama provider so we can show its endpoint as
+        # the default and only upsert when the user actually changes it.
+        all_providers = list_providers()
+        ollama_provider = next(
+            (p for p in all_providers if p.type == "ollama"), None
+        )
+        current_endpoint = ollama_provider.endpoint if ollama_provider else None
+
+        new_endpoint = prompt_for_ollama_endpoint(default=current_endpoint)
+        if new_endpoint is None:
+            render_system_line(style("warn",
+                "endpoint prompt cancelled — leaving server unchanged; "
+                "running autoconfigure against the existing provider"))
+        elif new_endpoint != current_endpoint:
+            cfg = ProviderConfig(
+                id=ollama_provider.id if ollama_provider else DEFAULT_PROVIDER_ID,
+                type="ollama",
+                name=ollama_provider.name if ollama_provider else DEFAULT_PROVIDER_NAME,
+                endpoint=new_endpoint,
+                api_key=ollama_provider.api_key if ollama_provider else None,
+                enabled=True,
+            )
+            upsert_provider(cfg)
+            rebuild_from_db()
+            audit("autoconfig.endpoint_change", {
+                "provider_id": cfg.id,
+                "from": current_endpoint,
+                "to": new_endpoint,
+            })
+            render_system_line(style("muted",
+                f"  endpoint updated: {current_endpoint or '(none)'}  →  {new_endpoint}"))
+            render_system_line(style("muted",
+                "  rescanning installed models against the new server…"))
+        else:
+            render_system_line(style("muted",
+                f"  endpoint unchanged ({current_endpoint})"))
+
         args = args[1:]
 
     # Parse --mincontext N
