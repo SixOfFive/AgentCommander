@@ -122,9 +122,17 @@ def _execute(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
         return ToolResult(ok=False, error="language is required")
     if not isinstance(code, str) or not code.strip():
         return ToolResult(ok=False, error="code is required")
+    if language.lower() not in _RUNNERS:
+        return ToolResult(ok=False, error=f"unsupported language: {language}")
     runner = _resolve_runner(language)
     if runner is None:
-        return ToolResult(ok=False, error=f"unsupported language: {language}")
+        return ToolResult(
+            ok=False,
+            error=(f"interpreter for {language!r} not found on PATH. "
+                   "On Windows, install Python from python.org "
+                   "(the launcher 'py' is preferred), or add 'python' / "
+                   "'python3' to PATH."),
+        )
 
     danger = scan_dangerous_code(code)
     if danger:
@@ -137,7 +145,18 @@ def _execute(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
     except Exception as exc:  # noqa: BLE001
         return ToolResult(ok=False, error=str(exc))
 
-    ext, cmd_name = runner
+    # Permission gate: ask the user before spawning the interpreter. Keyed
+    # on the working directory so "Always" persists per project rather than
+    # per-tempfile (every script lives in a fresh tempdir).
+    try:
+        from agentcommander.tui.permissions import request_permission
+        request_permission(cwd, "execute")  # type: ignore[arg-type]
+    except Exception as exc:  # PermissionDenied propagates upward
+        if type(exc).__name__ == "PermissionDenied":
+            raise
+        # Any other failure: fall through (don't block on a buggy prompt).
+
+    ext, cmd_prefix = runner
     timeout_s = max(1, min(int(timeout_s), MAX_TIMEOUT_S))
 
     with tempfile.TemporaryDirectory(prefix="ac-exec-") as tmp:
@@ -145,7 +164,7 @@ def _execute(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
         with open(script_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(code)
 
-        cmd = [cmd_name, script_path]
+        cmd = [*cmd_prefix, script_path]
         cmd = _wrap_with_prlimit(cmd)
 
         try:
@@ -158,8 +177,10 @@ def _execute(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
                 check=False,
             )
         except FileNotFoundError as exc:
-            return ToolResult(ok=False,
-                              error=f"runtime not found: {cmd_name} ({exc})")
+            return ToolResult(
+                ok=False,
+                error=f"runtime not found: {cmd_prefix[0]} ({exc})",
+            )
         except subprocess.TimeoutExpired as exc:
             stdout, _ = _truncate(exc.stdout or "")
             stderr, _ = _truncate(exc.stderr or "")
