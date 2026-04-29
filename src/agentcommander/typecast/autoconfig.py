@@ -34,6 +34,31 @@ ROLE_SCORE_MIN_THRESHOLD = 10
 ROLE_SCORE_MAX_THRESHOLD = 100
 ROLE_SCORE_THRESHOLD_STEP = 10
 
+# Config-table key holding the user's autoconfig ban list (JSON array of
+# model IDs). Banned models are excluded from candidate consideration so
+# autoconfigure never picks them — useful when a particular model is
+# misbehaving on the user's hardware.
+BANNED_MODELS_CONFIG_KEY = "autoconfig_banned_models"
+
+
+def get_banned_models() -> set[str]:
+    """Read the persisted ban list as a lowercase-comparable set."""
+    from agentcommander.db.repos import get_config  # lazy: avoid circulars
+    raw = get_config(BANNED_MODELS_CONFIG_KEY, None)
+    if not isinstance(raw, list):
+        return set()
+    out: set[str] = set()
+    for entry in raw:
+        if isinstance(entry, str) and entry:
+            out.add(entry)
+    return out
+
+
+def set_banned_models(models: set[str] | list[str]) -> None:
+    """Replace the persisted ban list with ``models``."""
+    from agentcommander.db.repos import set_config  # lazy: avoid circulars
+    set_config(BANNED_MODELS_CONFIG_KEY, sorted(set(models)))
+
 
 # ─── Mapping: AC Role enum ↔ TypeCast role names ───────────────────────────
 #
