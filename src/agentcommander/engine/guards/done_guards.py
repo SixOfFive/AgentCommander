@@ -195,8 +195,27 @@ def echo_request_guard(scratchpad: list[ScratchpadEntry], iteration: int, max_it
     return GuardVerdict(action="pass")
 
 
+_USER_ASKED_ABOUT_CAPS_RX = re.compile(
+    r"\b("
+    r"what (tools|capabilities|can you|are you able)"
+    r"|what.*(do|can).*you.*(have|do)"
+    r"|your (capabilities|tools|features|abilities)"
+    r"|tools? (do|are) you (have|have access)"
+    r"|what.*access.*to"
+    r"|list (your |the )?(tools|capabilities|features|commands|actions)"
+    r"|what (commands|actions) (do you|are)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
 def capabilities_list_guard(scratchpad: list[ScratchpadEntry], iteration: int, max_iter: int,
                               decision: OrchestratorDecision, user_message: str) -> GuardVerdict:
+    # If the user explicitly asked about the agent's tools/capabilities,
+    # listing them IS the correct answer — don't flag it as evasion.
+    if _USER_ASKED_ABOUT_CAPS_RX.search(user_message or ""):
+        return GuardVerdict(action="pass")
+
     text = (decision.input or "").lower()
     caps = re.search(
         r"\b(i can help|i('m| am) able to|here('s| is) what i can|my capabilities|"
