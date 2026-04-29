@@ -112,6 +112,42 @@ def _read_line() -> str | None:
         return ""
 
 
+def _poll_stdin_chunk() -> str:
+    """Non-blocking read of whatever the user has typed so far.
+
+    Returns a (possibly empty) string. Cross-platform:
+      - Windows: msvcrt.kbhit / msvcrt.getwch
+      - POSIX:   select.select on stdin
+    """
+    if not sys.stdin.isatty():
+        return ""
+    if sys.platform == "win32":
+        try:
+            import msvcrt
+        except ImportError:
+            return ""
+        out: list[str] = []
+        # Drain everything currently buffered.
+        while msvcrt.kbhit():
+            try:
+                ch = msvcrt.getwch()
+            except OSError:
+                break
+            out.append(ch)
+            if ch in "\r\n":
+                break
+        return "".join(out)
+    # POSIX
+    try:
+        import select
+        ready, _, _ = select.select([sys.stdin], [], [], 0)
+        if not ready:
+            return ""
+        return sys.stdin.readline()
+    except (OSError, ValueError):
+        return ""
+
+
 def _run_pipeline(state: dict, user_message: str) -> None:
     conv_id = _ensure_conversation(state)
     append_message(conv_id, "user", user_message)
@@ -130,29 +166,71 @@ def _run_pipeline(state: dict, user_message: str) -> None:
         conversation_id=conv_id,
         user_message=user_message,
         working_directory=state.get("working_dir"),
-        on_role_delta=render_role_delta,  # live typewriter streaming
+        on_role_delta=render_role_delta,
         on_role_start=_on_role_start,
         on_role_end=_on_role_end,
     )
     run = PipelineRun(opts)
+    cancel_event = threading.Event()
+    run.cancel_event = cancel_event
+    state["active_cancel"] = cancel_event
 
-    final_text: str | None = None
-    try:
-        for evt in run.events():
-            render_event(evt)
-            if evt.type == "done":
-                final_text = evt.final
-            elif evt.type == "error" and not final_text:
-                final_text = None
-    except KeyboardInterrupt:
-        render_error("interrupted by user")
-    except Exception as exc:  # noqa: BLE001
-        render_error(f"engine crashed: {type(exc).__name__}: {exc}")
-        if state.get("debug"):
-            traceback.print_exc()
+    events_q: queue.Queue = queue.Queue()
+    final_holder: dict[str, str | None] = {"final": None}
 
-    if final_text:
-        append_message(conv_id, "assistant", final_text)
+    def _runner() -> None:
+        try:
+            for evt in run.events():
+                events_q.put(("event", evt))
+                if evt.type == "done":
+                    final_holder["final"] = evt.final
+        except KeyboardInterrupt:
+            events_q.put(("error", "interrupted"))
+        except Exception as exc:  # noqa: BLE001
+            events_q.put(("error", f"{type(exc).__name__}: {exc}"))
+        finally:
+            events_q.put(("end", None))
+
+    worker = threading.Thread(target=_runner, daemon=True, name="ac-pipeline")
+    worker.start()
+
+    typed = ""
+    render_system_line(style("muted", "  (type /stop and press Enter to halt this run)"))
+
+    while True:
+        try:
+            kind, data = events_q.get(timeout=0.15)
+        except queue.Empty:
+            chunk = _poll_stdin_chunk()
+            if chunk:
+                typed += chunk
+                if any(ch in typed for ch in ("\n", "\r")):
+                    line = typed.replace("\r", "\n").split("\n", 1)[0].strip()
+                    typed = ""
+                    if line == "/stop":
+                        cancel_event.set()
+                        render_system_line(style("warn", "  /stop received — halting the pipeline…"))
+                    elif line:
+                        # Anything else typed mid-run is dropped with a hint.
+                        render_system_line(style("muted",
+                            f'  ignored "{line}" — only /stop is recognized while a run is active'))
+            continue
+
+        if kind == "end":
+            break
+        if kind == "event":
+            try:
+                render_event(data)
+            except Exception as exc:  # noqa: BLE001
+                render_error(f"render error: {exc}")
+        elif kind == "error":
+            render_error(str(data))
+            if state.get("debug"):
+                traceback.print_exc()
+
+    state.pop("active_cancel", None)
+    if final_holder["final"]:
+        append_message(conv_id, "assistant", final_holder["final"])
     bar.set_running(False)
 
 
