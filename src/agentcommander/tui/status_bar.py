@@ -1,26 +1,21 @@
-"""Persistent bottom status bar.
+"""Persistent bottom status bar + bottom-anchored input row.
 
-Reserves the last two terminal rows via an ANSI scroll-region escape and
-keeps a live status line painted there:
+Reserves the last THREE terminal rows via an ANSI scroll-region escape:
 
-  bottom-left:  current role/model running
-  bottom-right: tokens-in / tokens-out  ·  context now / [chain min cap]
-
-Pure stdlib. Uses standard ANSI sequences:
-
-  ESC[<top>;<bottom>r    set scroll region (1-based, inclusive)
-  ESC[s                  save cursor
-  ESC[u                  restore cursor
-  ESC[<row>;<col>H       move cursor
+    rows 1 .. (H-3)   scroll region for messages (content scrolls UP)
+    row H-2           thin separator rule
+    row H-1           live status (right-aligned: role → model · tokens · ctx)
+    row H             input prompt (where the user types)
 
 Drawing convention:
-  - The scroll region is rows 1 .. (H-2)
-  - Status occupies rows (H-1) .. H
-    (row H-1 = separator rule, row H = the live data)
-
-When the user resizes the terminal we re-pin the scroll region. We poll for
-size changes lazily on each redraw to keep this stdlib-only (no signal handler
-required, which keeps it cross-platform-clean on Windows).
+  - Cursor is parked at the bottom of the scroll region (row H-3) between
+    inputs. Newline at H-3 → scroll region shifts up by one line, top row
+    falls off, cursor stays at H-3. So every print/writeln naturally adds
+    to the bottom and pushes the rest upward — the terminal-log feel.
+  - Status redraws save+restore cursor so they don't disturb the scroll
+    region's cursor position.
+  - `read_line_at_bottom` parks the cursor on row H, calls input(), then
+    restores cursor to row H-3 so subsequent output streams in correctly.
 """
 from __future__ import annotations
 
@@ -28,6 +23,7 @@ import sys
 from dataclasses import dataclass, field
 
 from agentcommander.tui.ansi import (
+    BOLD,
     DIM,
     RESET,
     fg256,
@@ -37,6 +33,9 @@ from agentcommander.tui.ansi import (
     write,
 )
 
+# Number of reserved rows at the bottom (rule + status + input).
+RESERVED_ROWS = 3
+
 
 @dataclass
 class StatusState:
@@ -44,7 +43,7 @@ class StatusState:
     model: str | None = None
     tokens_in: int = 0
     tokens_out: int = 0
-    context_now: int = 0           # tokens we're currently sending in messages
+    context_now: int = 0
     context_cap_min: int | None = None
     pipeline_running: bool = False
     workdir: str | None = None
@@ -52,7 +51,7 @@ class StatusState:
 
 
 class StatusBar:
-    """Owns the bottom 2 rows of the terminal."""
+    """Owns the bottom RESERVED_ROWS rows of the terminal."""
 
     def __init__(self) -> None:
         self.state = StatusState()
@@ -60,31 +59,54 @@ class StatusBar:
         self._installed = False
         self._enabled = sys.stdout.isatty() and supports_color()
 
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    def scroll_bottom_row(self) -> int:
+        """Last row inside the scroll region (1-indexed)."""
+        return max(1, self._rows - RESERVED_ROWS)
+
+    def status_row(self) -> int:
+        """Row where the live status data lives."""
+        return max(1, self._rows - 1)
+
+    def rule_row(self) -> int:
+        return max(1, self._rows - 2)
+
+    def input_row(self) -> int:
+        return max(1, self._rows)
+
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
     def install(self) -> None:
-        """Reserve the bottom 2 rows and paint an empty status."""
+        """Reserve the bottom rows and park the cursor at the scroll-region bottom."""
         if not self._enabled or self._installed:
             return
         self._cols, self._rows = term_size()
-        self._set_scroll_region(1, max(1, self._rows - 2))
-        # Move cursor to top-of-scroll-region so subsequent prints don't land
-        # on a status row mid-redraw.
-        write(f"\x1b[{1};{1}H")
+        self._set_scroll_region(1, self.scroll_bottom_row())
+        # Park at scroll-region bottom so subsequent writes naturally push
+        # existing content upward instead of overwriting from the top.
+        write(f"\x1b[{self.scroll_bottom_row()};1H")
         self._installed = True
         self.redraw()
 
     def uninstall(self) -> None:
-        """Restore the full screen as the scroll region; clear status rows."""
+        """Restore the full screen as the scroll region; clear the reserved rows."""
         if not self._enabled or not self._installed:
             return
         self._set_scroll_region(1, self._rows)
-        # Wipe the bottom 2 rows.
-        write(f"\x1b[{self._rows - 1};{1}H\x1b[2K")
-        write(f"\x1b[{self._rows};{1}H\x1b[2K")
-        # Cursor home.
-        write(f"\x1b[{1};{1}H")
+        for r in (self.rule_row(), self.status_row(), self.input_row()):
+            write(f"\x1b[{r};1H\x1b[2K")
+        write(f"\x1b[{1};1H")
         self._installed = False
+
+    def park_cursor(self) -> None:
+        """Move the cursor to the bottom of the scroll region. Call before
+        emitting normal content so it scrolls up correctly."""
+        if not self._enabled or not self._installed:
+            return
+        write(f"\x1b[{self.scroll_bottom_row()};1H")
 
     def _set_scroll_region(self, top: int, bottom: int) -> None:
         write(f"\x1b[{top};{bottom}r")
@@ -114,8 +136,7 @@ class StatusBar:
         self.state.pipeline_running = running
         self.redraw()
 
-    def set_context(self, *, now: int | None = None,
-                    cap_min: int | None = None) -> None:
+    def set_context(self, *, now: int | None = None, cap_min: int | None = None) -> None:
         if now is not None:
             self.state.context_now = now
         if cap_min is not None:
@@ -132,83 +153,90 @@ class StatusBar:
         if not self._enabled or not self._installed:
             return
 
-        # Re-detect size in case the terminal was resized.
+        # Resize-aware: re-pin the scroll region if the terminal changed.
         cols, rows = term_size()
         if (cols, rows) != (self._cols, self._rows):
             self._cols, self._rows = cols, rows
-            self._set_scroll_region(1, max(1, rows - 2))
+            self._set_scroll_region(1, self.scroll_bottom_row())
 
-        # Save cursor + position state so the user's input/output isn't
-        # disturbed when we paint over the bottom rows.
-        write("\x1b7")  # save cursor (DECSC)
+        write("\x1b7")  # save cursor
 
+        # Separator rule
         rule_color = fg256(238) if supports_color() else ""
         rule = ("─" * cols) if rule_color else ("-" * cols)
-        sep_row = max(1, rows - 1)
-        data_row = max(1, rows)
-
-        write(f"\x1b[{sep_row};1H\x1b[2K")  # move + clear line
+        write(f"\x1b[{self.rule_row()};1H\x1b[2K")
         if rule_color:
             write(f"{rule_color}{rule}{RESET}")
         else:
             write(rule)
 
-        write(f"\x1b[{data_row};1H\x1b[2K")
-        write(self._compose_data_row(cols))
+        # Status row — right-aligned data block.
+        write(f"\x1b[{self.status_row()};1H\x1b[2K")
+        write(self._compose_status_row(cols))
 
-        write("\x1b8")  # restore cursor (DECRC)
+        # Input row — keep clear so the input prompt has a clean canvas.
+        write(f"\x1b[{self.input_row()};1H\x1b[2K")
+
+        write("\x1b8")  # restore cursor
         sys.stdout.flush()
 
-    def _compose_data_row(self, cols: int) -> str:
-        """Build the live data line. Left = role/model, right = tokens/context."""
+    def _compose_status_row(self, cols: int) -> str:
         s = self.state
-        # ── Left ──
+
+        # Build the visible-text version (no ANSI codes) so we can right-align it.
         if s.role and s.model:
             verb = "▸" if s.pipeline_running else "·"
-            left = f"{verb} {s.role} → {s.model}"
+            role_part = f"{verb} {s.role} → {s.model}"
         elif s.pipeline_running:
-            left = "▸ ..."
+            role_part = "▸ ..."
         else:
-            left = "· idle"
-        if s.workdir:
-            wd = s.workdir
-            if len(wd) > 32:
-                wd = "…" + wd[-31:]
-            left = f"{left}    [{wd}]"
+            role_part = "· idle"
 
-        # ── Right ──
+        token_part = f"in {_humanize(s.tokens_in)}  out {_humanize(s.tokens_out)}"
         ctx_part = ""
         if s.context_now or s.context_cap_min:
-            cap = f"[{_humanize_tokens(s.context_cap_min)}]" if s.context_cap_min else ""
-            ctx_part = f"ctx {_humanize_tokens(s.context_now)} {cap}".strip()
-        token_part = f"in {_humanize_tokens(s.tokens_in)}  out {_humanize_tokens(s.tokens_out)}"
-        right_parts = [p for p in (token_part, ctx_part) if p]
-        right = "  ·  ".join(right_parts)
+            cap = f"[{_humanize(s.context_cap_min)}]" if s.context_cap_min else ""
+            ctx_part = f"ctx {_humanize(s.context_now)} {cap}".strip()
 
-        # Compose, padding the gap. Account for ANSI codes only roughly.
-        plain_left = left
-        plain_right = right
-        gap = max(1, cols - len(plain_left) - len(plain_right))
+        wd_part = ""
+        if s.workdir:
+            wd = s.workdir
+            if len(wd) > 40:
+                wd = "…" + wd[-39:]
+            wd_part = f"[{wd}]"
 
-        if supports_color():
-            left_styled = style("accent", left.split(" ", 1)[0]) + " " + left.split(" ", 1)[1] \
-                if " " in left else style("accent", left)
-            right_styled = style("muted", right) if right else ""
-            return left_styled + (" " * gap) + right_styled
-        return plain_left + (" " * gap) + plain_right
+        plain_parts = [p for p in (role_part, token_part, ctx_part, wd_part) if p]
+        plain = "  ·  ".join(plain_parts)
+        # Right-align: pad with spaces on the left.
+        pad = max(0, cols - len(plain))
+
+        if not supports_color():
+            return (" " * pad) + plain
+
+        # Re-render with ANSI so the role marker pops.
+        styled_role = style("accent", role_part) if role_part else ""
+        styled_tokens = style("muted", token_part)
+        styled_ctx = style("muted", ctx_part) if ctx_part else ""
+        styled_wd = style("muted", wd_part) if wd_part else ""
+
+        styled_parts = [p for p in (styled_role, styled_tokens, styled_ctx, styled_wd) if p]
+        sep = style("rule", "  ·  ")
+        styled = sep.join(styled_parts)
+
+        return (" " * pad) + styled
 
 
-def _humanize_tokens(n: int | None) -> str:
+def _humanize(n: int | None) -> str:
     if n is None:
         return ""
     if n < 1000:
         return str(n)
     if n < 1_000_000:
-        return f"{n / 1000:.1f}k".rstrip("0").rstrip(".") + "k" if False else f"{n // 1000}k" if n % 1000 == 0 else f"{n / 1000:.1f}k"
+        return f"{n / 1000:.1f}k" if n % 1000 else f"{n // 1000}k"
     return f"{n / 1_000_000:.1f}m"
 
 
-# Module-level singleton. The TUI grabs one and feeds it events.
+# Module-level singleton.
 _global: StatusBar | None = None
 
 
@@ -219,5 +247,49 @@ def get_status_bar() -> StatusBar:
     return _global
 
 
-# Suppress unused-DIM warning (reserved for future styling tweaks)
-_ = DIM
+# ─── Bottom-anchored input ────────────────────────────────────────────────
+
+
+def read_line_at_bottom(prompt_text: str = "❯ ") -> str | None:
+    """Position the cursor on the input row, prompt, read a line, restore.
+
+    Returns the line, or None on EOF / Ctrl-D. Re-raises KeyboardInterrupt.
+    """
+    bar = get_status_bar()
+    if not bar.enabled or not bar._installed:
+        # Plain mode (non-TTY or no scroll region installed) — fall back to
+        # vanilla input() so piped runs still work.
+        try:
+            return input(prompt_text)
+        except EOFError:
+            return None
+
+    cols, rows = term_size()
+    input_row = rows  # last row
+
+    # Move to input row, clear it, paint the prompt.
+    write(f"\x1b[{input_row};1H\x1b[2K")
+    write(style("user_label", prompt_text))
+    sys.stdout.flush()
+
+    try:
+        line = input("")
+    except EOFError:
+        # Restore cursor into the scroll region before returning None.
+        bar.park_cursor()
+        return None
+    except KeyboardInterrupt:
+        bar.park_cursor()
+        raise
+
+    # input() left the cursor wherever the terminal sent it after newline
+    # (often row+1). Pull it back inside the scroll region so subsequent
+    # output streams correctly.
+    bar.park_cursor()
+    # Repaint status (input may have moved the cursor past where it should be)
+    bar.redraw()
+    return line
+
+
+# Suppress unused symbol warnings for reserved-future references.
+_ = (BOLD, DIM)
