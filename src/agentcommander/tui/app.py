@@ -161,25 +161,33 @@ def _handle_input(state: dict, line: str) -> None:
 
 
 def _print_role_assignments() -> None:
-    """Show the active role → (provider, model) bindings as a 3-column table."""
-    from agentcommander.db.repos import list_role_assignments
-    existing = {a["role"]: a for a in list_role_assignments()}
+    """Show the active role → (provider, model) bindings.
+
+    Pulls from the RoleResolver so it reflects DB overrides + in-memory
+    autoconfig. The 'kind' column distinguishes:
+      - 'override': set by /roles set, persisted in DB
+      - 'auto':     picked by /roles auto / startup autoconfigure (in-memory)
+      - 'unset':    no binding from either source
+    """
     rows: list[list[str]] = []
     for role in ALL_ROLES:
-        a = existing.get(role.value)
-        if a is None:
+        rr = resolve_role(role)
+        if rr is None:
             rows.append([role.value, "—", "—", style("warn", "unset")])
         else:
-            kind = "override" if a["is_override"] else "auto"
-            rows.append([role.value, a["model"], a["provider_id"], kind])
+            rows.append([role.value, rr.model, rr.provider_id, rr.kind])
     render_system_line("Role → model assignments:")
     render_table(["role", "model", "provider", "kind"], rows)
 
 
 def _run_startup_autoconfigure() -> None:
-    """After provider setup, pick best-fit models from TypeCast and assign
-    them to all non-override roles. Print the result."""
-    from agentcommander.db.repos import audit, get_role_assignment as _gra, set_role_assignment as _sra
+    """Compute best-fit role → model in memory. NOT persisted to DB.
+
+    Recomputed on every launch — if the user pulls or removes a model, the
+    next start picks it up automatically. User overrides set via `/roles set`
+    survive in the DB and beat the autoconfig at resolve time.
+    """
+    from agentcommander.db.repos import audit, get_role_assignment as _gra
     from agentcommander.providers.base import list_active
 
     providers = list_active()
@@ -189,13 +197,22 @@ def _run_startup_autoconfigure() -> None:
     applied = apply_autoconfigure(
         providers=providers,
         get_role_assignment_fn=_gra,
-        set_role_assignment_fn=_sra,
         audit_fn=audit,
     )
 
     if applied.skipped_reason:
         render_system_line(style("warn", f"autoconfigure skipped: {applied.skipped_reason}"))
+        _set_autoconfig({})
         return
+
+    # Stash the picks in the in-memory resolver. Convert role.value → Role enum.
+    in_memory_table: dict[Role, tuple[str, str]] = {}
+    for role_value, (provider_id, model) in applied.role_picks.items():
+        try:
+            in_memory_table[Role(role_value)] = (provider_id, model)
+        except ValueError:
+            continue
+    _set_autoconfig(in_memory_table)
 
     n_auto = len(applied.role_picks)
     n_overrides = len(applied.user_overrides)
