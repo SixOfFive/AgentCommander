@@ -263,7 +263,7 @@ def run_tui() -> int:
         _run_startup_autoconfigure()
         _print_role_assignments()
 
-    if not get_role_assignment(Role.ORCHESTRATOR):
+    if resolve_role(Role.ORCHESTRATOR) is None:
         render_system_line("Orchestrator role unassigned. After adding a provider:")
         render_system_line("  /models <provider_id>          # see available models")
         render_system_line("  /roles assign-all <provider_id> <model>   # one-shot setup")
