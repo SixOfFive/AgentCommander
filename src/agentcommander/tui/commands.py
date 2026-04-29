@@ -368,50 +368,8 @@ def cmd_typecast(ctx: CommandContext, args: list[str]) -> None:
         if result.remote_error:
             render_system_line(f"(remote error: {result.remote_error})")
     elif sub == "autoconfigure":
-        installed: set[str] = set()
-        for prov in list_active():
-            try:
-                for m in prov.list_models():
-                    if m.get("id"):
-                        installed.add(m["id"])
-            except ProviderError:
-                continue
-        if not installed:
-            render_system_line("no installed models found across active providers; "
-                               "configure a provider first with /providers add")
-            return
-        suggestion = suggest_config(installed)
-        if suggestion.default_model is None:
-            render_system_line("no suitable installed model in the TypeCast catalog "
-                               "(installed but unscored, or doesn't fit VRAM)")
-            return
-        from agentcommander.db.repos import list_providers, set_role_assignment
-        from agentcommander.types import ALL_ROLES
-        # Pick the provider that has this model; prefer the first hit.
-        chosen_provider_id: str | None = None
-        for prov in list_active():
-            try:
-                if any(m.get("id") == suggestion.default_model.model_id
-                       for m in prov.list_models()):
-                    chosen_provider_id = prov.id
-                    break
-            except ProviderError:
-                continue
-        if not chosen_provider_id:
-            providers = list_providers()
-            chosen_provider_id = providers[0].id if providers else None
-        if not chosen_provider_id:
-            render_system_line("no provider available")
-            return
-        for role in ALL_ROLES:
-            set_role_assignment(role, chosen_provider_id,
-                                suggestion.default_model.model_id, is_override=False)
-        for o in suggestion.overrides:
-            set_role_assignment(o.role, chosen_provider_id, o.model_id or "", is_override=True)
-        render_system_line(
-            f"set {suggestion.default_model.model_id} for all {len(ALL_ROLES)} roles "
-            f"(+ {len(suggestion.overrides)} per-role overrides)"
-        )
+        # Dispatch to /roles auto so there's exactly one autoconfig path.
+        cmd_roles(ctx, ["auto"])
     else:
         render_system_line(f"unknown sub-command: /typecast {sub}")
 
