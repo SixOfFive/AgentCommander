@@ -189,37 +189,126 @@ def cmd_models(ctx: CommandContext, args: list[str]) -> None:
 
 
 def cmd_roles(ctx: CommandContext, args: list[str]) -> None:
-    from agentcommander.db.repos import list_role_assignments, set_role_assignment
+    from agentcommander.db.connection import get_db
+    from agentcommander.db.repos import (
+        audit,
+        get_role_assignment,
+        list_role_assignments,
+        set_role_assignment,
+    )
+    from agentcommander.providers.base import list_active
+    from agentcommander.typecast import apply_autoconfigure
     from agentcommander.types import ALL_ROLES, Role
 
-    if not args:
+    def _print_all() -> None:
         existing = {a["role"]: a for a in list_role_assignments()}
         rows: list[list[str]] = []
         for role in ALL_ROLES:
             a = existing.get(role.value)
             if a:
                 rows.append([role.value, a["provider_id"], a["model"],
-                             "override" if a["is_override"] else "default"])
+                             "override" if a["is_override"] else "auto"])
             else:
                 rows.append([role.value, "—", "—", style("warn", "unset")])
         render_table(["role", "provider", "model", "kind"], rows)
+
+    def _try_role(role_str: str) -> Role | None:
+        try:
+            return Role(role_str)
+        except ValueError:
+            render_system_line(f'unknown role: "{role_str}"  (try /agents)')
+            return None
+
+    if not args:
+        _print_all()
         return
 
-    sub = args[0]
+    head = args[0]
+
+    # Single-role display: `/roles <role>`
+    try:
+        role = Role(head)
+    except ValueError:
+        role = None
+    if role is not None and len(args) == 1:
+        a = get_role_assignment(role)
+        if a is None:
+            render_system_line(f'{role.value}: ' + style("warn", "unset"))
+            render_system_line(f"  bind one with: /roles set {role.value} <provider_id> <model>")
+            return
+        kind = "override (user-set)" if a["is_override"] else "auto (TypeCast / default)"
+        render_system_line(f'{style("role_label", role.value)}')
+        render_system_line(f"  provider: {a['provider_id']}")
+        render_system_line(f"  model:    {a['model']}")
+        render_system_line(f"  kind:     {kind}")
+        return
+
+    sub = head
     rest = args[1:]
+
     if sub == "set":
         if len(rest) < 3:
             render_system_line("usage: /roles set <role> <provider_id> <model>")
             return
-        role_str, pid, model = rest[0], rest[1], " ".join(rest[2:])
-        try:
-            Role(role_str)
-        except ValueError:
-            render_system_line(f"unknown role: {role_str}")
+        role = _try_role(rest[0])
+        if role is None:
             return
-        set_role_assignment(role_str, pid, model, is_override=True)
-        render_system_line(f"set {role_str} → {pid} / {model}")
-    elif sub == "assign-all":
+        pid = rest[1]
+        model = " ".join(rest[2:])
+        set_role_assignment(role, pid, model, is_override=True)
+        render_system_line(f"set {role.value} → {pid} / {model}  "
+                           + style("muted", "(override; survives /roles auto)"))
+        return
+
+    if sub == "unset":
+        if not rest:
+            render_system_line("usage: /roles unset <role>")
+            return
+        role = _try_role(rest[0])
+        if role is None:
+            return
+        a = get_role_assignment(role)
+        if a is None:
+            render_system_line(f"{role.value}: nothing to unset (already unset)")
+            return
+        # Drop the row entirely so the next /roles auto can re-pick freely.
+        get_db().execute("DELETE FROM role_assignments WHERE role = ?", (role.value,))
+        audit("roles.unset", {"role": role.value, "previous_model": a["model"]})
+        render_system_line(f"unset {role.value}  "
+                           + style("muted", "(run /roles auto to let TypeCast re-pick)"))
+        return
+
+    if sub == "auto":
+        providers = list_active()
+        if not providers:
+            render_system_line("no active providers — add one with /providers add")
+            return
+        applied = apply_autoconfigure(
+            providers=providers,
+            get_role_assignment_fn=get_role_assignment,
+            set_role_assignment_fn=set_role_assignment,
+            audit_fn=audit,
+        )
+        if applied.skipped_reason:
+            render_system_line(f"autoconfigure skipped: {applied.skipped_reason}")
+            return
+        render_system_line(
+            f"autoconfigured {len(applied.role_picks)} role(s) "
+            f'→ default {style("accent", applied.default_model or "?")} '
+            f"on {applied.provider_id}"
+        )
+        if applied.diff_picks:
+            render_system_line(f"  + {len(applied.diff_picks)} stronger pick(s):")
+            for r, m in applied.diff_picks.items():
+                render_system_line(f"    {r} → {m}")
+        if applied.user_overrides:
+            render_system_line(
+                f"  preserved {len(applied.user_overrides)} user override(s) — "
+                "use /roles unset <role> to release"
+            )
+        return
+
+    if sub == "assign-all":
         if len(rest) < 2:
             render_system_line("usage: /roles assign-all <provider_id> <model>")
             return
@@ -227,8 +316,9 @@ def cmd_roles(ctx: CommandContext, args: list[str]) -> None:
         for role in ALL_ROLES:
             set_role_assignment(role, pid, model, is_override=False)
         render_system_line(f"assigned {pid}/{model} to all {len(ALL_ROLES)} roles")
-    else:
-        render_system_line(f"unknown sub-command: /roles {sub}")
+        return
+
+    render_system_line(f"unknown sub-command: /roles {sub}  (try /help roles)")
 
 
 def cmd_typecast(ctx: CommandContext, args: list[str]) -> None:
