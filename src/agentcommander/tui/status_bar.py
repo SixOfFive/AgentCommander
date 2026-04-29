@@ -306,8 +306,12 @@ class StatusBar:
         styled_role = style("accent", role_part) if role_part else ""
         styled_tokens = style("muted", token_part)
         styled_ctx = style("muted", ctx_part) if ctx_part else ""
+        styled_run = style("muted", run_part)
+        styled_total = style("muted", total_part)
 
-        styled_parts = [p for p in (styled_role, styled_tokens, styled_ctx) if p]
+        styled_parts = [p for p in
+                        (styled_role, styled_tokens, styled_ctx,
+                         styled_run, styled_total) if p]
         sep = style("rule", "  ·  ")
         styled = sep.join(styled_parts)
 
@@ -322,6 +326,20 @@ def _humanize(n: int | None) -> str:
     if n < 1_000_000:
         return f"{n / 1000:.1f}k" if n % 1000 else f"{n // 1000}k"
     return f"{n / 1_000_000:.1f}m"
+
+
+def _humanize_duration_ms(ms: int | None) -> str:
+    """Format a duration in milliseconds as ``0:05`` / ``1:23`` / ``1:23:45``."""
+    if ms is None or ms < 0:
+        ms = 0
+    total_s = ms // 1000
+    if total_s < 60:
+        return f"0:{total_s:02d}"
+    m, s = divmod(total_s, 60)
+    if m < 60:
+        return f"{m}:{s:02d}"
+    h, m = divmod(m, 60)
+    return f"{h}:{m:02d}:{s:02d}"
 
 
 # Module-level singleton.
