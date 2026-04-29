@@ -455,6 +455,18 @@ def _build_registry() -> dict[str, SlashCommand]:
             details="ANSI screen-clear; conversation history is preserved in SQLite.",
         ),
         SlashCommand(
+            name="/stop", aliases=(),
+            summary="halt the active pipeline run + cancel any planned future steps",
+            handler=cmd_stop,
+            usage="/stop",
+            details=(
+                "Mid-run, type /stop and press Enter to abort. The engine checks the\n"
+                "cancel signal at iteration boundaries, so the active role call or tool\n"
+                "may take a moment to finish, but no new dispatches happen after /stop.\n"
+                "Ctrl-C also works (sends KeyboardInterrupt to the pipeline thread)."
+            ),
+        ),
+        SlashCommand(
             name="/workdir", aliases=("/wd",),
             summary="set or show the working directory",
             handler=cmd_workdir,
