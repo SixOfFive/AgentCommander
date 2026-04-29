@@ -68,7 +68,7 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     if _db is not None:
         return _db
 
-    target = Path(db_path) if db_path else _default_db_dir() / "agentcommander.sqlite"
+    target = Path(db_path) if db_path else _project_db_dir() / "db.sqlite"
     target.parent.mkdir(parents=True, exist_ok=True)
 
     conn = sqlite3.connect(str(target), check_same_thread=False, isolation_level=None)
