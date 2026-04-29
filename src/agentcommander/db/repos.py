@@ -301,3 +301,117 @@ def insert_token_usage(*, conversation_id: str | None, role: str,
         (conversation_id, role, provider_id, model,
          prompt_tokens, completion_tokens, duration_ms, _now_ms()),
     )
+
+
+# ─── Scratchpad (model-facing memory) ──────────────────────────────────────
+#
+# These wrap `scratchpad_entries` — the persisted, cross-turn equivalent of
+# the in-memory scratchpad list. The user-view `messages` table is left
+# alone; compaction only writes here.
+
+def insert_scratchpad_entry(
+    *,
+    conversation_id: str,
+    run_id: str | None,
+    step: int,
+    role: str,
+    action: str,
+    input_text: str,
+    output_text: str,
+    timestamp: float,
+    duration_ms: int | None = None,
+    content: str | None = None,
+    message_id: str | None = None,
+    replaced_message_ids: list[str] | None = None,
+    is_replaced: bool = False,
+    entry_id: str | None = None,
+) -> str:
+    """Persist one scratchpad row. Returns the (possibly auto-generated) id."""
+    eid = entry_id or str(uuid.uuid4())
+    rmi = json.dumps(replaced_message_ids) if replaced_message_ids else None
+    get_db().execute(
+        "INSERT INTO scratchpad_entries "
+        "  (id, conversation_id, run_id, step, role, action, input, output, "
+        "   duration_ms, content, message_id, replaced_message_ids, "
+        "   is_replaced, timestamp, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (eid, conversation_id, run_id, step, role, action,
+         input_text or "", output_text or "",
+         duration_ms, content, message_id, rmi,
+         1 if is_replaced else 0, timestamp, _now_ms()),
+    )
+    return eid
+
+
+def list_scratchpad_entries(
+    conversation_id: str,
+    *,
+    include_replaced: bool = False,
+) -> list[dict[str, Any]]:
+    """Return all scratchpad rows for a conversation in timestamp order.
+
+    `include_replaced=False` (default) hides entries that compaction has
+    superseded — exactly what the prompt-builder wants. Pass True for
+    audit/inspection paths.
+    """
+    sql = (
+        "SELECT id, conversation_id, run_id, step, role, action, input, "
+        "       output, duration_ms, content, message_id, "
+        "       replaced_message_ids, is_replaced, timestamp "
+        "FROM scratchpad_entries WHERE conversation_id = ?"
+    )
+    params: tuple[Any, ...] = (conversation_id,)
+    if not include_replaced:
+        sql += " AND is_replaced = 0"
+    sql += " ORDER BY timestamp ASC, step ASC, created_at ASC"
+    rows = get_db().execute(sql, params).fetchall()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        rmi_raw = r["replaced_message_ids"]
+        try:
+            rmi = json.loads(rmi_raw) if rmi_raw else None
+        except (TypeError, ValueError):
+            rmi = None
+        out.append({
+            "id": r["id"],
+            "conversation_id": r["conversation_id"],
+            "run_id": r["run_id"],
+            "step": r["step"],
+            "role": r["role"],
+            "action": r["action"],
+            "input": r["input"],
+            "output": r["output"],
+            "duration_ms": r["duration_ms"],
+            "content": r["content"],
+            "message_id": r["message_id"],
+            "replaced_message_ids": rmi,
+            "is_replaced": bool(r["is_replaced"]),
+            "timestamp": r["timestamp"],
+        })
+    return out
+
+
+def mark_scratchpad_replaced(entry_ids: list[str]) -> int:
+    """Flag the given scratchpad entries as superseded by a compaction.
+
+    Returns the number of rows updated. The originals stay in the table for
+    replay/inspection — only the prompt-builder filters them out.
+    """
+    if not entry_ids:
+        return 0
+    placeholders = ",".join("?" * len(entry_ids))
+    cur = get_db().execute(
+        f"UPDATE scratchpad_entries SET is_replaced = 1 WHERE id IN ({placeholders})",
+        tuple(entry_ids),
+    )
+    return cur.rowcount or 0
+
+
+def clear_scratchpad(conversation_id: str) -> int:
+    """Delete every scratchpad row for one conversation. Returns rowcount.
+    Used when starting a fresh /new conversation, not by compaction."""
+    cur = get_db().execute(
+        "DELETE FROM scratchpad_entries WHERE conversation_id = ?",
+        (conversation_id,),
+    )
+    return cur.rowcount or 0
