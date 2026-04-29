@@ -34,8 +34,17 @@ _DEFAULT_ENDPOINT = "http://127.0.0.1:11434"
 KEEP_ALIVE_IDLE = "5m"
 
 
-def _post_stream(url: str, body: dict[str, Any], timeout: float = 600.0) -> Iterator[dict[str, Any]]:
-    """POST a JSON body and yield each newline-delimited JSON object from the stream."""
+def _post_stream(
+    url: str, body: dict[str, Any], timeout: float = 600.0,
+    should_cancel: Callable[[], bool] | None = None,
+) -> Iterator[dict[str, Any]]:
+    """POST a JSON body and yield each newline-delimited JSON object.
+
+    When ``should_cancel`` is supplied and returns True between chunks,
+    the loop breaks; the surrounding ``with urllib.request.urlopen(...)``
+    context manager closes the underlying socket so the daemon stops
+    generating tokens for this request.
+    """
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         url=url,
@@ -45,6 +54,8 @@ def _post_stream(url: str, body: dict[str, Any], timeout: float = 600.0) -> Iter
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         for raw_line in resp:
+            if should_cancel is not None and should_cancel():
+                break
             line = raw_line.strip()
             if not line:
                 continue
