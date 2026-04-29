@@ -151,6 +151,16 @@ class StatusBar:
         self.state.workdir = workdir
         self.redraw()
 
+    def set_pending_input(self, text: str | None) -> None:
+        """Update the in-flight typing buffer painted on the input row.
+
+        Pass an empty string to show just the prompt while a run is active,
+        a populated string to echo what the user has typed, or None when no
+        run is active and the row should be left clear for `read_line_at_bottom`.
+        """
+        self.state.pending_input = text
+        self.redraw()
+
     # ── Redraw ─────────────────────────────────────────────────────────────
 
     def redraw(self) -> None:
