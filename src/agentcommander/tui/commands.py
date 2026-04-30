@@ -1350,6 +1350,11 @@ def cmd_chat(ctx: CommandContext, args: list[str]) -> None:
 
         # Reset state and refresh screen
         ctx.state["conversation_id"] = None
+        try:
+            from agentcommander.db.repos import set_active_conversation_id
+            set_active_conversation_id(None)
+        except Exception:  # noqa: BLE001
+            pass
         # Clear screen + restore the bottom bar
         write(CLEAR_SCREEN)
         bar = get_status_bar()
