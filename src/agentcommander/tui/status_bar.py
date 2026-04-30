@@ -69,6 +69,11 @@ class StatusState:
     run_started_at: float | None = None
     run_elapsed_ms: int = 0
     total_elapsed_ms: int = 0
+    # Running-average tokens/second for ``model``, looked up at set_role
+    # time and refreshed on each role-end so the bar shows what to expect
+    # from this model right now. None == not yet known (display omits the
+    # rate); 100.0 is the seed default for never-measured models.
+    model_tps: float | None = None
 
 
 # Fields to persist to / load from `config.bar_state_json` so a mirror can
