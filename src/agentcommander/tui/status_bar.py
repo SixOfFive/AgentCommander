@@ -71,6 +71,30 @@ class StatusState:
     total_elapsed_ms: int = 0
 
 
+# Fields to persist to / load from `config.bar_state_json` so a mirror can
+# reproduce the primary's bar. We deliberately omit `workdir` and
+# `pending_input` because those are local-process concerns: the mirror
+# shows its own working directory in the banner, and never has typed text.
+_MIRRORED_BAR_FIELDS = (
+    "role", "model", "tokens_in", "tokens_out",
+    "context_now", "context_cap_min",
+    "pipeline_running",
+    "run_elapsed_ms", "total_elapsed_ms",
+)
+
+
+def _state_to_dict(state: StatusState) -> dict:
+    """Snapshot the mirror-relevant fields of a StatusState as a plain dict."""
+    return {k: getattr(state, k) for k in _MIRRORED_BAR_FIELDS}
+
+
+def _apply_dict_to_state(state: StatusState, d: dict) -> None:
+    """Copy mirror-relevant fields from a dict into a StatusState in-place."""
+    for k in _MIRRORED_BAR_FIELDS:
+        if k in d:
+            setattr(state, k, d[k])
+
+
 class StatusBar:
     """Owns the bottom RESERVED_ROWS rows of the terminal."""
 
