@@ -80,6 +80,20 @@ SUB_COMMANDS: dict[str, list[CompletionMatch]] = {
         CompletionMatch(name="off",
                         summary="clear the session-wide num_ctx override"),
     ],
+    "/chat": [
+        CompletionMatch(name="list",
+                        summary="list recent chats with message counts"),
+        CompletionMatch(name="new",
+                        summary="start a fresh chat: /chat new [<title>]"),
+        CompletionMatch(name="clear",
+                        summary="DESTRUCTIVE: delete current chat + scratchpad, clear screen"),
+        CompletionMatch(name="resume",
+                        summary="switch to existing chat: /chat resume <id_prefix>"),
+        CompletionMatch(name="title",
+                        summary="rename current chat: /chat title <new title>"),
+        CompletionMatch(name="export",
+                        summary="write chat to markdown: /chat export <path>"),
+    ],
 }
 
 
