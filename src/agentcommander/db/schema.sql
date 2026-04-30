@@ -207,3 +207,26 @@ CREATE TABLE IF NOT EXISTS fs_permissions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_fs_permissions_path ON fs_permissions(path);
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Pipeline events — the live event stream of an in-flight run, persisted so
+-- a read-only mirror process (`ac --mirror`) can replay everything the
+-- primary is doing in close-to-real-time. Each engine event (role/start,
+-- role/delta token chunk, role/end, tool/call, tool/result, guard/*, done)
+-- becomes one row. Mirror polls `id > last_seen` every ~200ms and renders
+-- in arrival order.
+--
+-- This table is INTENTIONALLY high-volume: token deltas can produce 10–60+
+-- inserts/sec during streaming. WAL mode + synchronous=FULL absorb this;
+-- the primary prunes rows older than ~1h on startup to keep the DB small.
+-- ─────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS pipeline_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id TEXT,
+  run_id TEXT,
+  event_type TEXT NOT NULL,           -- "role/start" | "role/delta" | "role/end" | "tool/call" | "tool/result" | "guard" | "done" | "system" | "error"
+  payload TEXT NOT NULL,              -- JSON; shape depends on event_type
+  created_at INTEGER NOT NULL         -- ms epoch
+);
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_events_id ON pipeline_events(id);
