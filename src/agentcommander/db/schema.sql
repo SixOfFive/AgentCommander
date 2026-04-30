@@ -230,3 +230,20 @@ CREATE TABLE IF NOT EXISTS pipeline_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pipeline_events_id ON pipeline_events(id);
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Per-model throughput — running average tokens/second across calls.
+--
+-- Updated after every role call (and chat-fallback call) using the
+-- formula:  new_avg = (old_avg + completion_tokens / duration_seconds) / 2
+-- which is a 50/50 EMA: each new measurement gets equal weight to the
+-- accumulated history. First measurement seeds against a default of 100
+-- t/s so a brand-new model gets a reasonable display number immediately
+-- and converges to its real rate within a handful of samples.
+-- ─────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS model_throughput (
+  model TEXT PRIMARY KEY,
+  tokens_per_second REAL NOT NULL DEFAULT 100.0,
+  samples INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
+);
