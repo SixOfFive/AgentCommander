@@ -432,7 +432,21 @@ class PipelineRun:
                   {"error": f"{type(exc).__name__}: {exc}"})
 
         try:
-            category = self._classify_category(opts.user_message, opts)
+            try:
+                category = yield from self._classify_category(opts.user_message, opts)
+            except ProviderRateLimited as exc:
+                # Five retries exhausted on the router. Surface a clean
+                # error and stop without polluting the scratchpad.
+                yield PipelineEvent(
+                    type="error",
+                    error="rate-limited (provider blocked our retries) — "
+                          "try /autoconfig clear to switch providers, "
+                          "or wait and retry your prompt",
+                )
+                update_pipeline_run(self.run_id, status="failed",
+                                    iterations=0, error=f"rate-limited: {exc}",
+                                    category="?")
+                return
             self._max_iterations = CATEGORY_MAX_ITERATIONS.get(category, 20)
             yield PipelineEvent(type="iteration", iteration=0, extra={"category": category})
 
