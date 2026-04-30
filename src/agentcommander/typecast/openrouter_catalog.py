@@ -493,3 +493,63 @@ def vote_after_rate_limit_for_provider(provider_type: str | None,
         except Exception:  # noqa: BLE001
             return 0
     return 0
+
+
+# ─── Performance-failure voting (downvote only, no sibling boost) ─────────
+#
+# When a model fails to PERFORM for an agent (returns an error other
+# than rate-limit, emits malformed JSON, etc.) we downvote it for THAT
+# role. We do NOT boost siblings — a quality failure on one model is
+# specific to that model, not signal that the others are objectively
+# better right now (unlike rate-limits, where every 429 means the
+# others are objectively reachable).
+#
+# Asymmetric voting per the user's spec: penalty only.
+
+
+def vote_after_failure(tier: str, failed_model: str, role: str) -> int:
+    """Apply a single -1 penalty to ``(failed_model, role)``. No sibling
+    boost. Returns the new per-role score for the failed pair.
+
+    Use this for non-rate-limit failures: ProviderError (network /
+    server / parse), invalid JSON from the orchestrator, the role call
+    erroring out before producing output.
+    """
+    _check_tier(tier)
+    if not failed_model or not role:
+        return 0
+    catalog = load(tier)
+    models = catalog["_models"]
+    if failed_model not in models:
+        models[failed_model] = _empty_model_entry()
+    stats = _ensure_role_stats(models[failed_model], role)
+    stats["score"] = max(VOTE_MIN,
+                         int(stats.get("score", 0)) - VOTE_INCREMENT)
+    stats["rate_limits"] = int(stats.get("rate_limits", 0)) + 1
+    stats["runs"] = int(stats.get("runs", 0)) + 1
+    now_ms = int(time.time() * 1000)
+    stats["lastBumpAt"] = now_ms
+    catalog["_meta"]["voteCount"] = int(catalog["_meta"].get("voteCount", 0)) + 1
+    catalog["_meta"]["lastVoteAt"] = now_ms
+    save(tier, catalog)
+    return int(stats["score"])
+
+
+def vote_after_failure_for_provider(provider_type: str | None,
+                                     failed_model: str | None,
+                                     role: str) -> int:
+    """Dispatch a single-model -1 vote to the right tier. Silent no-op
+    for non-OR providers."""
+    if not provider_type or not failed_model or not role:
+        return 0
+    if provider_type == "openrouter-free":
+        try:
+            return vote_after_failure(TIER_FREE, failed_model, role)
+        except Exception:  # noqa: BLE001
+            return 0
+    if provider_type == "openrouter-paid":
+        try:
+            return vote_after_failure(TIER_PAID, failed_model, role)
+        except Exception:  # noqa: BLE001
+            return 0
+    return 0
