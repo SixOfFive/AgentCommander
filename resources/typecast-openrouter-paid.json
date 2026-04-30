@@ -1,11 +1,12 @@
 {
   "_meta": {
-    "description": "OpenRouter Paid model scores per agent role. Auto-populated by AgentCommander's voting tests — do not edit by hand. Mirrors the schema of the main TypeCast catalog so the same threshold-cascade picker can consume both.",
-    "registrySource": "openrouter.ai/models (live fetch on first vote)",
+    "tier": "paid",
+    "description": "OpenRouter paid-tier model scores per agent role. Per-(model, role) voting under by_role.{role}.{score, successes, rate_limits, runs}. Fetched from OpenRouter /v1/models on configure; votes accumulated from live runs (-1 to failed model for THAT role on 429, +1 to every other model for THAT role).",
+    "registrySource": "openrouter.ai/models",
     "voteIncrement": 1,
     "voteMax": 1000000,
     "voteMin": -1000000,
-    "scoreFormula": "preferred_for/avoid_for tags accumulate +/- voteIncrement per pass; threshold cascade picks highest-scoring per role",
+    "lastFetchedAt": null,
     "lastVoteAt": null,
     "voteCount": 0,
     "modelCount": 0
