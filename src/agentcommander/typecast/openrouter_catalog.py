@@ -300,55 +300,45 @@ def populate_from_openrouter(tier: str,
 def record_vote(tier: str, model_id: str, role: str, *,
                 scope: str = "preferred",
                 increment: int = VOTE_INCREMENT) -> int:
-    """Apply one ±vote to ``(model_id, role)``. Returns the new score.
+    """Apply one ±vote to ``(model_id, role)``. Returns the new per-role
+    score for that pair.
 
-    ``scope='preferred'`` → +increment, role added to preferred_for,
-    removed from avoid_for, ``successes`` counter +1.
-    ``scope='avoid'`` → -increment, role added to avoid_for, removed
-    from preferred_for, ``rate_limits`` counter +1.
+    Per-(model, role) scoring: a +1 for ``coder`` does NOT raise the
+    model's score for ``translator``. The picker reads ``by_role[role]``
+    when ranking candidates, so each agent ends up with its own
+    independent best-fit ranking.
 
-    The model must exist in the catalog (populate it first via
-    ``populate_from_openrouter``); this function silently no-ops on
-    unknown models so a vote against a model OpenRouter doesn't
-    advertise (e.g. an alias the user typed manually) doesn't crash
-    the run.
+    ``scope='preferred'`` → ``+increment``, ``successes`` counter +1.
+    ``scope='avoid'`` → ``-increment``, ``rate_limits`` counter +1.
+
+    The model is registered on the fly if absent; metadata stays None
+    until the next ``populate_from_openrouter``.
     """
     _check_tier(tier)
     catalog = load(tier)
     models = catalog["_models"]
     if model_id not in models:
-        # Model was never registered. Add it with an empty entry so the
-        # vote sticks; metadata stays None until the next populate.
         models[model_id] = _empty_model_entry()
     entry = models[model_id]
-
-    pref = entry.setdefault("preferred_for", [])
-    avoid = entry.setdefault("avoid_for", [])
+    stats = _ensure_role_stats(entry, role)
 
     if scope == "preferred":
-        if role not in pref:
-            pref.append(role)
-        if role in avoid:
-            avoid.remove(role)
         delta = abs(increment)
-        entry["successes"] = int(entry.get("successes", 0)) + 1
+        stats["successes"] = int(stats.get("successes", 0)) + 1
     elif scope == "avoid":
-        if role not in avoid:
-            avoid.append(role)
-        if role in pref:
-            pref.remove(role)
         delta = -abs(increment)
-        entry["rate_limits"] = int(entry.get("rate_limits", 0)) + 1
+        stats["rate_limits"] = int(stats.get("rate_limits", 0)) + 1
     else:
         raise ValueError(f'scope must be "preferred" or "avoid"; got {scope!r}')
 
-    entry["score"] = max(VOTE_MIN, min(VOTE_MAX, int(entry.get("score", 0)) + delta))
-    entry["runs"] = int(entry.get("runs", 0)) + 1
-    entry["lastBumpAt"] = int(time.time() * 1000)
+    stats["score"] = max(VOTE_MIN,
+                         min(VOTE_MAX, int(stats.get("score", 0)) + delta))
+    stats["runs"] = int(stats.get("runs", 0)) + 1
+    stats["lastBumpAt"] = int(time.time() * 1000)
     catalog["_meta"]["voteCount"] = int(catalog["_meta"].get("voteCount", 0)) + 1
     catalog["_meta"]["lastVoteAt"] = int(time.time() * 1000)
     save(tier, catalog)
-    return int(entry["score"])
+    return int(stats["score"])
 
 
 def pick_for_role(tier: str, role: str, *,
