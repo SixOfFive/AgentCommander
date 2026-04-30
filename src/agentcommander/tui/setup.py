@@ -303,6 +303,7 @@ def configure_openrouter_free(*, existing_key: str | None = None) -> bool:
     from agentcommander.providers.openrouter import OPENROUTER_FREE_DEFAULT_MODEL
     from agentcommander.db.repos import (
         clear_role_assignments,
+        set_config,
         set_role_assignment,
     )
     from agentcommander.types import ALL_ROLES, Role
@@ -326,6 +327,14 @@ def configure_openrouter_free(*, existing_key: str | None = None) -> bool:
         "model": OPENROUTER_FREE_DEFAULT_MODEL,
     })
 
+    # Conservative ctx ceiling for the free tier. ``openrouter/free`` is an
+    # auto-router that picks among many free models with varying context
+    # windows (8k–32k). 16k splits the difference: most free models honor
+    # it, the bar shows a meaningful "ctx N/16k" indicator, and the user
+    # can raise it with /context 32k if they know the routed model handles
+    # more.
+    OR_FREE_CTX_DEFAULT = 16384
+
     # Wipe any prior role assignments and pin every TEXT role to the
     # default free model. This is direct (no TypeCast threshold cascade)
     # because there's exactly one model on offer.
@@ -340,13 +349,19 @@ def configure_openrouter_free(*, existing_key: str | None = None) -> bool:
             provider_id=cfg.id,
             model=OPENROUTER_FREE_DEFAULT_MODEL,
             is_override=True,
-            context_window_tokens=None,
+            context_window_tokens=OR_FREE_CTX_DEFAULT,
         )
         n_assigned += 1
 
+    # Persist the same value as the session ceiling so the bar's idle
+    # display shows ``ctx —/16k`` immediately on next launch (without
+    # waiting for the first role call to backfill it).
+    set_config("session_ceiling_tokens", OR_FREE_CTX_DEFAULT)
+
     render_system_line(
         f"added provider {style('accent', cfg.id)} → "
-        f"{style('accent', OPENROUTER_FREE_DEFAULT_MODEL)}"
+        f"{style('accent', OPENROUTER_FREE_DEFAULT_MODEL)} "
+        f"{style('muted', f'(ctx {OR_FREE_CTX_DEFAULT // 1024}k)')}"
     )
     render_system_line(style("muted",
         f"  assigned {n_assigned} text role(s) to this free model "
