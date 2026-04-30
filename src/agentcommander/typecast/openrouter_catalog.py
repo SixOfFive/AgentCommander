@@ -1,22 +1,37 @@
-"""OpenRouter Paid scores catalog — lives at the repo root, NOT cwd.
+"""OpenRouter scores catalogs — separate files for free and paid tiers.
 
-The user's earlier decision: scores are accumulated by AgentCommander's
-specialized voting tests (separate, future work) and persisted to
-``resources/typecast-openrouter-paid.json`` in the SOURCE TREE — not the
-project's working directory. That way every install of AgentCommander
-shares the same accumulated knowledge across projects.
+Two catalogs live at the AgentCommander repo root (the "main project
+folder"), parallel to the main TypeCast catalog for Ollama:
 
-This module provides:
-  - ``catalog_path()`` — locate the JSON file, walking up from this file
-    so dev (in-repo) and installed (next to package) layouts both work
-  - ``load()`` / ``save(catalog)`` — read/write helpers with safe defaults
-  - ``record_vote(model, role, increment, scope)`` — apply one
-    preferred_for / avoid_for adjustment from a voting pass
-  - ``empty_catalog()`` — the seed shape used when the file is missing
+  - ``resources/typecast-openrouter-free.json`` — scored ``:free``-tier
+    models. ``configure_openrouter_free`` fetches OpenRouter's /models
+    endpoint, filters to ids ending ``:free``, and seeds the catalog
+    with metadata. Votes accumulate from live runs.
+  - ``resources/typecast-openrouter-paid.json`` — scored paid-tier
+    models. Same flow, filtered to ids NOT ending ``:free``. Free
+    models never appear in this catalog so the picker can't fall back
+    to one when paid is selected.
 
-The schema mirrors the main TypeCast catalog so the existing
-``autoconfig.py`` threshold-cascade picker can consume both files
-seamlessly once the voting tests populate ``_models``.
+Voting (matches the user's spec): each successful call from an OR
+provider records a +1 vote for ``(model, role)``. Each rate-limit (HTTP
+429) records a -1 vote. Over time, the highest-voted model per role
+becomes the autoconfig pick.
+
+Metadata propagated from ``/v1/models`` per entry:
+  - name              display name (e.g. "Llama 3.3 70B Instruct")
+  - contextLength     max context window (top_provider.context_length
+                      preferred over the root context_length)
+  - max_completion    top_provider.max_completion_tokens (or None)
+  - pricing_prompt    USD per million input tokens (str — OR returns
+                      it as a string for precision)
+  - pricing_completion USD per million output tokens
+  - modality          "text" / "multimodal" / etc.
+  - supported_params  list of params accepted by /v1/chat/completions
+                      (used to gate features like response_format)
+
+The threshold-cascade picker in ``autoconfig.py`` doesn't currently
+consume these — it's Ollama-only — but the data is here for when we
+extend it.
 """
 from __future__ import annotations
 
@@ -26,33 +41,50 @@ from pathlib import Path
 from typing import Any
 
 
-CATALOG_FILENAME = "typecast-openrouter-paid.json"
+TIER_FREE = "free"
+TIER_PAID = "paid"
+
+_FILENAME_BY_TIER: dict[str, str] = {
+    TIER_FREE: "typecast-openrouter-free.json",
+    TIER_PAID: "typecast-openrouter-paid.json",
+}
+
+_ENV_BY_TIER: dict[str, str] = {
+    TIER_FREE: "AGENTCOMMANDER_OR_FREE_CATALOG",
+    TIER_PAID: "AGENTCOMMANDER_OR_PAID_CATALOG",
+}
+
 VOTE_INCREMENT = 1
 VOTE_MAX = 1_000_000
 VOTE_MIN = -1_000_000
 
 
-def empty_catalog() -> dict[str, Any]:
+def _check_tier(tier: str) -> None:
+    if tier not in _FILENAME_BY_TIER:
+        raise ValueError(f'tier must be "free" or "paid"; got {tier!r}')
+
+
+def empty_catalog(tier: str) -> dict[str, Any]:
     """Return the seed shape used when the file is missing or corrupt.
 
-    Matches the schema in ``resources/typecast-openrouter-paid.json`` so
-    a save-after-empty produces a file equivalent to the bundled one.
+    Two top-level keys: ``_meta`` and ``_models``. The shape mirrors
+    the main TypeCast catalog so a future generic picker could consume
+    either file.
     """
+    _check_tier(tier)
     return {
         "_meta": {
+            "tier": tier,
             "description": (
-                "OpenRouter Paid model scores per agent role. "
-                "Auto-populated by AgentCommander's voting tests — "
-                "do not edit by hand."
+                f"OpenRouter {tier} model scores per agent role. Fetched "
+                "from OpenRouter /v1/models on configure; votes "
+                "accumulated from live runs (+1 success, -1 rate-limit)."
             ),
-            "registrySource": "openrouter.ai/models (live fetch on first vote)",
+            "registrySource": "openrouter.ai/models",
             "voteIncrement": VOTE_INCREMENT,
             "voteMax": VOTE_MAX,
             "voteMin": VOTE_MIN,
-            "scoreFormula": (
-                "preferred_for/avoid_for tags accumulate +/- voteIncrement "
-                "per pass; threshold cascade picks highest-scoring per role"
-            ),
+            "lastFetchedAt": None,
             "lastVoteAt": None,
             "voteCount": 0,
             "modelCount": 0,
@@ -61,83 +93,90 @@ def empty_catalog() -> dict[str, Any]:
     }
 
 
-def catalog_path() -> Path:
-    """Locate ``typecast-openrouter-paid.json`` in the AgentCommander repo.
+def catalog_filename(tier: str) -> str:
+    _check_tier(tier)
+    return _FILENAME_BY_TIER[tier]
 
-    Search order matches ``agents/prompts.py:_prompt_dir``:
-      1. env override (``AGENTCOMMANDER_OR_PAID_CATALOG`` — full path)
+
+def catalog_path(tier: str) -> Path:
+    """Locate the catalog file for ``tier`` in the AgentCommander repo.
+
+    Search order (matches ``agents/prompts.py:_prompt_dir``):
+      1. env override (``AGENTCOMMANDER_OR_FREE_CATALOG`` / ``..._PAID_...``)
       2. installed-package neighbor: ``<pkg>/../../resources/<file>``
-      3. repo-dev: walk up from this module until a ``resources/<file>`` is found
-      4. fallback to a Path that doesn't exist — ``load`` returns the
-         empty catalog and ``save`` will create the file at this path.
+      3. repo-dev: walk up from this module until ``resources/<file>``
+      4. fallback: first parent with a ``resources/`` dir even if the
+         file isn't there yet — that's where ``save`` will create it.
     """
+    _check_tier(tier)
     import os
 
-    env = os.environ.get("AGENTCOMMANDER_OR_PAID_CATALOG")
+    fname = _FILENAME_BY_TIER[tier]
+    env_key = _ENV_BY_TIER[tier]
+
+    env = os.environ.get(env_key)
     if env:
         return Path(env)
 
     pkg_neighbor = (
         Path(__file__).resolve().parent.parent.parent.parent
-        / "resources" / CATALOG_FILENAME
+        / "resources" / fname
     )
     if pkg_neighbor.is_file():
         return pkg_neighbor
 
     here = Path(__file__).resolve()
     for parent in here.parents:
-        candidate = parent / "resources" / CATALOG_FILENAME
+        candidate = parent / "resources" / fname
         if candidate.is_file():
             return candidate
-        # Fall through to first parent that has a `resources/` dir even
-        # if the file isn't there yet — that's where we'll save.
         if (parent / "resources").is_dir():
-            return parent / "resources" / CATALOG_FILENAME
+            return parent / "resources" / fname
 
-    return Path("resources") / CATALOG_FILENAME
+    return Path("resources") / fname
 
 
-def load() -> dict[str, Any]:
-    """Read the OR Paid catalog. Returns an empty catalog when the file
-    is missing or unreadable so callers can treat the API uniformly.
-
-    A corrupt file is treated like a missing file — the program never
-    crashes on a malformed JSON catalog. Voting writes will silently
-    overwrite a corrupt file with the empty shape on the next save.
+def load(tier: str) -> dict[str, Any]:
+    """Read the catalog. Returns the empty seed shape on any failure
+    (missing file, corrupt JSON, wrong-shape root). Voting writes
+    silently overwrite a corrupt file with the empty shape on the next
+    save so transient corruption self-heals.
     """
-    path = catalog_path()
+    _check_tier(tier)
+    path = catalog_path(tier)
     try:
         text = path.read_text(encoding="utf-8")
     except (FileNotFoundError, OSError):
-        return empty_catalog()
+        return empty_catalog(tier)
     try:
         data = json.loads(text)
     except (ValueError, TypeError):
-        return empty_catalog()
+        return empty_catalog(tier)
     if not isinstance(data, dict):
-        return empty_catalog()
+        return empty_catalog(tier)
     if "_models" not in data or not isinstance(data["_models"], dict):
         data["_models"] = {}
     if "_meta" not in data or not isinstance(data["_meta"], dict):
-        data["_meta"] = empty_catalog()["_meta"]
+        data["_meta"] = empty_catalog(tier)["_meta"]
     return data
 
 
-def save(catalog: dict[str, Any]) -> bool:
+def save(tier: str, catalog: dict[str, Any]) -> bool:
     """Persist the catalog to disk. Returns True on success, False on
     write failure (read-only filesystem, missing parent dir, etc.).
 
-    Updates ``_meta.lastVoteAt`` and ``_meta.modelCount`` so a glance
-    at the file tells the user how recent the data is and how many
-    models the voting has touched so far.
+    Updates ``_meta.modelCount`` and ``_meta.lastVoteAt`` (when this
+    save is part of a vote — caller-driven). Other meta fields are
+    preserved as-is.
     """
-    path = catalog_path()
+    _check_tier(tier)
+    path = catalog_path(tier)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
     except OSError:
         return False
-    meta = catalog.setdefault("_meta", empty_catalog()["_meta"])
-    meta["lastVoteAt"] = int(time.time() * 1000)
+    meta = catalog.setdefault("_meta", empty_catalog(tier)["_meta"])
+    meta["tier"] = tier
     meta["modelCount"] = len(catalog.get("_models", {}))
     try:
         path.write_text(
@@ -150,32 +189,117 @@ def save(catalog: dict[str, Any]) -> bool:
 
 
 def _empty_model_entry() -> dict[str, Any]:
-    """Per-model row default — matches main TypeCast catalog shape."""
+    """Per-model row default. ``preferred_for`` / ``avoid_for`` mirror
+    the existing TypeCast schema; ``successes`` and ``rate_limits``
+    are extra debug counters so the user can see why a model's score
+    is what it is.
+    """
     return {
         "preferred_for": [],
         "avoid_for": [],
         "score": 0,
         "runs": 0,
+        "successes": 0,
+        "rate_limits": 0,
         "lastBumpAt": 0,
+        # Metadata (filled by ``populate_from_openrouter``):
+        "name": None,
+        "contextLength": None,
+        "max_completion_tokens": None,
+        "pricing_prompt": None,
+        "pricing_completion": None,
+        "modality": None,
+        "supported_params": [],
     }
 
 
-def record_vote(model_id: str, role: str, *, scope: str = "preferred",
-                increment: int = VOTE_INCREMENT) -> int:
-    """Apply one vote to ``(model_id, role)``.
+def populate_from_openrouter(tier: str,
+                              openrouter_models: list[dict[str, Any]]) -> int:
+    """Refresh the catalog's metadata from a fresh /v1/models response.
 
-    ``scope`` is ``"preferred"`` (boost) or ``"avoid"`` (penalty). The
-    role is added to (or removed from) the corresponding tag list and
-    the model's overall score is bumped by ``increment``. Returns the
-    model's new aggregate score (clamped to [VOTE_MIN, VOTE_MAX]).
+    Existing votes (``score``, ``preferred_for``, ``avoid_for``,
+    ``successes``, ``rate_limits``, ``runs``, ``lastBumpAt``) are
+    preserved — only the metadata fields are overwritten. New models
+    get added with the empty-entry shape; models that disappeared
+    upstream are kept (votes still apply if upstream un-deprecates).
 
-    Future voting tests will call this from per-role benchmark passes:
-      - good output → record_vote(model, role, scope="preferred")
-      - guard rejection / parse failure → record_vote(model, role, scope="avoid")
+    Returns the number of models in the catalog after populate.
     """
-    catalog = load()
+    _check_tier(tier)
+    catalog = load(tier)
     models = catalog["_models"]
-    entry = models.setdefault(model_id, _empty_model_entry())
+
+    free_filter = (tier == TIER_FREE)
+
+    for m in openrouter_models:
+        if not isinstance(m, dict):
+            continue
+        mid = m.get("id") or ""
+        if not mid:
+            continue
+        is_free = mid.endswith(":free")
+        if free_filter and not is_free:
+            continue
+        if not free_filter and is_free:
+            continue
+
+        entry = models.get(mid) or _empty_model_entry()
+
+        # Metadata (overwrite — these change on upstream model updates)
+        entry["name"] = m.get("name") or m.get("canonical_slug") or mid
+        # OR exposes context_length at root AND nested under top_provider.
+        # Prefer top_provider's value when present (it's the cap that the
+        # actual upstream provider honors; the root one can be a hint).
+        ctx = m.get("context_length")
+        tp = m.get("top_provider") if isinstance(m.get("top_provider"), dict) else None
+        if tp and isinstance(tp.get("context_length"), int):
+            ctx = tp["context_length"]
+        entry["contextLength"] = ctx if isinstance(ctx, int) else None
+        if tp and isinstance(tp.get("max_completion_tokens"), int):
+            entry["max_completion_tokens"] = tp["max_completion_tokens"]
+        else:
+            entry["max_completion_tokens"] = None
+        pricing = m.get("pricing") if isinstance(m.get("pricing"), dict) else {}
+        # Prices are returned as strings for precision (e.g. "0.00000060");
+        # we store them as-is and let the UI format.
+        entry["pricing_prompt"] = pricing.get("prompt")
+        entry["pricing_completion"] = pricing.get("completion")
+        arch = m.get("architecture") if isinstance(m.get("architecture"), dict) else {}
+        entry["modality"] = arch.get("modality") or arch.get("input_modalities")
+        supported = m.get("supported_parameters")
+        entry["supported_params"] = supported if isinstance(supported, list) else []
+
+        models[mid] = entry
+
+    catalog["_meta"]["lastFetchedAt"] = int(time.time() * 1000)
+    save(tier, catalog)
+    return len(models)
+
+
+def record_vote(tier: str, model_id: str, role: str, *,
+                scope: str = "preferred",
+                increment: int = VOTE_INCREMENT) -> int:
+    """Apply one ±vote to ``(model_id, role)``. Returns the new score.
+
+    ``scope='preferred'`` → +increment, role added to preferred_for,
+    removed from avoid_for, ``successes`` counter +1.
+    ``scope='avoid'`` → -increment, role added to avoid_for, removed
+    from preferred_for, ``rate_limits`` counter +1.
+
+    The model must exist in the catalog (populate it first via
+    ``populate_from_openrouter``); this function silently no-ops on
+    unknown models so a vote against a model OpenRouter doesn't
+    advertise (e.g. an alias the user typed manually) doesn't crash
+    the run.
+    """
+    _check_tier(tier)
+    catalog = load(tier)
+    models = catalog["_models"]
+    if model_id not in models:
+        # Model was never registered. Add it with an empty entry so the
+        # vote sticks; metadata stays None until the next populate.
+        models[model_id] = _empty_model_entry()
+    entry = models[model_id]
 
     pref = entry.setdefault("preferred_for", [])
     avoid = entry.setdefault("avoid_for", [])
@@ -186,29 +310,115 @@ def record_vote(model_id: str, role: str, *, scope: str = "preferred",
         if role in avoid:
             avoid.remove(role)
         delta = abs(increment)
+        entry["successes"] = int(entry.get("successes", 0)) + 1
     elif scope == "avoid":
         if role not in avoid:
             avoid.append(role)
         if role in pref:
             pref.remove(role)
         delta = -abs(increment)
+        entry["rate_limits"] = int(entry.get("rate_limits", 0)) + 1
     else:
         raise ValueError(f'scope must be "preferred" or "avoid"; got {scope!r}')
 
     entry["score"] = max(VOTE_MIN, min(VOTE_MAX, int(entry.get("score", 0)) + delta))
     entry["runs"] = int(entry.get("runs", 0)) + 1
     entry["lastBumpAt"] = int(time.time() * 1000)
-
     catalog["_meta"]["voteCount"] = int(catalog["_meta"].get("voteCount", 0)) + 1
-    save(catalog)
+    catalog["_meta"]["lastVoteAt"] = int(time.time() * 1000)
+    save(tier, catalog)
     return int(entry["score"])
 
 
-def has_data() -> bool:
-    """True when the catalog has at least one scored model.
+def pick_for_role(tier: str, role: str, *,
+                   fallback: str | None = None) -> str | None:
+    """Return the best model for ``role`` from the catalog.
 
-    Used by the autoconfig dispatch to decide whether OR Paid can be
-    auto-configured (data present) or must defer to manual setup
-    (still empty — voting hasn't run yet).
+    Selection rules:
+      1. Models with ``role in preferred_for`` rank first
+      2. Among those, highest ``score`` wins (ties broken by ``successes``,
+         then alphabetical for determinism)
+      3. If nothing has the role in preferred_for, fall back to the
+         single highest-scoring model overall (any positive score)
+      4. Final fallback: ``fallback`` argument
+
+    Returns ``None`` only when the catalog is empty AND no fallback
+    is provided.
     """
-    return bool(load().get("_models"))
+    _check_tier(tier)
+    catalog = load(tier)
+    models: dict[str, dict[str, Any]] = catalog.get("_models") or {}
+    if not models:
+        return fallback
+
+    role_lower = role.lower()
+
+    def _key(item: tuple[str, dict[str, Any]]) -> tuple:
+        mid, entry = item
+        score = int(entry.get("score", 0))
+        succ = int(entry.get("successes", 0))
+        return (-score, -succ, mid)
+
+    # Tier 1: explicit preferred_for hits
+    preferred = [
+        (mid, e) for mid, e in models.items()
+        if role_lower in [r.lower() for r in (e.get("preferred_for") or [])]
+        and role_lower not in [r.lower() for r in (e.get("avoid_for") or [])]
+    ]
+    if preferred:
+        preferred.sort(key=_key)
+        return preferred[0][0]
+
+    # Tier 2: any model with positive score (and not in avoid_for for this role)
+    scored = [
+        (mid, e) for mid, e in models.items()
+        if int(e.get("score", 0)) > 0
+        and role_lower not in [r.lower() for r in (e.get("avoid_for") or [])]
+    ]
+    if scored:
+        scored.sort(key=_key)
+        return scored[0][0]
+
+    # Tier 3: any model not in avoid_for (sort by score desc — even 0
+    # is fine since it just means "untested but allowed")
+    allowed = [
+        (mid, e) for mid, e in models.items()
+        if role_lower not in [r.lower() for r in (e.get("avoid_for") or [])]
+    ]
+    if allowed:
+        allowed.sort(key=_key)
+        return allowed[0][0]
+
+    return fallback
+
+
+def has_data(tier: str) -> bool:
+    """True when the catalog has at least one model registered."""
+    _check_tier(tier)
+    return bool(load(tier).get("_models"))
+
+
+# ─── Voting dispatcher ────────────────────────────────────────────────────
+
+
+def vote_for_provider(provider_type: str | None, model: str | None,
+                       role: str, *, scope: str = "preferred") -> None:
+    """Route a vote to the right tier based on the provider type.
+
+    Called from role_call.py (success path → preferred) and from
+    engine.py's retry helper (rate-limit path → avoid). Silently
+    no-ops for non-OR providers so Ollama / llama.cpp calls don't
+    accidentally write to the OR catalogs.
+    """
+    if not model or not provider_type or not role:
+        return
+    if provider_type == "openrouter-free":
+        try:
+            record_vote(TIER_FREE, model, role, scope=scope)
+        except Exception:  # noqa: BLE001
+            pass
+    elif provider_type == "openrouter-paid":
+        try:
+            record_vote(TIER_PAID, model, role, scope=scope)
+        except Exception:  # noqa: BLE001
+            pass
