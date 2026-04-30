@@ -868,25 +868,82 @@ class PipelineRun:
                              fn) -> "Iterator[PipelineEvent]":
         """Generator wrapper that retries ``fn()`` on ProviderRateLimited.
 
-        Usage from another generator method::
+        Two strategies, picked automatically by provider type:
 
-            result = yield from self._retry_on_rate_limit("classify",
+        1. **OR providers** (openrouter-free / openrouter-paid) — fast
+           swap. On 429: vote (-1 failing model, +1 siblings), look up
+           the next-best alternate from the catalog excluding models
+           we've already rate-limited THIS RUN, swap the role's DB
+           assignment, retry immediately. Repeat until success or the
+           catalog is exhausted. No backoff sleep — moving to a fresh
+           model is faster than waiting on the same one.
+
+        2. **Local providers** (Ollama / llama.cpp) — backoff schedule.
+           60s → 120s → 240s → 480s → 960s with /stop-aware sleep and
+           a 15-second countdown announce.
+
+        ``self.is_cancelled()`` honored both paths.
+
+        Usage::
+
+            result = yield from self._retry_on_rate_limit("orchestrate",
                 lambda: call_role(...))
-
-        Yields ``retry`` PipelineEvents at retry-start and during the
-        wait (every ~15 s). Honors ``self.is_cancelled()`` so /stop
-        breaks out of the wait immediately. After the schedule is
-        exhausted, re-raises the last ProviderRateLimited so the caller
-        can fall through to its normal error path.
-
-        Also lowers the failing model's vote in the OR catalog (-1) and
-        boosts every other model (+1) for this role. Voting is a no-op
-        for non-OR providers. Looks up the role's resolved (provider,
-        model) from ``action_label`` (which matches a Role.value when
-        the call site passes it that way) — when the label isn't a role
-        name we skip voting (e.g. "classify" for the router; we'd want
-        Role.ROUTER but the label is too generic to map back).
         """
+        role = self._label_to_role(action_label)
+        or_provider_type = self._is_or_provider_for(role)
+
+        # ── Fast swap path for OR providers ─────────────────────────
+        if or_provider_type and role is not None:
+            rate_limited_this_run: set[str] = set()
+            # Cap iterations at the catalog size + 1 so we exit
+            # cleanly after exhausting all models, even if something
+            # weird like an empty catalog races the loop.
+            from agentcommander.typecast.openrouter_catalog import (
+                TIER_FREE, TIER_PAID, load,
+            )
+            tier = TIER_FREE if or_provider_type == "openrouter-free" else TIER_PAID
+            max_attempts = len(load(tier).get("_models", {})) + 1
+
+            from agentcommander.db.repos import get_role_assignment
+
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    return fn()
+                except ProviderRateLimited:
+                    if self.is_cancelled():
+                        raise
+                    # Vote first so swap picks reflect this run's losers.
+                    self._record_rate_limit_vote(action_label)
+                    # Mark the current model as off-limits for this run.
+                    cur = get_role_assignment(role)
+                    cur_model = cur["model"] if cur else None
+                    if cur_model:
+                        rate_limited_this_run.add(cur_model)
+                    # Find an alternate.
+                    alt = self._pick_alternate(or_provider_type, role,
+                                                rate_limited_this_run)
+                    if alt is None:
+                        # Catalog exhausted — re-raise so the caller
+                        # can yield a clean error.
+                        raise
+                    # Swap and retry.
+                    if not self._swap_role_to(role, alt):
+                        raise
+                    yield PipelineEvent(
+                        type="swap",
+                        role=role.value,
+                        swap_from_model=cur_model,
+                        swap_to_model=alt,
+                        retry_attempt=attempt,
+                        retry_max=max_attempts,
+                    )
+            # Exhausted all models in the catalog.
+            raise ProviderRateLimited(
+                f"all {or_provider_type} models in the catalog hit rate-limits "
+                f"during this run"
+            )
+
+        # ── Backoff path for local providers ────────────────────────
         schedule = self._RATE_LIMIT_BACKOFF_S
         last_exc: ProviderRateLimited | None = None
         for attempt, base_wait in enumerate(schedule, start=1):
