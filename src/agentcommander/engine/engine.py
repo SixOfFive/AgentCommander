@@ -470,7 +470,25 @@ class PipelineRun:
                 yield PipelineEvent(type="iteration", iteration=iteration)
 
                 try:
-                    decision = self._orchestrate(opts)
+                    decision = yield from self._orchestrate(opts)
+                except ProviderRateLimited as exc:
+                    # Retries exhausted on the orchestrator. Surface a
+                    # clean error and stop — DO NOT include the raw 429
+                    # body in the user-visible event (it gets logged via
+                    # update_pipeline_run for /history, but the user sees
+                    # only the actionable message). Mirror already saw
+                    # the live countdown via retry events.
+                    yield PipelineEvent(
+                        type="error",
+                        error="rate-limited (provider blocked our retries) — "
+                              "/autoconfig clear to switch providers, "
+                              "or wait and re-run",
+                    )
+                    update_pipeline_run(self.run_id, status="failed",
+                                        iterations=iteration,
+                                        error=f"rate-limited: {exc}",
+                                        category=category)
+                    return
                 except (ProviderError, RoleNotAssigned) as exc:
                     yield PipelineEvent(type="error", error=str(exc))
                     update_pipeline_run(self.run_id, status="failed",
