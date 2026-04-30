@@ -269,6 +269,16 @@ class StatusBar:
                 (time.time() - self.state.run_started_at) * 1000
             )
 
+        # Tee the live bar state to the mirror (primary only — mirror is RO).
+        # Throttled to ~10 Hz internally so even the timer-tick redraw rate
+        # doesn't generate excessive DB writes.
+        if not self._mirror_mode:
+            try:
+                from agentcommander.engine import live_tee
+                live_tee.maybe_tee_bar_state(_state_to_dict(self.state))
+            except Exception:  # noqa: BLE001
+                pass
+
         # Resize-aware: re-pin the scroll region if the terminal changed.
         cols, rows = term_size()
         if (cols, rows) != (self._cols, self._rows):
