@@ -381,7 +381,10 @@ class StatusBar:
         # Build the visible-text version (no ANSI codes) so we can right-align it.
         if s.role and s.model:
             verb = "▸" if s.pipeline_running else "·"
-            role_part = f"{verb} {s.role} → {s.model}"
+            tps_suffix = ""
+            if s.model_tps is not None and s.model_tps > 0:
+                tps_suffix = f" @ {_fmt_tps(s.model_tps)}"
+            role_part = f"{verb} {s.role} → {s.model}{tps_suffix}"
         elif s.pipeline_running:
             role_part = "▸ ..."
         else:
