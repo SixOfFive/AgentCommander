@@ -335,7 +335,6 @@ def run_mirror() -> int:
     with raw_mode():
         while not should_exit:
             try:
-                tick_ok = True
                 # ── 1. Conversation switch detection ──────────────────
                 new_active = _resolve_active()
                 if new_active != active_conv_id:
