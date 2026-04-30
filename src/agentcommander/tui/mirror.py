@@ -367,8 +367,16 @@ def run_mirror() -> int:
                     last_event_id = max(last_event_id, int(evt.get("id") or 0))
 
                 # ── 3. Apply bar snapshot ─────────────────────────────
+                # Skip the repaint when the snapshot hasn't actually
+                # changed. Without this, bar.redraw() fires every poll
+                # tick (~5 Hz) and the clear-to-EOL on each line shows
+                # as a visible flicker on slower terminals. We only pay
+                # the redraw cost when role/tokens/ctx/timers changed.
                 try:
-                    _apply_bar_state(get_bar_state())
+                    new_snap = get_bar_state()
+                    if new_snap != last_bar_snapshot:
+                        _apply_bar_state(new_snap)
+                        last_bar_snapshot = new_snap
                 except Exception:  # noqa: BLE001
                     pass
 
