@@ -83,7 +83,12 @@ def _wait_for_db(path: Path, *, on_tick) -> None:
 def _replay_conversation(conv_id: str | None) -> int:
     """Render the active conversation's stored messages. Returns the id of
     the last event we should treat as "already seen" — the high-water mark
-    primary's events stream is at right now, so polling starts AFTER it."""
+    primary's events stream is at right now, so polling starts AFTER it.
+
+    Tolerant of: missing pipeline_events table (older DB pre-migration),
+    missing messages, transient DB errors. Returns 0 in any error path so
+    the next poll picks up everything new from id > 0.
+    """
     from agentcommander.db.repos import (
         latest_pipeline_event_id,
         list_messages,
@@ -92,7 +97,10 @@ def _replay_conversation(conv_id: str | None) -> int:
     if not conv_id:
         render_system_line(style("muted",
             "  (no active conversation — waiting for primary to start one)"))
-        return latest_pipeline_event_id()
+        try:
+            return latest_pipeline_event_id()
+        except Exception:  # noqa: BLE001
+            return 0
 
     try:
         msgs = list_messages(conv_id)
@@ -110,8 +118,13 @@ def _replay_conversation(conv_id: str | None) -> int:
             render_assistant_message(m.content, markdown=True)
 
     # Snap event cursor to "now" so we don't replay everything that's
-    # already on disk — only events that arrive AFTER attach.
-    return latest_pipeline_event_id()
+    # already on disk — only events that arrive AFTER attach. If the
+    # events table doesn't exist yet (older DB), 0 is the safe answer
+    # and the next tick will retry.
+    try:
+        return latest_pipeline_event_id()
+    except Exception:  # noqa: BLE001
+        return 0
 
 
 def _apply_bar_state(snapshot: dict[str, Any] | None) -> None:
