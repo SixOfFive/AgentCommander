@@ -718,6 +718,14 @@ class PipelineRun:
         breaks out of the wait immediately. After the schedule is
         exhausted, re-raises the last ProviderRateLimited so the caller
         can fall through to its normal error path.
+
+        Also lowers the failing model's vote in the OR catalog (-1) and
+        boosts every other model (+1) for this role. Voting is a no-op
+        for non-OR providers. Looks up the role's resolved (provider,
+        model) from ``action_label`` (which matches a Role.value when
+        the call site passes it that way) — when the label isn't a role
+        name we skip voting (e.g. "classify" for the router; we'd want
+        Role.ROUTER but the label is too generic to map back).
         """
         schedule = self._RATE_LIMIT_BACKOFF_S
         last_exc: ProviderRateLimited | None = None
@@ -726,6 +734,11 @@ class PipelineRun:
                 return fn()
             except ProviderRateLimited as exc:
                 last_exc = exc
+                # Vote down the failing model (and boost siblings) so
+                # repeat throttling on this model permanently shifts
+                # autoconfig away from it. Best-effort: never let a
+                # vote failure abort the retry loop.
+                self._record_rate_limit_vote(action_label)
                 # Server-suggested wait wins if it's longer than our slot.
                 wait = max(int(base_wait), int(exc.retry_after or 0))
                 # Initial announcement for this attempt.
