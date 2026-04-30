@@ -313,6 +313,23 @@ class OpenRouterProvider(ProviderBase):
                 err_body = exc.read().decode("utf-8", errors="replace")
             except Exception:  # noqa: BLE001
                 err_body = ""
+            # 429 = rate limit. OpenRouter sometimes surfaces upstream's
+            # 429 as 429 too (we saw this with the cognitivecomputations
+            # free model). Raise the dedicated exception so the engine
+            # runs the backoff/retry loop instead of treating it as a
+            # final failure that pollutes the scratchpad.
+            if exc.code == 429:
+                retry_hdr = exc.headers.get("Retry-After") if exc.headers else None
+                retry_after: float | None = None
+                if retry_hdr:
+                    try:
+                        retry_after = float(retry_hdr)
+                    except (TypeError, ValueError):
+                        retry_after = None
+                raise ProviderRateLimited(
+                    f"OpenRouter rate-limited: {err_body[:200]}",
+                    retry_after=retry_after,
+                ) from exc
             raise ProviderError(
                 f"OpenRouter chat failed: HTTP {exc.code} {exc.reason} — {err_body[:300]}"
             ) from exc
