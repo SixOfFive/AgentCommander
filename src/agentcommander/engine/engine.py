@@ -709,6 +709,113 @@ class PipelineRun:
     _RATE_LIMIT_BACKOFF_S: tuple[int, ...] = (60, 120, 240, 480, 960)
     _RETRY_ANNOUNCE_INTERVAL_S: int = 15
 
+    def _label_to_role(self, action_label: str) -> "Role | None":
+        """Map a rate-limit ``action_label`` back to a ``Role`` enum.
+
+        Call sites pass the role.value verbatim for direct delegations
+        (``"coder"``, ``"orchestrator"``); the router and chat-fallback
+        paths pass static labels (``"classify"``, ``"orchestrate"``,
+        ``"chat"``) which we map explicitly.
+        """
+        try:
+            return Role(action_label)
+        except ValueError:
+            label_map = {
+                "classify": Role.ROUTER,
+                "orchestrate": Role.ORCHESTRATOR,
+                "chat": Role.ORCHESTRATOR,
+            }
+            return label_map.get(action_label)
+
+    def _is_or_provider_for(self, role: "Role | None") -> str | None:
+        """Return the OR provider type ("openrouter-free" / "openrouter-paid")
+        if this role's provider is one, else None. Used to gate the
+        swap-on-429 fast path — Ollama / llama.cpp 429s still get the
+        slow backoff because they don't have a per-tier catalog of
+        alternates to swap between.
+        """
+        if role is None:
+            return None
+        rr = resolve_role(role)
+        if rr is None:
+            return None
+        try:
+            from agentcommander.providers.base import resolve as resolve_provider
+            provider = resolve_provider(rr.provider_id)
+        except Exception:  # noqa: BLE001
+            return None
+        ptype = getattr(provider, "type", None)
+        if ptype in ("openrouter-free", "openrouter-paid"):
+            return ptype
+        return None
+
+    def _swap_role_to(self, role: "Role", new_model: str) -> bool:
+        """Update the role's DB assignment to ``new_model`` so the next
+        ``call_role(role, ...)`` re-resolves to it. Preserves ``is_override``
+        so the swap survives subsequent autoconfig runs (this IS a
+        deliberate user-facing pin once chosen).
+
+        Pulls ``contextLength`` from the catalog for the new model so the
+        bar shows the right ctx cap on the next role-start.
+        """
+        from agentcommander.db.repos import get_role_assignment, set_role_assignment
+        from agentcommander.typecast.openrouter_catalog import (
+            TIER_FREE, TIER_PAID, load,
+        )
+        existing = get_role_assignment(role)
+        if existing is None:
+            return False
+        provider_id = existing["provider_id"]
+        # Look up ctx from whichever tier the new model belongs to.
+        ctx = existing.get("context_window_tokens")
+        for tier in (TIER_FREE, TIER_PAID):
+            cat = load(tier)
+            entry = cat.get("_models", {}).get(new_model)
+            if entry and isinstance(entry.get("contextLength"), int):
+                ctx = int(entry["contextLength"])
+                break
+        try:
+            set_role_assignment(
+                role=role, provider_id=provider_id, model=new_model,
+                is_override=True, context_window_tokens=ctx,
+            )
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _pick_alternate(self, provider_type: str, role: "Role",
+                        exclude: set[str]) -> str | None:
+        """Pick the next-best model from the appropriate catalog for
+        ``role``, skipping any model in ``exclude`` (the set we've already
+        rate-limited this run so we don't re-pick them in a loop).
+
+        Returns the model id, or None if every model in the catalog has
+        been tried.
+        """
+        from agentcommander.typecast.openrouter_catalog import (
+            TIER_FREE, TIER_PAID, load,
+        )
+        tier = TIER_FREE if provider_type == "openrouter-free" else TIER_PAID
+        catalog = load(tier)
+        models = catalog.get("_models") or {}
+
+        candidates = [
+            (mid, e) for mid, e in models.items()
+            if mid not in exclude
+            and role.value.lower() not in [r.lower() for r in (e.get("avoid_for") or [])]
+        ]
+        if not candidates:
+            return None
+
+        def _key(item):
+            mid, e = item
+            score = int(e.get("score", 0))
+            succ = int(e.get("successes", 0))
+            return (-score, -succ, mid)
+
+        candidates.sort(key=_key)
+        return candidates[0][0]
+
     def _record_rate_limit_vote(self, action_label: str) -> None:
         """Best-effort vote-down for the model currently being throttled.
 
