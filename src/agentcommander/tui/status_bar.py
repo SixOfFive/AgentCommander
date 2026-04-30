@@ -302,6 +302,13 @@ class StatusBar:
             # The cap_min stays so the bar shows "ctx —/8.2k" — the
             # configured ceiling is still relevant info.
             self.state.context_now = 0
+            # Same logic for retry pin — a finished run can't be in a
+            # retry wait. Drop any leftover state so the bar doesn't lie
+            # about the next idle prompt.
+            self.state.retry_attempt = None
+            self.state.retry_max = None
+            self.state.retry_wait_total_s = None
+            self.state.retry_started_at = None
         self.redraw()
         # Run-state transitions are mirror-critical: a watcher needs to see
         # pipeline_running flip immediately, not whenever the throttle
