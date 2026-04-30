@@ -232,6 +232,17 @@ class StatusBar:
             # configured ceiling is still relevant info.
             self.state.context_now = 0
         self.redraw()
+        # Run-state transitions are mirror-critical: a watcher needs to see
+        # pipeline_running flip immediately, not whenever the throttle
+        # next allows a write. Force an unthrottled tee here so the bar in
+        # the mirror process drops the "▸ running" verb the moment the
+        # primary's run actually ended.
+        if not self._mirror_mode:
+            try:
+                from agentcommander.engine import live_tee
+                live_tee.maybe_tee_bar_state(_state_to_dict(self.state), force=True)
+            except Exception:  # noqa: BLE001
+                pass
 
     def set_context(self, *, now: int | None = None, cap_min: int | None = None) -> None:
         if now is not None:
