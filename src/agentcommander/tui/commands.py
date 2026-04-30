@@ -1943,6 +1943,26 @@ def _build_registry() -> dict[str, SlashCommand]:
                     "$XDG_DATA_HOME/agentcommander/agentcommander.sqlite.",
         ),
         SlashCommand(
+            name="/status", aliases=(),
+            summary="model usage stacked bar for the current chat",
+            handler=cmd_status,
+            usage="/status",
+            details=(
+                "Renders a single horizontal bar for the active conversation,\n"
+                "with each segment sized in proportion to that model's share\n"
+                "of total tokens (prompt + completion). Below the bar, a chip\n"
+                "legend lists each model with its percentage, prompt-vs-\n"
+                "completion split, call count, and total provider wall-time.\n"
+                "\n"
+                "Source: token_usage table — populated by every role call as\n"
+                "it returns. Filtered to the current conversation so a noisy\n"
+                "older chat doesn't drown out what you're working on now.\n"
+                "Empty result means no role has finished yet in this chat —\n"
+                "send a prompt and re-run."
+            ),
+            examples=("/status",),
+        ),
+        SlashCommand(
             name="/new", aliases=(),
             summary="start a new conversation",
             handler=cmd_new,
