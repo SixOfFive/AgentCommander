@@ -108,6 +108,8 @@ _MIRRORED_BAR_FIELDS = (
     "model_tps",
     "or_credits_remaining", "or_credits_total",
     "or_daily_limit", "or_daily_limit_remaining",
+    "retry_attempt", "retry_max",
+    "retry_wait_total_s", "retry_started_at",
 )
 
 
