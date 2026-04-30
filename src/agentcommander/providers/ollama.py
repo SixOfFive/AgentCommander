@@ -20,6 +20,7 @@ from agentcommander.providers.base import (
     ChatMessage,
     ProviderBase,
     ProviderError,
+    ProviderRateLimited,
     provider_factory,
 )
 from agentcommander.safety.host_validator import validate_provider_host
