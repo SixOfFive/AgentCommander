@@ -202,6 +202,22 @@ def render_event(evt: PipelineEvent) -> None:
         _close_streaming()
         writeln(style("guard_label", f"  ⌫ guard:{evt.family}  ") +
                 style("muted", f"({evt.reason})"))
+    elif evt.type == "swap":
+        # Rate-limit fast-swap on an OR provider: vote shifted, a
+        # different model picked from the catalog, no wait. One-line
+        # display per swap so the user can see the model rotation.
+        _close_streaming()
+        from_m = evt.swap_from_model or "?"
+        to_m = evt.swap_to_model or "?"
+        attempt = evt.retry_attempt or 0
+        max_a = evt.retry_max or "?"
+        writeln(
+            style("warn", "  ↪ swap on ") +
+            style("accent", evt.role or "?") +
+            style("muted", f":  {from_m}  →  ") +
+            style("accent", to_m) +
+            style("muted", f"  (attempt {attempt}/{max_a})")
+        )
     elif evt.type == "retry":
         # Provider rate-limit backoff. Initial event for an attempt has
         # the full wait_seconds; subsequent countdown events have the
