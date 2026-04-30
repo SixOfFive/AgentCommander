@@ -190,6 +190,15 @@ class StatusBar:
         if num_ctx is not None:
             self.state.context_cap_min = num_ctx
         self.redraw()
+        # Role transitions are mirror-critical too: bypass the throttle so
+        # the watcher sees "▸ coder → devstral-small-2:24b" the instant
+        # primary fires the role-start, not 100 ms later.
+        if not self._mirror_mode:
+            try:
+                from agentcommander.engine import live_tee
+                live_tee.maybe_tee_bar_state(_state_to_dict(self.state), force=True)
+            except Exception:  # noqa: BLE001
+                pass
 
     def add_tokens(self, *, prompt: int = 0, completion: int = 0) -> None:
         self.state.tokens_in += max(0, prompt)
