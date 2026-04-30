@@ -261,12 +261,15 @@ class PipelineRun:
     # summary.
 
     COMPACTION_KEEP_TAIL: int = 6
-    COMPACTION_TRIGGER_FRACTION: float = 0.5  # of session context window
+    COMPACTION_TRIGGER_FRACTION: float = 0.9  # of session context window
     COMPACTION_DEFAULT_NUM_CTX: int = 8192    # fallback when no ceiling set
 
     def _compaction_budget_chars(self) -> int:
-        """Char budget for the prompt-side scratchpad. Roughly 50% of the
-        session context window expressed as chars (4 chars/token estimate)."""
+        """Char budget for the prompt-side scratchpad. Roughly 90% of the
+        session context window expressed as chars (4 chars/token estimate).
+        Compaction fires only when we're close to the ceiling so the model
+        keeps as much real history as possible before the summarizer trims
+        it — earlier compaction discards information unnecessarily."""
         from agentcommander.db.repos import get_config
         raw = get_config("session_ceiling_tokens", None)
         try:
