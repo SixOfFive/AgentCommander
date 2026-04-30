@@ -432,3 +432,132 @@ def clear_scratchpad(conversation_id: str) -> int:
         (conversation_id,),
     )
     return cur.rowcount or 0
+
+
+# ─── Active conversation tracker (mirror handshake) ───────────────────────
+#
+# The primary process writes the currently-displayed conversation id into
+# config so a read-only mirror knows which conversation to follow. Cleared
+# (set to None) by `/chat clear`; updated by `/chat new`, `/chat resume`,
+# and the startup auto-resume.
+
+ACTIVE_CONVERSATION_KEY = "active_conversation_id"
+
+
+def set_active_conversation_id(conv_id: str | None) -> None:
+    """Persist the active conversation id so a mirror can follow it.
+
+    Pass ``None`` to clear (e.g. after ``/chat clear`` deletes the chat).
+    """
+    set_config(ACTIVE_CONVERSATION_KEY, conv_id)
+
+
+def get_active_conversation_id() -> str | None:
+    raw = get_config(ACTIVE_CONVERSATION_KEY, None)
+    return raw if isinstance(raw, str) else None
+
+
+# ─── Pipeline events (mirror live stream) ─────────────────────────────────
+#
+# Each engine event the primary wants the mirror to see lands here as one
+# row. Payload is JSON, shape varies by event_type. Mirror polls
+# `id > last_seen_id` and renders in id-order.
+
+def insert_pipeline_event(
+    *,
+    event_type: str,
+    payload: dict[str, Any] | None = None,
+    conversation_id: str | None = None,
+    run_id: str | None = None,
+) -> int:
+    """Append one event to the mirror stream. Returns the new event id.
+
+    Cheap-by-design: a single INSERT, no joins, no triggers. ``payload`` is
+    serialized to JSON; pass dataclass dicts (asdict) or plain dicts.
+    """
+    body = json.dumps(payload or {}, default=_json_default)
+    cur = get_db().execute(
+        "INSERT INTO pipeline_events (conversation_id, run_id, event_type, payload, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (conversation_id, run_id, event_type, body, _now_ms()),
+    )
+    return int(cur.lastrowid or 0)
+
+
+def list_pipeline_events_after(last_id: int, *, limit: int = 1000) -> list[dict[str, Any]]:
+    """Mirror-side poll: return events with ``id > last_id`` in id order."""
+    rows = get_db().execute(
+        "SELECT id, conversation_id, run_id, event_type, payload, created_at "
+        "FROM pipeline_events WHERE id > ? ORDER BY id ASC LIMIT ?",
+        (last_id, limit),
+    ).fetchall()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        try:
+            payload = json.loads(r["payload"])
+        except (TypeError, ValueError):
+            payload = {}
+        out.append({
+            "id": r["id"],
+            "conversation_id": r["conversation_id"],
+            "run_id": r["run_id"],
+            "event_type": r["event_type"],
+            "payload": payload,
+            "created_at": r["created_at"],
+        })
+    return out
+
+
+def latest_pipeline_event_id() -> int:
+    """Highest id in the events table, or 0 if empty.
+
+    Mirror calls this once at startup so it doesn't replay the entire
+    historical event stream — only events that arrive AFTER mirror attached.
+    """
+    row = get_db().execute(
+        "SELECT MAX(id) AS m FROM pipeline_events"
+    ).fetchone()
+    if row is None or row["m"] is None:
+        return 0
+    return int(row["m"])
+
+
+def prune_pipeline_events(older_than_ms: int) -> int:
+    """Delete events older than the given epoch-ms cutoff. Returns rowcount.
+
+    Called once on primary startup to keep the DB from growing unboundedly
+    across long sessions. Mirror sees only the live tail anyway, so trimming
+    history is harmless.
+    """
+    cur = get_db().execute(
+        "DELETE FROM pipeline_events WHERE created_at < ?",
+        (older_than_ms,),
+    )
+    return cur.rowcount or 0
+
+
+# ─── Status bar state mirror ───────────────────────────────────────────────
+#
+# Primary serializes its StatusState every change and on each timer tick.
+# Mirror reads this on poll and applies fields onto its own bar so the user
+# sees role/model/tokens/ctx/timers exactly as the primary shows them.
+
+BAR_STATE_KEY = "bar_state_json"
+
+
+def set_bar_state(state_dict: dict[str, Any]) -> None:
+    set_config(BAR_STATE_KEY, state_dict)
+
+
+def get_bar_state() -> dict[str, Any] | None:
+    raw = get_config(BAR_STATE_KEY, None)
+    return raw if isinstance(raw, dict) else None
+
+
+def _json_default(obj: Any) -> Any:
+    """Best-effort coercion for non-stdlib-JSON types in event payloads."""
+    if hasattr(obj, "value"):  # Enum
+        return obj.value
+    if hasattr(obj, "__dict__"):
+        return obj.__dict__
+    return str(obj)
