@@ -225,14 +225,18 @@ def cmd_roles(ctx: CommandContext, args: list[str]) -> None:
     from agentcommander.types import ALL_ROLES, Role
 
     def _print_all() -> None:
+        from agentcommander.db.repos import get_throughput
+        from agentcommander.tui.status_bar import _fmt_tps
         rows: list[list[str]] = []
         for role in ALL_ROLES:
             rr = resolve_role(role)
             if rr is None:
-                rows.append([role.value, "—", "—", style("warn", "unset")])
+                rows.append([role.value, "—", "—", "—", style("warn", "unset")])
             else:
-                rows.append([role.value, rr.model, rr.provider_id, rr.kind])
-        render_table(["role", "model", "provider", "kind"], rows)
+                tps = get_throughput(rr.model)
+                rows.append([role.value, rr.model, rr.provider_id,
+                             _fmt_tps(tps), rr.kind])
+        render_table(["role", "model", "provider", "tok/s", "kind"], rows)
 
     def _try_role(role_str: str) -> Role | None:
         try:
