@@ -588,3 +588,115 @@ def _json_default(obj: Any) -> Any:
     if hasattr(obj, "__dict__"):
         return obj.__dict__
     return str(obj)
+
+
+# ─── Model throughput (running tokens/second average) ──────────────────────
+
+# Seed value used when a model has no recorded measurement yet. Picked to be
+# vaguely plausible for a small-to-medium local model on consumer hardware
+# so the first display reads sensibly; the running average converges to the
+# real rate within a few samples.
+DEFAULT_TOKENS_PER_SECOND = 100.0
+
+
+def get_throughput(model: str | None) -> float:
+    """Return the current running-average tokens/sec for ``model``.
+
+    Falls back to ``DEFAULT_TOKENS_PER_SECOND`` (100) when the model has no
+    row yet — this is the "haven't measured yet" default the UI shows so a
+    fresh install doesn't display a blank rate next to every model.
+    """
+    if not model:
+        return DEFAULT_TOKENS_PER_SECOND
+    try:
+        row = get_db().execute(
+            "SELECT tokens_per_second FROM model_throughput WHERE model = ?",
+            (model,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return DEFAULT_TOKENS_PER_SECOND
+    if row is None:
+        return DEFAULT_TOKENS_PER_SECOND
+    try:
+        return float(row["tokens_per_second"])
+    except (TypeError, ValueError):
+        return DEFAULT_TOKENS_PER_SECOND
+
+
+def record_throughput(model: str | None, completion_tokens: int | None,
+                      duration_ms: int | None) -> float | None:
+    """Update the running-average tokens/sec for ``model`` from one call's
+    measurement.
+
+    Formula (matches the user's spec):
+
+        rate    = completion_tokens / (duration_ms / 1000)
+        new_avg = (old_avg + rate) / 2
+
+    Where ``old_avg`` is whatever the table currently has for this model, or
+    ``DEFAULT_TOKENS_PER_SECOND`` if there's no row yet. The 50/50 weighting
+    means each fresh measurement is half the new value — quick to adapt
+    when a model's real throughput changes (e.g. a different size / quant
+    is swapped in under the same alias) without thrashing on noisy single
+    calls.
+
+    Skips the write entirely (returns the existing average instead) when
+    the inputs would produce a meaningless rate: zero/missing tokens, zero
+    duration, or no model name. Returns ``None`` on DB error so callers
+    can detect the failure and avoid teeing it.
+    """
+    if not model:
+        return None
+    if not completion_tokens or not duration_ms or duration_ms <= 0 or completion_tokens <= 0:
+        # Nothing useful to learn from this sample — return the existing
+        # value so callers that want to display "current rate" still get
+        # the right number.
+        return get_throughput(model)
+    seconds = duration_ms / 1000.0
+    rate = float(completion_tokens) / seconds
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT tokens_per_second FROM model_throughput WHERE model = ?",
+            (model,),
+        ).fetchone()
+        if row is None:
+            new_avg = (DEFAULT_TOKENS_PER_SECOND + rate) / 2.0
+            db.execute(
+                "INSERT INTO model_throughput (model, tokens_per_second, samples, updated_at) "
+                "VALUES (?, ?, 1, ?)",
+                (model, new_avg, _now_ms()),
+            )
+        else:
+            old_avg = float(row["tokens_per_second"])
+            new_avg = (old_avg + rate) / 2.0
+            db.execute(
+                "UPDATE model_throughput "
+                "SET tokens_per_second = ?, samples = samples + 1, updated_at = ? "
+                "WHERE model = ?",
+                (new_avg, _now_ms(), model),
+            )
+        return new_avg
+    except sqlite3.DatabaseError:
+        return None
+
+
+def list_throughput() -> list[dict[str, Any]]:
+    """Return all known throughput rows (model, tokens_per_second, samples).
+
+    Used by ``/status`` and other UI surfaces that show the current rate
+    per model. Order: highest measured rate first so the fastest models
+    surface in tables.
+    """
+    try:
+        rows = get_db().execute(
+            "SELECT model, tokens_per_second, samples, updated_at "
+            "FROM model_throughput ORDER BY tokens_per_second DESC"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    return [
+        {"model": r["model"], "tokens_per_second": float(r["tokens_per_second"]),
+         "samples": int(r["samples"]), "updated_at": r["updated_at"]}
+        for r in rows
+    ]
