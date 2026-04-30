@@ -257,9 +257,6 @@ class StatusBar:
     # ── Redraw ─────────────────────────────────────────────────────────────
 
     def redraw(self) -> None:
-        if not self._enabled or not self._installed:
-            return
-
         # Refresh the live run timer from the wall clock. This is why the
         # TUI loop calls redraw() once per second during a pipeline — without
         # that periodic call, the timer would only advance on engine events
@@ -270,14 +267,18 @@ class StatusBar:
             )
 
         # Tee the live bar state to the mirror (primary only — mirror is RO).
-        # Throttled to ~10 Hz internally so even the timer-tick redraw rate
-        # doesn't generate excessive DB writes.
+        # MUST run before the _enabled / _installed early-return so headless
+        # primary (piped stdin, remote shell, no-color terminal) still keeps
+        # the mirror's bar in sync. Throttled to ~10 Hz internally.
         if not self._mirror_mode:
             try:
                 from agentcommander.engine import live_tee
                 live_tee.maybe_tee_bar_state(_state_to_dict(self.state))
             except Exception:  # noqa: BLE001
                 pass
+
+        if not self._enabled or not self._installed:
+            return
 
         # Resize-aware: re-pin the scroll region if the terminal changed.
         cols, rows = term_size()
