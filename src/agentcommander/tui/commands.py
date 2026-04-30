@@ -1767,6 +1767,36 @@ def _build_registry() -> dict[str, SlashCommand]:
             examples=("/db", "/db check", "/db reindex", "/db backup ~/ac-backup.sqlite"),
         ),
         SlashCommand(
+            name="/chat", aliases=(),
+            summary="manage the active chat (status / list / new / clear / resume / title / export)",
+            handler=cmd_chat,
+            usage="/chat                       # show current chat status\n"
+                  "/chat list                  # list recent chats\n"
+                  "/chat new [<title>]         # start a fresh chat\n"
+                  "/chat clear                 # DESTRUCTIVE: delete current chat + scratchpad\n"
+                  "/chat resume <id_prefix>    # switch to an existing chat (replays history)\n"
+                  "/chat title <new title>     # rename current chat\n"
+                  "/chat export <path>         # write chat to markdown",
+            details=(
+                "AgentCommander auto-resumes the most recent chat for the\n"
+                "current project on startup — your conversation continues\n"
+                "where you left off. Switch chats with /chat resume; the\n"
+                "screen replays past turns so context is visible.\n"
+                "\n"
+                "/chat clear is destructive — it deletes the messages AND the\n"
+                "scratchpad rows for the current chat from the project DB. To\n"
+                "preserve old chats but start fresh, use /chat new instead."
+            ),
+            examples=(
+                "/chat",
+                "/chat list",
+                "/chat new debugging the parser",
+                "/chat resume 3a5f",
+                "/chat clear",
+                "/chat export ./conversation.md",
+            ),
+        ),
+        SlashCommand(
             name="/history", aliases=(),
             summary="show recent conversations",
             handler=cmd_history,
