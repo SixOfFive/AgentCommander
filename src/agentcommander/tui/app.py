@@ -607,6 +607,59 @@ def _print_role_assignments() -> None:
     render_table(["role", "model", "provider", "tok/s", "kind"], rows)
 
 
+def _refresh_or_role_picks_from_catalog() -> int:
+    """Re-pick non-override OR roles from the latest catalog scores.
+
+    Called once per launch BEFORE ``_run_startup_autoconfigure`` so the
+    program — not the user — drives which models get used. Voting from
+    prior runs (rate-limit -1s, sibling +1s, quality failures) shifts the
+    catalog scores; this function propagates those shifts into
+    ``role_assignments`` so the next pipeline call uses the freshest picks.
+
+    Skipped when:
+      - The role has ``is_override=True`` (user explicitly pinned with
+        ``/roles set`` — manual choice survives refresh).
+      - The role's current provider isn't an OR provider (Ollama / llama.cpp
+        live in the main TypeCast catalog and have their own refresh path).
+
+    Returns the number of role assignments that actually changed.
+    """
+    from agentcommander.db.repos import (
+        get_role_assignment, list_role_assignments,
+        list_providers, set_role_assignment,
+    )
+    from agentcommander.typecast.openrouter_catalog import (
+        TIER_FREE, TIER_PAID, load, pick_for_role,
+    )
+
+    # Map provider_id → provider_type for fast lookup
+    provider_types = {p.id: p.type for p in list_providers()}
+
+    changed = 0
+    for r in list_role_assignments():
+        if r.get("is_override"):
+            # Manual pin — leave alone.
+            continue
+        ptype = provider_types.get(r["provider_id"])
+        if ptype not in ("openrouter-free", "openrouter-paid"):
+            continue
+        tier = TIER_FREE if ptype == "openrouter-free" else TIER_PAID
+        new_pick = pick_for_role(tier, r["role"], fallback=r["model"])
+        if new_pick and new_pick != r["model"]:
+            cat = load(tier)
+            entry = cat.get("_models", {}).get(new_pick) or {}
+            ctx = entry.get("contextLength") or r.get("context_window_tokens") or 16384
+            set_role_assignment(
+                role=r["role"],
+                provider_id=r["provider_id"],
+                model=new_pick,
+                is_override=False,
+                context_window_tokens=ctx,
+            )
+            changed += 1
+    return changed
+
+
 def _run_startup_autoconfigure() -> None:
     """Compute best-fit role → model in memory. NOT persisted to DB.
 
