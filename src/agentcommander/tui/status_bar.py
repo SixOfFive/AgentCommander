@@ -230,6 +230,16 @@ class StatusBar:
         # is the meaningful one — not a sum across calls.
         if prompt > 0:
             self.state.context_now = prompt
+        # Pull the freshly-updated throughput for this model. role_call.py
+        # writes record_throughput RIGHT BEFORE the on_role_end callback
+        # we're inside, so this re-read picks up the new average without
+        # waiting for the next role to start.
+        if self.state.model:
+            try:
+                from agentcommander.db.repos import get_throughput
+                self.state.model_tps = get_throughput(self.state.model)
+            except Exception:  # noqa: BLE001
+                pass
         self.redraw()
 
     def reset_run(self) -> None:
