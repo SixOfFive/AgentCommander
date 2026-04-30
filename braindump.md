@@ -1,8 +1,8 @@
 # AgentCommander — braindump.md
 
-**This file is the single source of context for any future Claude instance after a compaction event.** Read it first; trust it; update it whenever the project's shape changes.
+**Single source of context for any future Claude instance after a compaction event.** Read it first; trust it; update it whenever the project's shape changes.
 
-Repo: `C:\Users\sixoffive\Documents\AgentCommander` · Remote: `github.com/SixOfFive/AgentCommander` (main was force-pushed to overwrite the prior TypeScript rewrite — that history is gone).
+Repo: `C:\Users\sixoffive\Documents\AgentCommander` · Remote: `github.com/SixOfFive/AgentCommander` (main was force-pushed earlier in the project to overwrite the prior TypeScript rewrite — that history is gone). Branch is `main` only — work has been pushed directly throughout.
 
 ## What this is
 
@@ -12,192 +12,350 @@ User's philosophy verbatim: **"one computer, one LLM, one army of agents."** The
 
 ## Hard constraints (do NOT violate)
 
-- **stdlib only** — no `httpx`, no `pydantic`, no `rich`, no `prompt_toolkit`. Use `urllib`, `dataclasses`, ANSI escapes, `sqlite3`, `argparse`, `re`. The provider streaming is `urllib.request.urlopen` line-iterating an HTTP body.
-- **Serial only** — no `parallel` action, no async coordination. The pipeline runs one role/tool at a time. The TUI thread + a worker thread is the only concurrency, and that's solely so `/stop` can fire mid-run.
+- **stdlib only** — no `httpx`, no `pydantic`, no `rich`, no `prompt_toolkit`. Use `urllib`, `dataclasses`, ANSI escapes, `sqlite3`, `argparse`, `re`. Provider streaming is `urllib.request.urlopen` line-iterating an HTTP body.
+- **Serial only** — no `parallel` action, no async. Pipeline runs one role/tool at a time. TUI thread + worker thread is the only concurrency, and that's solely so `/stop` can fire mid-run.
 - **Highly modular** — providers, tools, and guard families all self-register through Protocol-based registries. Adding one is "drop a `.py` and call `register(...)` at module top-level."
-- **No credentials or addresses in source** — endpoints + api keys live ONLY in the user-data SQLite, which is gitignored. The DB is at `%APPDATA%/AgentCommander/agentcommander.sqlite` (Windows) / `~/.local/share/agentcommander/agentcommander.sqlite` (Linux) / `~/Library/Application Support/AgentCommander/...` (macOS).
-- **Auto-commit hook is on** — `.claude/settings.json` has a `PostToolUse` hook on `Edit|Write|MultiEdit|NotebookEdit` that runs `git add -A && git commit -m "auto: changes from claude"`. Every Edit/Write fires it. Never push to remote without confirming.
-- **The TS rewrite has been wiped** — it is NOT scope. Don't try to bring back Electron/TypeScript. Python is the only target.
+- **No credentials in source** — endpoints + api keys live ONLY in the project-local SQLite DB (gitignored). DB path: **`<cwd>/.agentcommander/db.sqlite`** — project-local since the corruption incident; `%APPDATA%` is now used only for the TypeCast catalog cache.
+- **Auto-commit hook is on** — `.claude/settings.json` has a `PostToolUse` hook on `Edit|Write|MultiEdit|NotebookEdit`. Every Edit/Write fires `git add -A && git commit`. Never push to remote without confirming.
+- **The TS rewrite has been wiped** — not scope. Don't try to bring back Electron/TypeScript. Python is the only target.
+- **llama.cpp gets minimal-surface treatment** — single model per process. Never tell it to unload; signature parity only on `should_cancel`/`unload`/`list_loaded_details`. Ollama is the primary provider.
+- **Slash commands and their output are screen-only** — they never enter the `messages` table or the `scratchpad_entries` table. Confirmed by the user as a hard requirement.
 
 ## Architecture map (`src/agentcommander/`)
 
 | Layer | Files | Purpose |
 |---|---|---|
-| Entry | `cli.py`, `__main__.py` | argparse → `tui.app.run_tui()` |
-| Types | `types.py` | `Role` enum (19 values), `ProviderConfig`, `OrchestratorDecision`, `ScratchpadEntry` (with `message_id` + `replaced_message_ids` for future compression), `LoopState`, `PipelineEvent` |
-| Registry | `registry.py` | `Provider` / `ToolHandler` / `GuardFamily` Protocols + Registry helpers |
-| Safety | `safety/` | `dangerous_patterns.py` (~30 regexes), `sandbox.py` (`is_path_within` + symlink-escape check), `host_validator.py` (strict + permissive), `prompt_injection.py` (18 patterns) — verbatim ports of EC's utils |
-| Agents | `agents/manifest.py` (single source of truth for the 19 roles + defaults), `agents/prompts.py` (loads `resources/prompts/{ROLE}.md`) |
-| DB | `db/connection.py` (sqlite3 stdlib), `db/schema.sql` (idempotent, all CREATE IF NOT EXISTS), `db/repos.py` |
-| Providers | `providers/base.py` (`ProviderBase` + factory registry), `ollama.py`, `llamacpp.py`, `bootstrap.py` |
+| Entry | `cli.py`, `__main__.py` | argparse → `tui.app.run_tui()`; catches `DBAlreadyOpen` with friendly message |
+| Types | `types.py` | `Role` enum (19 values), `ProviderConfig`, `OrchestratorDecision`, `ScratchpadEntry` (with `message_id` + `replaced_message_ids`), `LoopState`, `PipelineEvent` |
+| Safety | `safety/` | `dangerous_patterns.py`, `sandbox.py`, `host_validator.py`, `prompt_injection.py` |
+| Agents | `agents/manifest.py`, `agents/prompts.py` (loads `resources/prompts/{ROLE}.md`) |
+| DB | `db/connection.py` (locks + auto-repair + signal handlers), `db/schema.sql`, `db/repos.py` |
+| Providers | `providers/base.py`, `ollama.py`, `llamacpp.py`, `bootstrap.py` |
 | Tools | `tools/dispatcher.py`, `file_tool.py` / `code_tool.py` / `web_tool.py` / `process_tool.py` |
-| Engine | `engine/engine.py` (`PipelineRun.events()` generator), `actions.py`, `scratchpad.py`, `role_call.py`, `role_resolver.py` (DB override → in-memory autoconfig), `engine-output.py`/`scratchpad.py` build_final_output |
-| Guards | `engine/guards/` — 9 families ported verbatim from EC: `decision`, `flow`, `execute`, `write`, `output`, `fetch`, `post_step`, `done` + shared `types.py`. ~110 individual guards. |
-| TypeCast | `typecast/catalog.py` (conditional-GET with ETag/Last-Modified), `vram.py`, `autoconfig.py` |
-| TUI | `tui/app.py`, `setup.py` (first-run wizard), `commands.py` (slash registry), `render.py`, `markdown.py` (minimal ANSI markdown), `status_bar.py`, `permissions.py`, `ansi.py` |
+| Engine | `engine/engine.py` (`PipelineRun.events()` generator), `actions.py`, `scratchpad.py`, `role_call.py`, `role_resolver.py` |
+| Guards | `engine/guards/` — 9 families ported from EC + my additions: `decision`, `flow`, `execute`, `write`, `output`, `fetch`, `post_step`, `done` + shared `types.py`. ~110+ individual guards. |
+| TypeCast | `typecast/catalog.py` (conditional-GET), `vram.py`, `autoconfig.py` (threshold-cascade picker, ban list, min-context filter) |
+| TUI | `tui/app.py`, `setup.py` (first-run wizard + reusable `prompt_for_ollama_endpoint`), `commands.py` (slash registry), `render.py`, `markdown.py`, `status_bar.py`, `permissions.py`, `terminal_input.py`, `autocomplete.py`, `ansi.py` |
+
+## Database (project-local SQLite, gitignored)
+
+**Path: `<cwd>/.agentcommander/db.sqlite`** — each project has its own DB.
+
+Tables:
+- `migrations` (reserved)
+- `config` (key-value JSON; holds `working_directory`, `context_override_tokens`, `session_ceiling_tokens`, `autoconfig_banned_models`)
+- `providers` (id, type, name, endpoint, api_key, enabled, created_at)
+- `role_assignments` (role PK, provider_id, model, is_override, **`context_window_tokens`**, updated_at)
+- `conversations` (id PK, title, working_directory, created_at, updated_at, archived, pinned)
+- `messages` (id PK, conversation_id FK, role, content, created_at) — **user view, never compacted**
+- `token_usage`
+- `model_hints` (TypeCast hint accumulator — wiring deferred)
+- `audit_log`
+- `pipeline_runs`, `pipeline_steps`
+- `operational_rules` (preflight/postmortem — deferred)
+- `fs_permissions` (path, operation, decision, scope=`exact`/`subtree`, created_at) — **subtree scope IS wired** via `_load_persisted` walking ancestors
+- **`scratchpad_entries`** (id, conversation_id, run_id, step, role, action, input, output, duration_ms, content, **`message_id`** FK to messages, **`replaced_message_ids`** JSON array, **`is_replaced`** flag, timestamp, created_at) — model-side memory; **compactable**
+
+### DB hardening (corruption defense — installed after a real corruption incident)
+
+`init_db` does:
+1. `PRAGMA journal_mode = WAL`, `synchronous = FULL`, `cell_size_check = ON`, `wal_checkpoint(TRUNCATE)` on open
+2. **Single-instance lock** via `<dbpath>.lock` — `msvcrt.locking` on Windows, `fcntl.flock` on POSIX. Concurrent processes fail with `DBAlreadyOpen` (friendly cli.py message)
+3. Idempotent ALTER for `context_window_tokens` column
+4. Idempotent backfill of conversation titles from first user message
+5. **Auto check + repair**: `PRAGMA quick_check` → if not ok, `REINDEX` + retry. Result stashed in `_last_auto_repair`, surfaced in startup banner
+6. **Atexit + SIGINT/SIGTERM/SIGBREAK handlers** call `close_db()` which does final `wal_checkpoint(TRUNCATE)` + releases the lock — prevents the kill-during-checkpoint corruption that bit us originally
+
+### `/db` command — full DB recovery surface
+
+```
+/db                    # path + size + integrity status
+/db check              # full integrity_check report
+/db reindex            # rebuild every index (often clears corruption)
+/db vacuum             # rewrite the file (defragment)
+/db backup <path>      # byte-copy via SQLite backup API (preserves corruption)
+/db salvage <path>     # row-by-row export to fresh DB; skips unreadable rows
+/db reset              # DESTRUCTIVE: archive corrupt DB to *.corrupt-NNN, init fresh
+```
+
+## Slash command registry
+
+**16 unique commands** (with aliases). `/help <cmd>` shows full details for any of them; autocomplete popup surfaces them as you type `/`.
+
+| Command | Sub-commands | Notes |
+|---|---|---|
+| `/help [<cmd>]` | — | Full registry table or per-cmd details |
+| `/quit`, `/exit` | — | Exit; mid-run cancels + sets should_exit |
+| `/clear` | — | ANSI screen wipe |
+| `/stop` | — | Halt active pipeline; mid-run typing also recognized |
+| `/workdir [<path>]` | — | Show/set sandbox dir |
+| `/providers` | `add`, `test`, `rm` | DB-backed |
+| `/models <pid>` | — | List provider's installed models |
+| `/roles` | `set`, `unset`, `auto`, `assign-all` | Role/model bindings |
+| `/typecast` | `refresh`, `autoconfigure` | Catalog status / re-fetch / dispatch |
+| **`/autoconfig`** | `minctx <N>`, `ban <model>`, `unban <model>`, `bans`, `clear` | TypeCast picker; `minctx` filters + persists; `clear` re-prompts endpoint and rescans |
+| **`/context [<N>|off]`** | — | Session-wide `num_ctx` override; persisted; warns when value exceeds picked models' training ctx |
+| **`/vram`** | — | Detected total + Ollama `/api/ps` live + catalog estimates for non-loaded role models |
+| **`/db`** | `check`, `reindex`, `vacuum`, `backup`, `salvage`, `reset` | DB inspect + recovery |
+| **`/chat`** | `list`, `new [<title>]`, `clear`, `resume <id>`, `title <name>`, `export <path>` | Conversation manage; `clear` is destructive (wipes messages + scratchpad + screen); resume replays history |
+| `/agents` | — | 19-role manifest |
+| `/tools` | — | Registered tool verbs |
+| `/history` | — | Recent conversations table |
+| `/new [<title>]` | — | Start new conversation (legacy — `/chat new` is preferred) |
+
+### Autocomplete popup (`tui/autocomplete.py` + `status_bar.read_line_at_bottom`)
+
+- Custom char-mode input loop (replaced `input()`); raw_mode CM in `terminal_input.py`
+- **Tier 1**: typing `/` → matches all top-level commands
+- **Tier 2**: typing `/cmd ` → matches sub-commands from `SUB_COMMANDS` table (covers `/autoconfig`, `/typecast`, `/providers`, `/roles`, `/context`, `/chat`)
+- **Tab** inserts the highlighted match (replacing only the trailing token, not the whole buffer)
+- **Up/Down**: cycle popup highlight; when popup empty, navigate in-process input history
+- **Esc**: dismiss popup, keep buffer
+- **Enter**: submit
+- Past the second token, no completion (free-form args)
 
 ## Key flows
 
 ### Startup sequence (`tui/app.py:run_tui`)
 
-1. `_bootstrap()` — `enable_ansi()` (UTF-8 stdout, VT mode on Windows), `init_db()`, `bootstrap_tools()`, `bootstrap_providers()` (registers ollama/llamacpp factories), `refresh_catalog()` (TypeCast conditional-GET).
-2. **Install StatusBar BEFORE banner** — sets ANSI scroll region `\x1b[1;{H-3}r`, parks cursor at row H-3 so subsequent prints scroll up correctly.
-3. `render_banner` — prints into the scroll region.
-4. `needs_first_run_setup()` → if no providers, `first_run_wizard()` prompts for Ollama URL via `read_line_at_bottom`, persists provider, calls `rebuild_from_db()`.
-5. `_run_startup_autoconfigure()` — calls `apply_autoconfigure()` which queries each provider's `list_models()`, runs TypeCast best-fit, returns a `dict[role_value, (provider_id, model)]`. Result is stashed in the in-memory `role_resolver._autoconfig` table — **never persisted**.
-6. `_print_role_assignments()` — prints role → model table from `resolve_role()` (each row tagged `override` / `auto` / `unset`).
-7. REPL loop: `read_line_at_bottom("❯ ")` → `_handle_input()` → either run slash command or `_run_pipeline()`.
-
-### Role resolution (`engine/role_resolver.py`)
-
-```python
-def resolve(role) -> ResolvedRole | None:
-    # 1. DB override (set by /roles set ... — every set is is_override=True)
-    a = get_role_assignment(role)
-    if a: return ResolvedRole(provider_id=a["provider_id"], model=a["model"], kind="override")
-    # 2. In-memory autoconfig (recomputed every launch)
-    pair = _autoconfig.get(role)
-    if pair: return ResolvedRole(provider_id=pair[0], model=pair[1], kind="auto")
-    return None
-```
-
-`call_role()` and the engine consult **only** `role_resolver.resolve` — never `get_role_assignment` directly.
-
-### TypeCast catalog (`typecast/catalog.py`)
-
-- URL: `https://raw.githubusercontent.com/SixOfFive/TypeCast/main/models-catalog.json`
-- Cache: `<user_data>/typecast/models-catalog.json` + `models-catalog.meta.json` (etag, last_modified, fetched_at)
-- Conditional GET sends `If-None-Match` + `If-Modified-Since`. 304 → keep cache (`source="cache-fresh"`). 200 → write new body + headers (`source="remote"`). Network fail → cache fallback (`source="cache"`). No cache → bundled (`source="bundled"`). None → empty.
-- Autoconfig in `typecast/autoconfig.py:apply_autoconfigure` runs every launch in memory only.
+1. `_bootstrap()` — `enable_ansi()`, `init_db()` (acquires lock, runs auto-repair, signal handlers register), `bootstrap_tools()`, `bootstrap_providers()`, `refresh_catalog()`.
+2. **Install StatusBar BEFORE banner** — sets ANSI scroll region; parks cursor at H-3.
+3. `render_banner` — workdir at top, then logo, version, providers/models count.
+4. **Auto-repair status banner line** — if `_last_auto_repair` is set, prints `db auto-repair: REINDEX cleared a quick_check issue …` (or warn variant).
+5. First-run wizard if no providers (uses `prompt_for_ollama_endpoint` helper).
+6. `_run_startup_autoconfigure()` — calls `apply_autoconfigure()`, picks per role via threshold cascade 100→10, persists `session_ceiling_tokens` config row.
+7. `_print_role_assignments()` + `_print_session_context_summary` — role table + "session max context: 8k (set by command-r7b:7b)" line + active `/context` override line if set.
+8. **Seed bar's context cap** from override / ceiling (after autoconfig, so we read fresh values).
+9. **Resume most recent chat** — sets `state.conversation_id`, replays past `messages` to screen via `render_user_message` / `render_assistant_message`. Print line: `resuming chat <id> (N message(s)) — use /chat list to switch, /chat clear to start fresh`.
+10. REPL loop.
 
 ### Pipeline (`engine/engine.py:PipelineRun.events()`)
 
-Generator yields `PipelineEvent`s. Order per iteration: `iteration` → `_orchestrate()` (calls Role.ORCHESTRATOR with `json_mode=True`) → decision-guards → `done`?: done-guards → flow-guards → role/tool dispatch → post-step-guards. Threaded by `_run_pipeline()`; events flow back via `queue.Queue`. `cancel_event: threading.Event` is checked at iteration top + before tool dispatch — set by `/stop` or `cmd_stop`.
-
-### TUI layout (3 reserved rows)
-
 ```
-1 .. H-3   scroll region (messages; cursor parked at H-3 so writes scroll UP)
-H-2        thin separator rule (dim grey)
-H-1        live status, RIGHT-ALIGNED: "{verb} {role} → {model}  ·  in {N}  out {N}  ·  ctx {now} [{cap}]  ·  [{workdir}]"
-H          input prompt "❯ " (where the user types)
+events() generator:
+  insert_pipeline_run
+  _hydrate_scratchpad_from_db      ← cross-turn memory (loads prior, filters is_replaced)
+  _maybe_compact_scratchpad        ← if hydrated text exceeds budget, summarizer compresses
+  _classify_category(opts)         ← router; fires on_role_start/end
+  _push_entry(router/classify)     ← persisted with message_id=user_msg.id
+  for iteration in 1..max:
+    _orchestrate(opts)             ← orchestrator; fires hooks
+    decision-guards
+    chat-coercion (action: "chat" → done with reasoning as input)
+    if done:
+      _handle_done                  ← runs done-guards
+      if final is router-echo:
+        if decision.input is meaningful: use it
+        else: yield from _chat_fallback_stream  ← live streamed chat reply
+      yield done
+    if action in ROLE_ACTIONS: yield from _dispatch_role
+    if action in TOOL_ACTIONS: yield from _dispatch_tool (catches PermissionDenied → friendly final)
+    post_step guards
 ```
 
-`StatusBar` (`tui/status_bar.py`) owns rows H-2..H. Save/restore cursor on every `redraw()`. `read_line_at_bottom()` moves cursor to (H,1), clears, prints prompt, calls `input("")`, then parks cursor back at H-3.
+`_run_pipeline()` (app.py) runs `events()` in a worker thread; main thread polls events queue + char-mode stdin (for /stop, /exit, /quit, queued next prompt). `cancel_event` is checked at iteration boundaries AND inside the provider's `_post_stream` (mid-token cancellation).
+
+### Compaction (`engine/engine.py:_maybe_compact_scratchpad`)
+
+- Trigger: `compact_scratchpad(state)` text exceeds `session_ceiling_tokens × 4 × 0.5` chars (~50% of context budget)
+- Action: keep last 6 entries verbatim, summarize older via `Role.SUMMARIZER` (`json_mode=False`), insert synthetic `system/compacted` row with `replaced_message_ids = [...]`, mark originals `is_replaced=1`
+- Yields `guard/compaction` events at start AND end so user sees `⌫ guard:compaction (compacting 14 prior scratchpad entries via summarizer …)` instead of silent pause
+- Failure-graceful: summarizer unassigned/errored → "keeping originals", run proceeds uncompacted
+
+### Role resolution + num_ctx precedence (`engine/role_resolver.py`)
+
+```python
+def resolve(role) -> ResolvedRole | None:
+    session_ctx = _session_context_override()    # /context override
+    ceiling     = _session_ceiling_tokens()      # autoconfig-derived
+
+    # 1. DB role override (set by /roles set or /autoconfig minctx)
+    a = get_role_assignment(role)
+    if a:
+        per_role_ctx = a["context_window_tokens"]
+        ctx = session_ctx if session_ctx else (per_role_ctx if per_role_ctx else ceiling)
+        return ResolvedRole(..., kind="override", context_window_tokens=ctx)
+
+    # 2. In-memory autoconfig
+    pair = _autoconfig.get(role)
+    if pair:
+        ctx = session_ctx if session_ctx else ceiling
+        return ResolvedRole(..., kind="auto", context_window_tokens=ctx)
+    return None
+```
+
+**num_ctx precedence (highest → lowest):** `/context` override → per-role `context_window_tokens` → session ceiling → None (provider default). The session ceiling falling-through means models get the announced cap by default instead of Ollama's 2048/4096.
+
+### TypeCast autoconfig (`typecast/autoconfig.py`)
+
+- **Threshold cascade**: for each role, find best-scoring installed model. Walk thresholds 100 → 10 (step −10). First threshold that's met wins. Roles with no qualifying model → `unset_roles` (typical for `vision`/`audio`/`image_gen` on a text-only stack).
+- **Ban list**: `BANNED_MODELS_CONFIG_KEY = "autoconfig_banned_models"` in config table. `build_candidates` filters bans before any picker sees them.
+- **Min-context filter**: `apply_autoconfigure(min_context=N)` — drops candidates with `contextLength < N`, persists picks to DB with `context_window_tokens = N`.
+- **Session ceiling**: `min(contextLength)` across distinct picked models, persisted as `session_ceiling_tokens`, used by both display and resolver.
 
 ### Filesystem permissions (`tui/permissions.py`)
 
-Every file read/write/delete passes through `request_permission(path, op)`:
-- Persisted "always allow"/"always deny" in `fs_permissions` table → return immediately
-- Session-cached "yes once" → return
-- Otherwise prompt: `[d] Deny  [t] Yes this time  [a] Always (persist)`
-- Deny raises `PermissionDenied` — `tools/dispatcher.py` re-raises it; `engine/engine.py:_dispatch_tool` catches it and emits a `cancelled` event then returns. Pipe halts; future planned steps don't run.
-- Non-TTY → automatic deny (piped runs can never silently exfiltrate).
+- `Operation` literal: `"read" | "write" | "delete" | "execute"`
+- **Subtree scope wired**: `_load_persisted(path, op)` does exact match first, then walks `path.parents` looking for `scope='subtree'` rows
+- `grant_subtree(path, op, decision)` is a public helper used to pre-authorize sandbox dirs
+- Non-TTY: auto-deny (no silent exfiltration)
+- `request_permission` keyed on the cwd for `execute` (not the tempfile path), so a single Always-allow covers a project
 
-### `/stop` (threaded pipeline)
+### TUI layout (3 reserved bottom rows)
 
-`_run_pipeline` runs `run.events()` in a background thread, pushes events onto `queue.Queue`. Main thread polls `events_q.get(timeout=0.15)` and during empty timeouts calls `_poll_stdin_chunk()` (msvcrt on Windows / `select.select` on POSIX). If the user types `/stop\n`, `cancel_event.set()`. Engine checks `is_cancelled()` at iteration top + reports `cancelled by /stop`.
+```
+1 .. H-3   scroll region (cursor parks at H-3 so writes scroll UP)
+H-2        thin separator rule
+H-1        live status, RIGHT-ALIGNED:
+           ▸ role → model  ·  in N out N  ·  ctx now/max [████░░]  ·  run mm:ss  ·  total mm:ss
+H          input prompt "❯ "
+```
 
-## Slash commands (live in `tui/commands.py`)
+- **Workdir is in the banner area at the top** — moved out of the bottom row for future expansion.
+- **Status row fields**: role+verb (`▸` running / `·` idle), token totals (cumulative), `ctx now/max` with a fill bar (green<60%<yellow<85%<red), run timer (elapsed for current run), total timer (session-cumulative).
+- **`context_now` clears when run ends** — `set_running(False)` zeros it so post-run display is `ctx —/8.2k` instead of stale "7.8k/8.2k" with red bar.
+- **Bar timer ticks once per second** during a run from inside the run loop (calls `bar.redraw()` even when no engine event arrives).
+- **Bar uninstall parks cursor at last row** — so shell prompt appears below content on exit, not overwriting it.
+- **`writeln` clears to end-of-line** — `s + "\x1b[K\n"` — prevents residual chars from previous content bleeding through when new content is shorter.
 
-| Command | Notes |
-|---|---|
-| `/help [<cmd>]` | Detail block with usage + details + examples |
-| `/quit`, `/exit` | Exit the TUI (no confirm) |
-| `/clear` | ANSI screen clear |
-| `/stop` | Halt active pipeline (also typeable mid-run via the keystroke poller) |
-| `/workdir [<path>]` | Show or set sandbox dir |
-| `/providers [add\|rm\|test]` | DB-backed providers (endpoint + api_key persisted in user-data DB) |
-| `/models <pid>` | List installed models from a provider |
-| `/roles` | Table of all 19 roles with kind=override/auto/unset |
-| `/roles <role>` | One-role detail |
-| `/roles set <role> <pid> <model>` | Override (persisted) |
-| `/roles unset <role>` | Drop override; lets autoconfig re-pick |
-| `/roles auto` | Re-run TypeCast autoconfig in memory; respects overrides |
-| `/roles assign-all <pid> <model>` | Bulk-set every role as override |
-| `/typecast [refresh\|autoconfigure]` | Status / re-fetch / dispatch to /roles auto |
-| `/agents` | 19-role manifest table |
-| `/tools` | Registered tool verbs |
-| `/history`, `/new` | Conversation management |
+## Slash command + chat semantics (the user's mental model)
 
-## Database (sqlite3, stdlib, gitignored)
-
-Tables: `migrations`, `config` (key-value JSON), `providers` (id, type, name, endpoint, api_key, enabled), `role_assignments` (role PK, provider_id, model, is_override always 1 in current usage), `conversations`, `messages`, `token_usage`, `model_hints` (TypeCast hint accumulator — wiring deferred), `audit_log` (every tool call + role call + guard block + permission decision), `pipeline_runs` + `pipeline_steps` (replay/inspector), `operational_rules` (preflight/postmortem — deferred), `fs_permissions` (persisted Always-allow/Always-deny).
+User explicitly stated:
+1. **Two views per conversation:**
+   - User view = `messages` table = full fidelity, never compacted
+   - Scratchpad = `scratchpad_entries` table = model-facing, can be compacted; entries link to user view via `message_id`
+2. **Compaction only touches the scratchpad side.** Messages stay readable forever.
+3. **Slash commands and their output are screen-only.** Never enter `messages` or `scratchpad_entries`. Confirmed by inspecting DB after a session — `/help` and `/agents` produce no DB rows.
+4. **Startup auto-resumes the most recent chat for the project.** `/chat new` starts fresh without deleting; `/chat clear` deletes current + clears screen.
+5. **Project-local DB.** Each working directory has its own state. `AgentTesting/.agentcommander/db.sqlite` is separate from the project root's DB.
 
 ## Resources
 
-- `resources/prompts/*.md` — 19 role system prompts (copied verbatim from EC). Loaded by `agents/prompts.py:get_role_prompt`. Missing files fall back to a generic prompt.
+- `resources/prompts/*.md` — 19 role system prompts. Loaded by `agents/prompts.py:get_role_prompt`. **The orchestrator's prompt + every role's prompt now gets the live tool-registry appendix** appended at call time so models can answer "what tools do you have?" honestly.
+- The orchestrator additionally gets a self-introspection directive ("answer DIRECTLY with `{action: done, input: <list>}`, do NOT delegate to research/plan/architect/coder").
 
 ## Launchers
 
-- `ac.bat` — Windows. **MUST be CRLF**. Uses `>nul 2>nul` (NOT `>/dev/null` — bash sandbox auto-translates this; rewrite via Python `pathlib` to bypass). Sets `PYTHONUTF8=1` + `PYTHONIOENCODING=utf-8` + `PYTHONPATH=src`.
-- `ac.sh` — POSIX. LF endings. Same idea.
+- `ac.bat` — Windows. **MUST be CRLF**. Uses `>nul 2>nul`. Sets `PYTHONUTF8=1`, `PYTHONIOENCODING=utf-8`, `PYTHONPATH=src`. Resolves Python via `py -3` first, then `python`, then `python3` (matches `code_tool._resolve_python_cmd`).
+- `ac.sh` — POSIX. LF endings.
+
+## Bugs found and fixed in this session
+
+| Bug | Symptom | Fix |
+|---|---|---|
+| A | `echo_request_guard` rejected factual Q&A whose answer naturally repeats question words ("Paris" rejected as echo) | Short-circuit on factual prefix at iter 1 with no tool work |
+| B | `capabilities_list_guard` rejected valid capability questions | Skip when user message asks about tools/capabilities |
+| C | `build_final_output` ignored `list_dir` / `read_file` / `fetch`; failed-execute showed raw step echo | Surface those outputs as `**Directory listing**` / `**File contents**` / `**Fetched content**` / `**Execution failed**` blocks; exclude router from step list |
+| D | "halted by user" wording on auto-deny (non-TTY) | Neutral "halted: permission denied for X Y" |
+| E | No final synthesis on permission denial | Yields `done` event with concrete next-steps |
+| F | `has_deliverable` required >100 chars for fetch (excluded compact JSON) | Any successful fetch counts; same for `list_dir`/`read_file`/`write_file` |
+| G | Every conversation titled "Conversation" → `/history` unscannable | Auto-derive from first user message + idempotent backfill |
+| H | `multi_step_guard` rejected comprehensive multi-part chat answers | Skip when `decision.input` ≥ 80 chars |
+| I | False positive (turned out to be capture artifact) | — |
+| J | Model uses `execute`-only when user named a file → file never written | New `unwritten_file_guard` with **fire-once** gating |
+| Corruption | `Tree X page Y: btreeInitPage error 11` | Single-instance lock + `synchronous=FULL` + `cell_size_check` + atexit/signal handlers + auto-repair on startup |
+| ctx stale | After run ends, bar showed `ctx 7.8k/8.2k [████]` (stale) | `set_running(False)` clears `context_now`; post-run shows `ctx —/8.2k` |
+| `--mincontext` | User wanted shorter syntax | Renamed to `minctx`; `--mincontext` / `--min-context` kept as aliases |
 
 ## What's complete
 
-- Safety (4 modules, 20 unit tests passing)
-- 19-role manifest
-- DB layer (sqlite3) + repos
-- Ollama + llama.cpp providers
+- All hard constraints satisfied
+- 19-role manifest + system prompts
+- Project-local SQLite DB with corruption defense (lock + auto-repair + signals)
+- Ollama + llama.cpp providers (Ollama: keep_alive=5m, /api/ps, unload-on-exit, should_cancel mid-stream)
 - Tool dispatcher + file/code/web/process tools
-- Engine main loop with guard hook points
-- All 9 guard families (~110 guards total) ported and wired
-- TypeCast catalog with conditional-GET freshness
-- In-memory autoconfig (recomputed every launch, not DB-persisted)
-- RoleResolver (DB override → in-memory)
-- Bottom-anchored TUI with scroll region + status bar + bottom input
-- ANSI markdown renderer for assistant output
+- `code_tool` resolves Python via `py -3` first on Windows (no more 9009)
+- Engine main loop with all 9 guard families wired
+- ~110+ guards including new `unwritten_file_guard` and Bug A/B/H/J fixes inside existing ones
+- TypeCast catalog (conditional-GET) + threshold-cascade autoconfig + ban list + min-context filter
+- Cross-turn scratchpad persistence (`scratchpad_entries` table) + hydration + compaction
+- RoleResolver with `/context > per-role > session_ceiling > None` precedence
+- Bottom-anchored TUI with scroll region + status bar (workdir up top; bar shows role/tokens/ctx-fill-bar/run-timer/total-timer)
+- ANSI markdown renderer with `\x1b[K` line-clearing
 - Streaming tokens via on_role_delta with auto-indent
-- Token usage threaded through call_role → status bar
-- Filesystem permission prompts with persisted Always
-- /stop with threaded pipeline + non-blocking keystroke poll
+- Filesystem permissions with subtree scope wired
+- /stop / /exit / /quit cancel mid-stream + unload models
 - Auto-commit hook installed and active
+- 16 slash commands with autocomplete (top-level + sub-commands), tab insertion, history nav
+- Chat fallback (with scratchpad context block) for bare-scratchpad / router-echo finals
+- Self-introspection: tool registry injected into every role's system prompt
+- Startup chat resume + `/chat list / new / clear / resume / title / export`
+- `/db` and `/vram` and `/context` commands
+- `/autoconfig` with minctx + ban/unban/bans + clear-with-endpoint-reprompt
+- 20/20 unit tests pass
 
 ## What's deferred (NOT done)
 
-- **Preflight + postmortem meta-agents** — `operational_rules` table exists but `apply_preflight` / `apply_postmortem` not wired. EC has them at `EngineCommander/src/main/orchestration/{preflight,postmortem}.ts` + `utils/action-fingerprint.ts`. Engine has stub TODO comments at the dispatch points.
-- **TypeCast hint accumulator** — `model_hints` table exists but no engine code bumps `(model, role) ± 0.1` per run. EC's logic is in `engine.ts` post-step.
-- **Browser tool / image gen / git tool / http tool / env tool** — only file/code/web/process exist. EC has the others at `EngineCommander/src/main/tools/*.tool.ts`.
-- **OpenRouter / Anthropic / Google providers** — only Ollama + llama.cpp implemented.
-- **Compression of scratchpad messages** — `ScratchpadEntry.message_id` + `replaced_message_ids` fields exist (placeholder); no compression pass yet.
-- **Live context-length tracking on the status bar** — fields exist (`StatusState.context_now` + `context_cap_min`), no engine-side hook updates them yet.
-
-## Recent / in-flight decisions
-
-- **Autoconfig is in-memory only** — was DB-persisted; refactored so the user can pull/remove a model and the next launch re-picks automatically. Only `/roles set` writes the DB now (always as `is_override=True`).
-- **Force-pushed main** — wiped the upstream TS history; `main` now reflects the Python rewrite.
-- **3-row TUI layout** — input row at the bottom, status row above it (right-aligned), separator rule above that. Scroll region cursor parks at H-3 so content scrolls UP from the bottom.
-- **`message_id` placeholder added to ScratchpadEntry** — for future compression that replaces N originals with 1 synthetic summary while still showing originals when requested.
+- **Preflight + postmortem meta-agents** — `operational_rules` table exists but `apply_preflight` / `apply_postmortem` not wired
+- **TypeCast hint accumulator** — `model_hints` table exists, no engine code bumps `(model, role) ± 0.1`
+- **Browser tool / image gen / git tool / http tool / env tool** — only file/code/web/process exist
+- **OpenRouter / Anthropic / Google providers** — only Ollama + llama.cpp
+- **Model registers as a streaming role for orchestrator** — orchestrator + chat fallback don't display token-by-token, just the final result. Roles dispatched via `_dispatch_role` DO stream live (existing behavior)
 
 ## Common gotchas (learned the hard way)
 
-- **`ac.bat` line endings** — Python `Path.write_text` writes LF; cmd.exe needs CRLF. The Edit tool preserves CRLF if it's already there. The bash sandbox rewrites `>nul` → `>/dev/null` when it sees a redirection — write CRLF + `>nul` from Python directly, not via `cat <<EOF` in bash.
-- **Windows stdout is cp1252** by default — non-ASCII (box-drawing chars in banner) errors with `UnicodeEncodeError`. Mitigated via `enable_ansi()` which calls `sys.stdout.reconfigure(encoding="utf-8")` AND sets the console code page to 65001. `PYTHONUTF8=1` in `ac.bat` is the belt + suspenders.
-- **Scroll region quirks** — content scrolls when newline is emitted at the bottom row of the region. If you write to row outside the region, it sits there until manually overwritten. Always save/restore cursor (`\x1b7` / `\x1b8`) when status-bar painting touches reserved rows.
-- **`input()` after status bar install** — moves the cursor naturally; we always re-park at H-3 after via `bar.park_cursor()`.
-- **`urllib.error.HTTPError` for 304** — the conditional GET loop catches this case explicitly and returns `not_modified=True`. Don't treat 304 as a transport failure.
-- **The bash sandbox in this dev environment uses POSIX paths but the actual app runs on Windows.** When testing the user's launcher, use `cmd.exe //c ".\ac.bat"` from bash.
-- **Autoconfig "skipped: no installed model has a positive TypeCast score"** is normal when the user only has vision/specialized models. Not a bug — the catalog correctly refuses to recommend.
-- **`get_role_assignment` returns the override row only** — never autoconfig picks. Use `role_resolver.resolve()` for the unified view.
+- **DB corruption from concurrent processes** — pre-lock days, parallel test runs got SQLite torn between WAL and main pages. Lock file + signals fix this. If a `.lock` file exists, a fresh process cleans it up via `flock` reuse — no stale-lock concern.
+- **Ollama `size_vram` in `/api/ps` includes offloaded layers** — `/vram` may show "loaded 14.3 GB" against a 6 GB GPU. Documented behavior, not our bug.
+- **`ac.bat` line endings** — Python `Path.write_text` writes LF; cmd.exe needs CRLF. The Edit tool preserves CRLF if it's already there. Bash sandbox rewrites `>nul` → `>/dev/null` in heredocs — write CRLF + `>nul` from Python directly.
+- **Windows stdout cp1252** — `enable_ansi()` reconfigures stdout to UTF-8 + sets console code page to 65001. `PYTHONUTF8=1` in `ac.bat` is belt+suspenders.
+- **Scroll region quirks** — content scrolls when newline emits at row H-3. Writes outside the region just sit there. Always save/restore cursor (`\x1b7`/`\x1b8`) when status-bar painting touches reserved rows.
+- **`urllib.error.HTTPError` for 304** — conditional GET catches this explicitly, returns `not_modified=True`. Don't treat 304 as transport failure.
+- **Bash sandbox uses POSIX paths but app runs on Windows** — when testing the launcher, use `cmd.exe //c ".\ac.bat"` from bash.
+- **Background-task captured output can be truncated** — observed during testing. Always cross-check against the DB if a captured transcript looks weird.
+- **Models hallucinate JSON output** — small/medium local models sometimes emit markdown when they should emit JSON actions. The chat-action coercion (`{"action":"chat"}` → `done`) and chat fallback paper over the common cases. For "write X then run X" prompts on weak orchestrators, the new `unwritten_file_guard` catches the gap.
+- **Session ceiling is real** — when the banner says "session max context: 8k", every role gets called with `num_ctx=8192` by default now (after the deepseek-context fix). If you want a higher cap, `/context 32k`. If you want per-role differentiation, `/autoconfig minctx N`.
+- **Slash-command output is intentionally NOT in DB** — confirmed by user as a hard requirement. Don't accidentally append to `messages` from slash handlers.
+
+## Recent decisions worth remembering
+
+- **DB is project-local** — switched from `%APPDATA%/AgentCommander/agentcommander.sqlite` to `<cwd>/.agentcommander/db.sqlite`. Catalog cache stays global.
+- **Single-instance lock** — concurrent processes refused with friendly message. Trade-off: can't run two `ac.bat` against the same project. Different projects (different cwd) have different DBs and don't conflict.
+- **`synchronous=FULL`** — durability over speed for the kind of workload AC has (small writes, infrequent).
+- **`/autoconfig minctx`** — flag renamed (no dashes); old `--mincontext` kept as alias.
+- **`/chat clear` is destructive** — deletes messages + scratchpad + conversation row. Use `/chat new` to start fresh while keeping old ones.
+- **Auto-resume on startup** — most recent chat for the project DB loads automatically. Past messages re-render. State `conversation_id` is set so next prompt continues that chat.
+- **Subtree permissions wired** — `grant_subtree(path, op, "allow")` pre-authorizes a directory tree. AgentTesting/ has subtree allow for write/execute/read/delete persisted, so non-TTY tests work end-to-end there.
 
 ## User preferences (do these by default)
 
-- **Commit on every change** — auto-commit hook is on; don't try to disable it without explicit instruction.
-- **Modular by default** — when adding a new feature, place it in its own module under the appropriate package and self-register if it's a tool/provider/guard.
-- **Pure stdlib** — never reach for a pip dep. If something feels like it needs `requests`, use `urllib.request`. If something feels like it needs `rich`, use ANSI escapes.
-- **Treat the TUI as the primary interface** — when verifying behavior, drive through `ac.bat` + slash commands. Don't `curl` Ollama directly to bypass the program (that's a documented mistake).
-- **Confirm before destructive ops** — force-push, drop-table, rm -rf. The user said "do 1" once for a force-push; that doesn't generalize.
+- **Commit on every change** — auto-commit hook is on; don't disable.
+- **Modular by default** — new feature → its own module under appropriate package, self-register.
+- **Pure stdlib** — never reach for a pip dep.
+- **Drive through the TUI** — when verifying behavior, use `ac.bat` + slash commands. Don't `curl` Ollama directly.
+- **Confirm before destructive ops** — force-push, drop-table, rm -rf.
+- **Push to main directly** — the user pushes through main; no PR workflow set up. (Don't try to create PRs from main → main; gh CLI isn't installed anyway.)
 
-## Pointers to remembered files
+## Pointers
 
-- Memory directory: `C:\Users\sixoffive\.claude\projects\C--Users-sixoffive-Documents-AgentCommander\memory\` — see `MEMORY.md` index.
-- EngineCommander upstream (read-only reference): `C:\Users\sixoffive\Documents\Claude_Projects\EngineCommander` — port from here when adding features. The TypeScript was the source of truth for guards/agents/tools.
-- TypeCast: `https://github.com/SixOfFive/TypeCast` — `models-catalog.json` is the per-model role-fit benchmark; we conditional-GET it on every startup.
+- Memory directory: `C:\Users\sixoffive\.claude\projects\C--Users-sixoffive-Documents-AgentCommander\memory\` — see `MEMORY.md`.
+- EngineCommander upstream (read-only): `C:\Users\sixoffive\Documents\Claude_Projects\EngineCommander`. Port from here when adding features.
+- TypeCast: `https://github.com/SixOfFive/TypeCast` — `models-catalog.json`. Conditional-GET on every startup.
+- User's email: `hvr.biz@gmail.com` (from auto-memory).
 
 ## Sanity-check checklist on resume
 
-1. `cd C:\Users\sixoffive\Documents\AgentCommander && py -3.14 -m unittest discover tests` → 20 OK
-2. `cmd.exe //c ".\ac.bat --version"` → `AgentCommander 0.1.0`
-3. `git status` → clean (auto-commit fires every Edit/Write)
-4. `git remote -v` → `origin` points at `github.com/SixOfFive/AgentCommander`
-5. `ac.bat` first line bytes → `b'@echo off\r'` (CRLF, ASCII, no BOM)
+1. `cd C:\Users\sixoffive\Documents\AgentCommander && PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest discover tests` → 20 OK
+2. `git status --short` → clean (auto-commit fires every Edit/Write)
+3. `git remote -v` → `origin` points at `github.com/SixOfFive/AgentCommander`
+4. `git log --oneline origin/main..HEAD` → empty (everything pushed)
+5. `cmd.exe //c ".\ac.bat --version"` → `AgentCommander 0.1.0`
+6. `echo "/db" | timeout 30 ./ac.bat 2>&1 | head -c 500` → `integrity: ok (quick_check)` somewhere
+7. `echo "/chat list" | timeout 30 ./ac.bat 2>&1 | head -c 500` → table of recent chats with `*` on active
+8. `echo "what is 2+2" | timeout 60 ./ac.bat 2>&1 | tail -c 500` → `4` as the assistant final
+9. `cat .gitignore | grep -E "agentcommander|AgentTesting"` → both ignored
+
+## File-level reading order (for the next Claude)
+
+When debugging or extending, open in this order:
+
+1. `braindump.md` (this file) → high-level state
+2. `src/agentcommander/types.py` → all dataclasses
+3. `src/agentcommander/db/schema.sql` → DB shape
+4. `src/agentcommander/db/connection.py` → init + locks + auto-repair
+5. `src/agentcommander/engine/engine.py` → pipeline loop, chat fallback, compaction
+6. `src/agentcommander/engine/role_resolver.py` → num_ctx precedence
+7. `src/agentcommander/tui/app.py:run_tui` → startup sequence + REPL
+8. `src/agentcommander/tui/commands.py` → slash registry
+9. `src/agentcommander/typecast/autoconfig.py` → role-picking logic
+
+Last updated end of session covering: chat resume + /chat family + minctx rename + ctx-clear-on-end + corruption defense + permissions subtree + many guard fixes + project-local DB.
