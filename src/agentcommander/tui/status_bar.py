@@ -475,6 +475,19 @@ def _humanize(n: int | None) -> str:
     return f"{n / 1_000_000:.1f}m"
 
 
+def _fmt_tps(tps: float) -> str:
+    """Compact ``N t/s`` formatting for status row + tables.
+
+    Picks decimals based on magnitude so the column doesn't visually drift:
+      - < 10   → one decimal ("8.5 t/s")
+      - 10-99  → no decimals ("42 t/s")
+      - 100+   → no decimals ("145 t/s")
+    """
+    if tps < 10:
+        return f"{tps:.1f} t/s"
+    return f"{tps:.0f} t/s"
+
+
 def _render_ctx_bar(now: int, cap: int, cells: int = 8) -> tuple[str, str]:
     """Render a tiny fill-bar for the ``ctx N/M`` segment.
 
