@@ -1482,16 +1482,10 @@ def cmd_history(ctx: CommandContext, _args: list[str]) -> None:
 
 
 def cmd_new(ctx: CommandContext, args: list[str]) -> None:
-    from agentcommander.db.repos import create_conversation, set_active_conversation_id
-    title = " ".join(args).strip() or "New conversation"
-    conv = create_conversation(title=title,
-                                working_directory=ctx.state.get("working_dir"))
-    ctx.state["conversation_id"] = conv.id
-    try:
-        set_active_conversation_id(conv.id)
-    except Exception:  # noqa: BLE001
-        pass
-    render_system_line(f"new conversation: {conv.id[:8]} — {conv.title}")
+    """Alias for ``/chat new`` — single source of truth for "start a fresh
+    chat" lives in cmd_chat. Forwarding here keeps the audit log entry,
+    the active-conversation tracker, and the title fallback identical."""
+    cmd_chat(ctx, ["new", *args])
 
 
 # ─── Registry ──────────────────────────────────────────────────────────────
