@@ -136,12 +136,14 @@ def score_match(role: str, model_id: str, entry: dict[str, Any]) -> float:
     n_matches = sum(1 for h in hints if h.lower() in name_lower)
     bonus += min(0.3, 0.1 * n_matches)
 
-    # JSON requirement: ±0.3 swing
-    if req.get("needs_json"):
-        if _supports_json(entry):
-            bonus += 0.3
-        else:
-            bonus -= 0.3
+    # JSON requirement: +0.3 bonus when explicitly declared. NO penalty
+    # for absence — OpenRouter's /v1/models returns ``supported_parameters: []``
+    # for almost every free model regardless of what the model actually
+    # accepts, so penalizing missing-field would unfairly bury everyone.
+    # The bonus still rewards models that DO declare it; absence stays
+    # neutral until a real run tells us otherwise (vote signal handles that).
+    if req.get("needs_json") and _supports_json(entry):
+        bonus += 0.3
 
     # Min ctx: -0.2 if model is below the threshold
     min_ctx = req.get("min_ctx")

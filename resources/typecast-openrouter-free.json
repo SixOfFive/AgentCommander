@@ -6,10 +6,736 @@
     "voteIncrement": 1,
     "voteMax": 1000000,
     "voteMin": -1000000,
-    "lastFetchedAt": null,
-    "lastVoteAt": null,
-    "voteCount": 0,
-    "modelCount": 0
+    "lastFetchedAt": 1777577956174,
+    "lastVoteAt": 1777578122807,
+    "voteCount": 928,
+    "modelCount": 29
   },
-  "_models": {}
+  "_models": {
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": {
+      "name": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+      "contextLength": 256000,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "poolside/laguna-xs.2:free": {
+      "name": "poolside/laguna-xs.2:free",
+      "contextLength": 131072,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "poolside/laguna-m.1:free": {
+      "name": "poolside/laguna-m.1:free",
+      "contextLength": 131072,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "inclusionai/ling-2.6-1t:free": {
+      "name": "inclusionai/ling-2.6-1t:free",
+      "contextLength": 262144,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "tencent/hy3-preview:free": {
+      "name": "tencent/hy3-preview:free",
+      "contextLength": 262144,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "baidu/qianfan-ocr-fast:free": {
+      "name": "baidu/qianfan-ocr-fast:free",
+      "contextLength": 65536,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "google/gemma-4-26b-a4b-it:free": {
+      "name": "google/gemma-4-26b-a4b-it:free",
+      "contextLength": 262144,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "google/gemma-4-31b-it:free": {
+      "name": "google/gemma-4-31b-it:free",
+      "contextLength": 262144,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "nvidia/nemotron-3-super-120b-a12b:free": {
+      "name": "nvidia/nemotron-3-super-120b-a12b:free",
+      "contextLength": 262144,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "minimax/minimax-m2.5:free": {
+      "name": "minimax/minimax-m2.5:free",
+      "contextLength": 196608,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "liquid/lfm-2.5-1.2b-thinking:free": {
+      "name": "liquid/lfm-2.5-1.2b-thinking:free",
+      "contextLength": 32768,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "liquid/lfm-2.5-1.2b-instruct:free": {
+      "name": "liquid/lfm-2.5-1.2b-instruct:free",
+      "contextLength": 32768,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "nvidia/nemotron-3-nano-30b-a3b:free": {
+      "name": "nvidia/nemotron-3-nano-30b-a3b:free",
+      "contextLength": 256000,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "nvidia/nemotron-nano-12b-v2-vl:free": {
+      "name": "nvidia/nemotron-nano-12b-v2-vl:free",
+      "contextLength": 128000,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "qwen/qwen3-next-80b-a3b-instruct:free": {
+      "name": "qwen/qwen3-next-80b-a3b-instruct:free",
+      "contextLength": 262144,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "nvidia/nemotron-nano-9b-v2:free": {
+      "name": "nvidia/nemotron-nano-9b-v2:free",
+      "contextLength": 128000,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "openai/gpt-oss-120b:free": {
+      "name": "openai/gpt-oss-120b:free",
+      "contextLength": 131072,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "openai/gpt-oss-20b:free": {
+      "name": "openai/gpt-oss-20b:free",
+      "contextLength": 131072,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "z-ai/glm-4.5-air:free": {
+      "name": "z-ai/glm-4.5-air:free",
+      "contextLength": 131072,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "qwen/qwen3-coder:free": {
+      "name": "qwen/qwen3-coder:free",
+      "contextLength": 262000,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "cognitivecomputations/dolphin-mistral-24b-venice-edition:free": {
+      "name": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+      "contextLength": 32768,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "google/gemma-3n-e2b-it:free": {
+      "name": "google/gemma-3n-e2b-it:free",
+      "contextLength": 8192,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "google/gemma-3n-e4b-it:free": {
+      "name": "google/gemma-3n-e4b-it:free",
+      "contextLength": 8192,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "google/gemma-3-4b-it:free": {
+      "name": "google/gemma-3-4b-it:free",
+      "contextLength": 32768,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "google/gemma-3-12b-it:free": {
+      "name": "google/gemma-3-12b-it:free",
+      "contextLength": 32768,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "google/gemma-3-27b-it:free": {
+      "name": "google/gemma-3-27b-it:free",
+      "contextLength": 131072,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "meta-llama/llama-3.3-70b-instruct:free": {
+      "name": "meta-llama/llama-3.3-70b-instruct:free",
+      "contextLength": 65536,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": -1,
+          "successes": 0,
+          "rate_limits": 1,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 25,
+          "successes": 28,
+          "rate_limits": 3,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "meta-llama/llama-3.2-3b-instruct:free": {
+      "name": "meta-llama/llama-3.2-3b-instruct:free",
+      "contextLength": 131072,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    },
+    "nousresearch/hermes-3-llama-3.1-405b:free": {
+      "name": "nousresearch/hermes-3-llama-3.1-405b:free",
+      "contextLength": 131072,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {
+        "router": {
+          "score": 1,
+          "successes": 1,
+          "rate_limits": 0,
+          "runs": 1,
+          "lastBumpAt": 1777577965062
+        },
+        "orchestrator": {
+          "score": 29,
+          "successes": 30,
+          "rate_limits": 1,
+          "runs": 31,
+          "lastBumpAt": 1777578122807
+        }
+      }
+    }
+  }
 }
