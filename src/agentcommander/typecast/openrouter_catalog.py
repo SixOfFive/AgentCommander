@@ -344,22 +344,18 @@ def record_vote(tier: str, model_id: str, role: str, *,
 def pick_for_role(tier: str, role: str, *,
                    fallback: str | None = None) -> str | None:
     """Return the best model for ``role`` from the catalog, ranked by
-    that model's per-role score.
+    that model's per-role score plus a small capability-match bonus.
 
-    Selection rules (in order):
-      1. Models with positive ``by_role[role].score`` — highest wins,
-         tie-break by per-role ``successes``, then alphabetical.
-      2. Models with ``by_role[role].score == 0`` (untested for this
-         role specifically). Same tie-break.
-      3. Models with negative ``by_role[role].score`` are excluded
-         entirely — voting deliberately steers the picker AWAY from
-         these for THIS role only. They're still eligible for OTHER
-         roles where their per-role score is non-negative.
-      4. ``fallback`` argument when no eligible model exists (catalog
-         empty or every model has rate-limited for this role).
-
-    Returns ``None`` only when ``fallback`` is None and the catalog has
-    no eligible models.
+    Selection algorithm:
+      1. Hard filter: drop models that fail ``is_eligible`` (modality
+         mismatch — e.g. a text model can't qualify for the vision role).
+      2. Composite rank: ``per_role_score + capability_bonus`` where the
+         bonus is in [-0.5, +0.5]. Voting always dominates but
+         capabilities break ties in favour of sensible defaults.
+      3. Models with negative composite rank are excluded — voting has
+         deliberately steered the picker away from these for THIS role.
+      4. Tie-break: per-role ``successes`` desc, then alphabetical.
+      5. ``fallback`` argument when no eligible model exists.
     """
     _check_tier(tier)
     catalog = load(tier)
@@ -367,38 +363,39 @@ def pick_for_role(tier: str, role: str, *,
     if not models:
         return fallback
 
+    # Lazy import — agent_requirements.py is in the same package and
+    # cleanly importable, but keeping it lazy avoids an import cycle
+    # if either side ever grows reverse deps.
+    from agentcommander.typecast.agent_requirements import (
+        is_eligible, score_match,
+    )
+
     def _stats(entry: dict[str, Any]) -> dict[str, Any]:
         return (entry.get("by_role") or {}).get(role, {}) or {}
 
-    def _key(item: tuple[str, dict[str, Any]]) -> tuple:
-        mid, entry = item
-        s = _stats(entry)
-        score = int(s.get("score", 0))
-        succ = int(s.get("successes", 0))
-        return (-score, -succ, mid)
+    eligible = []
+    for mid, entry in models.items():
+        if not is_eligible(role, mid, entry):
+            continue
+        per_role = int(_stats(entry).get("score", 0))
+        bonus = score_match(role, mid, entry)
+        composite = per_role + bonus
+        if composite < 0:
+            # Negative composite means voting plus capability evidence
+            # together deemed this model unfit for THIS role. Skip.
+            continue
+        eligible.append((mid, entry, composite))
 
-    # Tier 1: positive per-role score
-    positive = [
-        (mid, e) for mid, e in models.items()
-        if int(_stats(e).get("score", 0)) > 0
-    ]
-    if positive:
-        positive.sort(key=_key)
-        return positive[0][0]
+    if not eligible:
+        return fallback
 
-    # Tier 2: zero per-role score (untested but not yet penalized for
-    # this role). Note we ALLOW models with negative scores for OTHER
-    # roles — only the per-role score matters here.
-    untested = [
-        (mid, e) for mid, e in models.items()
-        if int(_stats(e).get("score", 0)) == 0
-    ]
-    if untested:
-        untested.sort(key=_key)
-        return untested[0][0]
+    def _key(item):
+        mid, entry, composite = item
+        succ = int(_stats(entry).get("successes", 0))
+        return (-composite, -succ, mid)
 
-    # Every model has been rate-limited for this role.
-    return fallback
+    eligible.sort(key=_key)
+    return eligible[0][0]
 
 
 def has_data(tier: str) -> bool:
