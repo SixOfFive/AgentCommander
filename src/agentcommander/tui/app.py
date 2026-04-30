@@ -456,7 +456,26 @@ def _run_pipeline(state: dict, user_message: str) -> None:
                       {"error": f"{type(exc).__name__}: {exc}"})
             except Exception:  # noqa: BLE001
                 pass
+        # Tee the final assistant message id so the mirror knows when to
+        # render the canonical reply (it can also pick it up from the
+        # `messages` table on its next poll).
+        try:
+            live_tee.tee_event(
+                "assistant/final",
+                {"text": final_holder["final"], "message_id": assistant_msg.id},
+                conversation_id=conv_id,
+                run_id=run_id_holder["run_id"],
+                flush_deltas=True,
+            )
+        except Exception:  # noqa: BLE001
+            pass
     bar.set_running(False)
+    # Drop any stale delta buffer so a cancelled or errored run can't bleed
+    # leftover text into the next pipeline's mirror stream.
+    try:
+        live_tee.reset_active_buffer()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _handle_input(state: dict, line: str) -> None:
