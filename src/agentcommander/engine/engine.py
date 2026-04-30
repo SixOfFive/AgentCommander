@@ -833,6 +833,42 @@ class PipelineRun:
         candidates.sort(key=_key)
         return candidates[0][0]
 
+    def _record_failure_vote(self, action_label: str) -> None:
+        """Best-effort -1 vote (no sibling boost) for the model that just
+        failed to PERFORM for this role. Asymmetric to rate-limit voting
+        on purpose — a quality failure on one model is specific to that
+        model, not signal about the others.
+
+        Triggered from the engine's non-rate-limit error paths:
+        ProviderError fallthrough, JSON parse failures, etc. Maps the
+        ``action_label`` to a Role the same way ``_record_rate_limit_vote``
+        does so the vote lands on the right (model, role) pair.
+        """
+        try:
+            from agentcommander.providers.base import resolve as resolve_provider
+            from agentcommander.typecast.openrouter_catalog import (
+                vote_after_failure_for_provider,
+            )
+        except Exception:  # noqa: BLE001
+            return
+        role_enum = self._label_to_role(action_label)
+        if role_enum is None:
+            return
+        rr = resolve_role(role_enum)
+        if rr is None:
+            return
+        try:
+            provider = resolve_provider(rr.provider_id)
+        except Exception:  # noqa: BLE001
+            return
+        provider_type = getattr(provider, "type", None)
+        try:
+            vote_after_failure_for_provider(
+                provider_type, rr.model, role_enum.value,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
     def _record_rate_limit_vote(self, action_label: str) -> None:
         """Best-effort vote-down for the model currently being throttled.
 
