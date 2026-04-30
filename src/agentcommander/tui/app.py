@@ -578,18 +578,27 @@ def _run_startup_autoconfigure() -> None:
             continue
     _set_autoconfig(in_memory_table)
 
+    from agentcommander.db.repos import get_throughput as _gtp
+    from agentcommander.tui.status_bar import _fmt_tps as _ftp
+
+    def _model_with_tps(name: str | None) -> str:
+        if not name:
+            return "?"
+        return f"{name} {style('muted', f'@ {_ftp(_gtp(name))}')}"
+
     n_auto = len(applied.role_picks)
     n_overrides = len(applied.user_overrides)
     n_diff = len(applied.diff_picks)
     n_unset = len(applied.unset_roles)
     msg = (f"autoconfigured {n_auto} role(s) → primary model "
            f'{style("accent", applied.default_model or "?")}'
+           f' {style("muted", f"@ {_ftp(_gtp(applied.default_model or ""))}")}'
            f' on {applied.provider_id}')
     render_system_line(msg)
     if n_diff:
         render_system_line(f"  + {n_diff} role(s) got a stronger TypeCast pick:")
         for role_name, model in applied.diff_picks.items():
-            render_system_line(f"    {role_name} → {model}")
+            render_system_line(f"    {role_name} → {_model_with_tps(model)}")
     if n_unset:
         render_system_line(style("warn",
             f"  {n_unset} role(s) left unset (no installed model scores ≥ "
