@@ -225,6 +225,12 @@ class StatusBar:
         self.state.model = model
         if num_ctx is not None:
             self.state.context_cap_min = num_ctx
+        # A role just started → any pending retry pin is stale (the call
+        # actually went through). Clear it so the bar drops the countdown.
+        self.state.retry_attempt = None
+        self.state.retry_max = None
+        self.state.retry_wait_total_s = None
+        self.state.retry_started_at = None
         # Refresh the throughput for the new model. None when no model is
         # set (idle / between roles); the helper handles that path.
         if model:
