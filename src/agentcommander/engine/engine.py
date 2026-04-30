@@ -786,11 +786,14 @@ class PipelineRun:
     def _pick_alternate(self, provider_type: str, role: "Role",
                         exclude: set[str]) -> str | None:
         """Pick the next-best model from the appropriate catalog for
-        ``role``, skipping any model in ``exclude`` (the set we've already
-        rate-limited this run so we don't re-pick them in a loop).
+        ``role``, skipping any model in ``exclude`` (rate-limited
+        this run) and any model with a per-role score below zero
+        (deliberately steered away from for THIS role).
 
-        Returns the model id, or None if every model in the catalog has
-        been tried.
+        Reads ``by_role[role.value]`` for per-role rank, NOT the legacy
+        global ``score`` field — that field is gone in the new schema.
+        Returns None if every model in the catalog has been tried or
+        permanently steered away from for this role.
         """
         from agentcommander.typecast.openrouter_catalog import (
             TIER_FREE, TIER_PAID, load,
@@ -799,18 +802,24 @@ class PipelineRun:
         catalog = load(tier)
         models = catalog.get("_models") or {}
 
+        role_key = role.value
+
+        def _stats(entry):
+            return (entry.get("by_role") or {}).get(role_key, {}) or {}
+
         candidates = [
             (mid, e) for mid, e in models.items()
             if mid not in exclude
-            and role.value.lower() not in [r.lower() for r in (e.get("avoid_for") or [])]
+            and int(_stats(e).get("score", 0)) >= 0
         ]
         if not candidates:
             return None
 
         def _key(item):
             mid, e = item
-            score = int(e.get("score", 0))
-            succ = int(e.get("successes", 0))
+            s = _stats(e)
+            score = int(s.get("score", 0))
+            succ = int(s.get("successes", 0))
             return (-score, -succ, mid)
 
         candidates.sort(key=_key)
