@@ -320,6 +320,43 @@ class StatusBar:
         self.state.workdir = workdir
         self.redraw()
 
+    def set_retry_state(self, *, attempt: int | None, max_a: int | None,
+                        wait_s: int | None) -> None:
+        """Pin a rate-limit retry indicator on the bar.
+
+        Called from app.py whenever a ``retry`` PipelineEvent arrives.
+        The first event for an attempt has ``wait_s`` = full backoff
+        seconds; subsequent countdown events have smaller values. We use
+        the first event to start the timer, then redraw computes the
+        smooth per-second countdown from the wall clock — subsequent
+        countdown events are no-ops on the bar (they still scroll).
+
+        Pass ``attempt=None`` (or ``wait_s=0``) to clear the pin
+        immediately, e.g. when the run ends or a role-start succeeds.
+        """
+        if attempt is None or wait_s is None or wait_s <= 0:
+            self.state.retry_attempt = None
+            self.state.retry_max = None
+            self.state.retry_wait_total_s = None
+            self.state.retry_started_at = None
+        else:
+            # Same attempt as before? Don't reset the timer (this is a
+            # 15-second countdown announce; the smooth ticker keeps
+            # running). New attempt OR initial set: start fresh.
+            if (self.state.retry_attempt != attempt
+                    or self.state.retry_started_at is None):
+                self.state.retry_started_at = time.time()
+                self.state.retry_wait_total_s = wait_s
+            self.state.retry_attempt = attempt
+            self.state.retry_max = max_a
+        self.redraw()
+        if not self._mirror_mode:
+            try:
+                from agentcommander.engine import live_tee
+                live_tee.maybe_tee_bar_state(_state_to_dict(self.state), force=True)
+            except Exception:  # noqa: BLE001
+                pass
+
     def set_or_balance(
         self,
         *,
