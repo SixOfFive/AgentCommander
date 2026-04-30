@@ -92,6 +92,12 @@ def _ensure_conversation(state: dict) -> str:
     conv = create_conversation(title="Conversation",
                                 working_directory=state.get("working_dir"))
     state["conversation_id"] = conv.id
+    # Tell any mirror process which chat we're now on.
+    try:
+        from agentcommander.db.repos import set_active_conversation_id
+        set_active_conversation_id(conv.id)
+    except Exception:  # noqa: BLE001
+        pass
     return conv.id
 
 
