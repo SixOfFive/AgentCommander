@@ -695,23 +695,30 @@ def cmd_autoconfig(ctx: CommandContext, args: list[str]) -> None:
             render_system_line(style("warn",
                 "backend selection cancelled — leaving providers unchanged; "
                 "running autoconfigure against the existing setup"))
-        elif backend == BACKEND_OPENROUTER_FREE:
-            # Forward the existing key so the user can press Enter to
-            # keep it instead of pasting it again.
+        elif backend in (BACKEND_OPENROUTER_FREE, BACKEND_OPENROUTER_PAID):
+            # Forward the existing key for whichever tier we're picking
+            # so the user can press Enter to keep it instead of pasting.
+            target_provider_id = (
+                DEFAULT_OPENROUTER_FREE_PROVIDER_ID
+                if backend == BACKEND_OPENROUTER_FREE
+                else "openrouter-paid"
+            )
             existing_or_provider = next(
-                (p for p in all_providers if p.id == DEFAULT_OPENROUTER_FREE_PROVIDER_ID),
+                (p for p in all_providers if p.id == target_provider_id),
                 None,
             )
             existing_key = existing_or_provider.api_key if existing_or_provider else None
             ok = configure_backend(backend, existing_key=existing_key)
             if not ok:
                 render_system_line(style("warn",
-                    "OpenRouter Free configuration cancelled — no roles "
-                    "were assigned. Try /autoconfig clear again."))
+                    "OpenRouter configuration cancelled — no roles were "
+                    "assigned. Try /autoconfig clear again."))
                 return
-            # OpenRouter Free populates role_assignments directly; rebuild
-            # the in-memory autoconfig table to match and bail out before
-            # the threshold-cascade path below would overwrite our picks.
+            # The OR configurators populate role_assignments directly
+            # using the catalog picker; rebuild the in-memory autoconfig
+            # table to match and bail out BEFORE the threshold-cascade
+            # path below would overwrite our picks (it's Ollama-only and
+            # has no scores for OR models).
             from agentcommander.engine.role_resolver import set_autoconfig
             from agentcommander.db.repos import list_role_assignments
             in_memory: dict[Role, tuple[str, str]] = {}
@@ -721,16 +728,10 @@ def cmd_autoconfig(ctx: CommandContext, args: list[str]) -> None:
                 except ValueError:
                     continue
             set_autoconfig(in_memory)
+            tier_label = "Free" if backend == BACKEND_OPENROUTER_FREE else "Paid"
             render_system_line(style("muted",
-                "  OpenRouter Free is single-model — skipping TypeCast "
-                "threshold cascade."))
-            return
-        elif backend == BACKEND_OPENROUTER_PAID:
-            # Should never reach here — prompt_for_backend rejects "4"
-            # with a notice and re-prompts — but guard anyway.
-            render_system_line(style("warn",
-                "OpenRouter Paid is disabled (no per-role auto-pick yet). "
-                "Configure manually with /providers add + /roles set."))
+                f"  OpenRouter {tier_label} uses its own catalog — "
+                "skipping the local TypeCast threshold cascade."))
             return
         else:
             ok = configure_backend(backend)
