@@ -1037,6 +1037,7 @@ class PipelineRun:
         collected: list[str] = []
         prompt_tokens: int | None = None
         completion_tokens: int | None = None
+        fallback_started = time.time()
         try:
             for chunk in provider.chat(
                 model=model_name, messages=messages,
@@ -1065,6 +1066,24 @@ class PipelineRun:
                 )
             except Exception:  # noqa: BLE001
                 pass
+
+        # Record this in token_usage so /status sees the chat-fallback
+        # call too. Without this row the bar would underrepresent
+        # casual-conversation turns where the orchestrator-as-chat path
+        # produces the answer directly.
+        try:
+            from agentcommander.db.repos import insert_token_usage
+            insert_token_usage(
+                conversation_id=opts.conversation_id,
+                role=marker_role,
+                provider_id=rr.provider_id,
+                model=model_name,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                duration_ms=int((time.time() - fallback_started) * 1000),
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
         final = "".join(collected).strip()
         if not final:
