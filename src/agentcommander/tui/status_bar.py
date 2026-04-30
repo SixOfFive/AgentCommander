@@ -103,6 +103,21 @@ class StatusBar:
         self._cols, self._rows = term_size()
         self._installed = False
         self._enabled = sys.stdout.isatty() and supports_color()
+        # Mirror mode: when True, this bar is owned by `ac --mirror` and
+        # must NOT tee its state back to the DB (mirror is read-only and
+        # would dirty the snapshot the primary owns). Also adjusts the
+        # right-side text to show "(read-only)" so the watcher knows.
+        self._mirror_mode: bool = False
+
+    def set_mirror_mode(self, on: bool) -> None:
+        """Mark this bar as the mirror's display. Disables state tee, adds
+        the read-only badge, suppresses the input-row prompt repaint."""
+        self._mirror_mode = on
+        self.redraw()
+
+    @property
+    def mirror_mode(self) -> bool:
+        return self._mirror_mode
 
     @property
     def enabled(self) -> bool:
