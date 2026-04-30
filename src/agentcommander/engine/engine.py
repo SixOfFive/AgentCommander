@@ -1182,6 +1182,11 @@ class PipelineRun:
             )
             return
         except (ProviderError, RoleNotAssigned) as exc:
+            # Quality failure on this model for this role. Per spec:
+            # downvote ONLY this (model, role) — no sibling boost,
+            # because a model erroring out is a quality signal specific
+            # to that model, not evidence the others would do better.
+            self._record_failure_vote(role.value)
             push_nudge(self.state.scratchpad, iteration, f"{role.value}_failed",
                        f"Role {role.value} call failed: {exc}")
             if opts.on_role_end is not None:
