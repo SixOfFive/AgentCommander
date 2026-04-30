@@ -660,6 +660,7 @@ class PipelineRun:
 
         try:
             raw = call_role(Role.ROUTER, user_input=user_message,
+                            conversation_id=self.opts.conversation_id,
                             json_mode=True, on_finish=_capture,
                             should_cancel=self.is_cancelled)
             parsed = json.loads(raw)
