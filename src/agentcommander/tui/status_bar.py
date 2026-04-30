@@ -190,11 +190,27 @@ class StatusBar:
                  num_ctx: int | None = None) -> None:
         """Mark which (role, model) is active. ``num_ctx`` updates the
         displayed context-window cap when provided (so the bar shows
-        ``ctx N/M`` against the actual limit configured for this role)."""
+        ``ctx N/M`` against the actual limit configured for this role).
+
+        Also refreshes the cached running-average tokens/second for this
+        model so the bar can show ``▸ role → model @ N t/s`` without a
+        DB hit on every redraw. Lookup goes through ``get_throughput``
+        which returns the 100 default when the model has no row yet.
+        """
         self.state.role = role
         self.state.model = model
         if num_ctx is not None:
             self.state.context_cap_min = num_ctx
+        # Refresh the throughput for the new model. None when no model is
+        # set (idle / between roles); the helper handles that path.
+        if model:
+            try:
+                from agentcommander.db.repos import get_throughput
+                self.state.model_tps = get_throughput(model)
+            except Exception:  # noqa: BLE001
+                self.state.model_tps = None
+        else:
+            self.state.model_tps = None
         self.redraw()
         # Role transitions are mirror-critical too: bypass the throttle so
         # the watcher sees "▸ coder → devstral-small-2:24b" the instant
