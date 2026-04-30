@@ -1308,11 +1308,17 @@ def cmd_chat(ctx: CommandContext, args: list[str]) -> None:
 
     if sub == "new":
         # Just create a fresh conversation; previous one stays in DB.
-        from agentcommander.db.repos import create_conversation
+        from agentcommander.db.repos import (
+            create_conversation, set_active_conversation_id,
+        )
         title = " ".join(args[1:])[:60].strip() or "new chat"
         conv = create_conversation(title=title,
                                     working_directory=ctx.state.get("working_dir"))
         ctx.state["conversation_id"] = conv.id
+        try:
+            set_active_conversation_id(conv.id)
+        except Exception:  # noqa: BLE001
+            pass
         audit("chat.new", {"id": conv.id, "title": title})
         render_system_line(
             f"started new chat: {style('accent', conv.id[:8])} "
