@@ -1390,6 +1390,11 @@ def cmd_chat(ctx: CommandContext, args: list[str]) -> None:
             return
         target = rows[0]
         ctx.state["conversation_id"] = target["id"]
+        try:
+            from agentcommander.db.repos import set_active_conversation_id
+            set_active_conversation_id(target["id"])
+        except Exception:  # noqa: BLE001
+            pass
         audit("chat.resume", {"id": target["id"]})
         render_system_line(
             f"resumed chat: {style('accent', target['id'][:8])} "
