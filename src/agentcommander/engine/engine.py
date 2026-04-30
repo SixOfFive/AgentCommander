@@ -90,7 +90,7 @@ class RunOptions:
 class PipelineEvent:
     """Streamed from engine → CLI for live rendering."""
 
-    type: str  # iteration | role | role_delta | tool | guard | done | error | retry
+    type: str  # iteration | role | role_delta | tool | guard | done | error | retry | swap
     iteration: int | None = None
     action: str | None = None
     role: str | None = None
@@ -109,6 +109,11 @@ class PipelineEvent:
     retry_attempt: int | None = None
     retry_max: int | None = None
     retry_wait_seconds: int | None = None
+    # Swap events (rate-limit on OR provider → switch to alternate model).
+    # Display: "↪ swap on coder: <from> → <to> (attempt N/M)". Like retry
+    # events, never enters scratchpad.
+    swap_from_model: str | None = None
+    swap_to_model: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
