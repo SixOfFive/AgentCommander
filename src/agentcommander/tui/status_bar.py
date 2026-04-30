@@ -377,11 +377,19 @@ class StatusBar:
 
         plain_parts = [p for p in (role_part, token_part, ctx_part, run_part, total_part) if p]
         plain = "  ·  ".join(plain_parts)
-        # Right-align: pad with spaces on the left.
-        pad = max(0, cols - len(plain))
+        # Right-align: pad with spaces on the left, but reserve the left
+        # edge for the mirror badge when present.
+        right_width = max(0, cols - len(plain))
+        if mirror_badge_plain:
+            # Badge + at least 2 spaces of separation from the right block.
+            badge_w = len(mirror_badge_plain) + 2
+            right_width = max(0, cols - badge_w - len(plain))
+            badge_pad = " " * right_width
 
         if not supports_color():
-            return (" " * pad) + plain
+            if mirror_badge_plain:
+                return mirror_badge_plain + "  " + badge_pad + plain
+            return (" " * right_width) + plain
 
         # Re-render with ANSI so the role marker pops.
         styled_role = style("accent", role_part) if role_part else ""
@@ -395,7 +403,10 @@ class StatusBar:
         sep = style("rule", "  ·  ")
         styled = sep.join(styled_parts)
 
-        return (" " * pad) + styled
+        if mirror_badge_plain:
+            badge_styled = style("warn", mirror_badge_plain)
+            return badge_styled + "  " + badge_pad + styled
+        return (" " * right_width) + styled
 
 
 def _humanize(n: int | None) -> str:
