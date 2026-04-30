@@ -188,7 +188,9 @@ def cmd_providers(ctx: CommandContext, args: list[str]) -> None:
 
 
 def cmd_models(ctx: CommandContext, args: list[str]) -> None:
+    from agentcommander.db.repos import get_throughput
     from agentcommander.providers.base import ProviderError, resolve
+    from agentcommander.tui.status_bar import _fmt_tps
     if not args:
         render_system_line("usage: /models <provider_id>")
         return
@@ -197,8 +199,13 @@ def cmd_models(ctx: CommandContext, args: list[str]) -> None:
     except ProviderError as exc:
         render_system_line(f"error: {exc}")
         return
-    rows = [[m.get("id", ""), m.get("family") or "", m.get("parameter_size") or ""] for m in models]
-    render_table(["model", "family", "size"], rows)
+    rows = [
+        [m.get("id", ""), m.get("family") or "",
+         m.get("parameter_size") or "",
+         _fmt_tps(get_throughput(m.get("id") or ""))]
+        for m in models
+    ]
+    render_table(["model", "family", "size", "tok/s"], rows)
 
 
 def cmd_roles(ctx: CommandContext, args: list[str]) -> None:
