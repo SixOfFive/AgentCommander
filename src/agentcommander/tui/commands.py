@@ -1488,6 +1488,130 @@ def cmd_new(ctx: CommandContext, args: list[str]) -> None:
     cmd_chat(ctx, ["new", *args])
 
 
+# ─── /status — model usage stacked bar ─────────────────────────────────────
+
+
+# 256-color palette for the bar segments. Picked for high contrast against
+# both light and dark backgrounds; cycles if there are more than 10 models
+# in one chat (rare in practice).
+_STATUS_COLORS = (33, 208, 41, 201, 220, 51, 165, 196, 87, 226)
+
+
+def _distribute_cells(weights: list[int], total_width: int) -> list[int]:
+    """Allocate ``total_width`` integer cells across ``weights`` so each gets
+    at least 1 cell when its weight > 0 and the sum equals ``total_width``.
+
+    Plain proportional rounding can produce sums that overshoot or undershoot
+    the target by a few cells (especially with many tiny segments). We fix
+    that by repeatedly trimming the currently-largest cell or padding the
+    cell whose raw share has the biggest fractional remainder.
+    """
+    if not weights or sum(weights) <= 0 or total_width <= 0:
+        return [0] * len(weights)
+    grand = sum(weights)
+    raw = [w / grand * total_width for w in weights]
+    cells = [max(1, int(round(x))) if w > 0 else 0 for w, x in zip(weights, raw)]
+    while sum(cells) > total_width:
+        # Steal a cell from the largest segment with > 1 cell.
+        idx = max(
+            (i for i in range(len(cells)) if cells[i] > 1),
+            key=lambda i: cells[i],
+            default=None,
+        )
+        if idx is None:
+            break
+        cells[idx] -= 1
+    while sum(cells) < total_width:
+        # Add a cell to the segment with the biggest fractional share that
+        # rounding chopped off.
+        idx = max(
+            range(len(cells)),
+            key=lambda i: raw[i] - cells[i],
+        )
+        cells[idx] += 1
+    return cells
+
+
+def cmd_status(ctx: CommandContext, _args: list[str]) -> None:
+    """Show a horizontal stacked bar of per-model usage for the active chat.
+
+    Each segment's length is proportional to that model's share of total
+    tokens (prompt + completion) for the conversation. The legend below the
+    bar gives the same chip color, the model id, percentage share, raw token
+    count, call count, and total wall-time in the provider.
+
+    Source: ``token_usage`` table — one row per role call, populated by
+    ``role_call._record_token_usage``. Filtered to the current conversation
+    so a noisy older chat doesn't drown out the current session.
+    """
+    from agentcommander.db.connection import get_db
+    from agentcommander.tui.ansi import RESET, fg256
+
+    cid = ctx.state.get("conversation_id")
+    if not cid:
+        render_system_line("no active chat — start one with a prompt or /chat new")
+        return
+
+    rows = list(get_db().execute(
+        "SELECT model, "
+        "       SUM(COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0)) AS total_tokens, "
+        "       COUNT(*) AS calls, "
+        "       SUM(COALESCE(duration_ms, 0)) AS total_ms, "
+        "       SUM(COALESCE(prompt_tokens, 0)) AS prompt_tokens, "
+        "       SUM(COALESCE(completion_tokens, 0)) AS completion_tokens "
+        "FROM token_usage "
+        "WHERE conversation_id = ? AND model IS NOT NULL "
+        "GROUP BY model "
+        "ORDER BY total_tokens DESC",
+        (cid,),
+    ))
+    rows = [r for r in rows if (r["total_tokens"] or 0) > 0]
+    if not rows:
+        render_system_line(style("muted",
+            "  no model usage recorded yet for this chat — "
+            "send a prompt and try again"))
+        return
+
+    grand_tokens = sum(r["total_tokens"] for r in rows)
+    grand_calls = sum(r["calls"] for r in rows)
+    grand_ms = sum(r["total_ms"] or 0 for r in rows)
+
+    # Build the bar — width chosen to fit comfortably inside a typical
+    # terminal even after the leading "  [" indent and trailing "]".
+    bar_width = 60
+    cells = _distribute_cells([r["total_tokens"] for r in rows], bar_width)
+
+    bar_chunks: list[str] = []
+    for n, color in zip(cells, _STATUS_COLORS):
+        if n > 0:
+            bar_chunks.append(fg256(color) + ("█" * n))
+    bar = "".join(bar_chunks) + RESET
+
+    render_system_line(
+        f"Model usage for chat {style('accent', cid[:8])} — "
+        f"{grand_tokens:,} tokens · {grand_calls} call(s) · {grand_ms / 1000:.1f}s total"
+    )
+    render_system_line("  [" + bar + "]")
+
+    # Column widths: model id can be long (mistral-small:22b is 17 chars,
+    # kamekichi128/qwen3-4b-instruct-2507:latest is 42). Pick 42 to fit
+    # the longest realistic id without truncating.
+    model_w = max((len(r["model"]) for r in rows), default=20)
+    model_w = min(model_w, 48)
+    for r, color in zip(rows, _STATUS_COLORS):
+        share = r["total_tokens"] / grand_tokens * 100
+        chip = fg256(color) + "█" + RESET
+        secs = (r["total_ms"] or 0) / 1000
+        render_system_line(
+            f"  {chip} {r['model']:<{model_w}s}  "
+            f"{share:5.1f}%  "
+            f"in {r['prompt_tokens']:>6,} · "
+            f"out {r['completion_tokens']:>5,} · "
+            f"{r['calls']:>3d} call(s) · "
+            f"{secs:>6.1f}s"
+        )
+
+
 # ─── Registry ──────────────────────────────────────────────────────────────
 
 
