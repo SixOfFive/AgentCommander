@@ -388,6 +388,13 @@ def run_mirror() -> int:
             except KeyboardInterrupt:
                 should_exit = True
                 break
+            except Exception:  # noqa: BLE001
+                # Catch-all: a transient DB error (locked, malformed
+                # row, etc.) must not kill the mirror. Sleep a beat and
+                # try again next tick. Errors are intentionally silent —
+                # the mirror is a passive observer, not a debugger.
+                time.sleep(POLL_INTERVAL_S * 2)
+                continue
 
     bar.uninstall()
     write(SHOW_CURSOR)
