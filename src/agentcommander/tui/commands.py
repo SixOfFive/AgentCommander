@@ -1238,6 +1238,223 @@ def cmd_db(ctx: CommandContext, args: list[str]) -> None:
     render_system_line("  try: /db, /db check, /db vacuum, /db reindex, /db backup <path>, /db reset")
 
 
+def cmd_chat(ctx: CommandContext, args: list[str]) -> None:
+    """Manage the active chat session.
+
+    /chat                    show current chat: id, title, msg count
+    /chat list               list recent chats with msg counts
+    /chat new [<title>]      start a fresh chat (current stays in DB)
+    /chat clear              DESTRUCTIVE: delete current chat (msgs +
+                             scratchpad) and start fresh; clears the screen
+    /chat resume <id_prefix> switch to an existing chat (full history
+                             reloads on next prompt; previous turns
+                             remain in the model context)
+    /chat title <new title>  rename the current chat
+    /chat export <path>      write the chat to a markdown file
+    """
+    import os
+    import sqlite3
+    from agentcommander.db.connection import get_db
+    from agentcommander.db.repos import (
+        audit, list_conversations, list_messages, get_conversation,
+        delete_conversation, clear_scratchpad,
+    )
+    from agentcommander.tui.ansi import CLEAR_SCREEN, write
+    from agentcommander.tui.render import (
+        render_assistant_message, render_user_message,
+    )
+    from agentcommander.tui.status_bar import get_status_bar
+
+    sub = (args[0] if args else "").lower()
+
+    if sub in ("", "status", "info"):
+        cid = ctx.state.get("conversation_id")
+        if not cid:
+            render_system_line("no active chat — start one by sending a prompt")
+            return
+        conv = get_conversation(cid)
+        if conv is None:
+            render_system_line(style("warn", f"chat {cid[:8]} no longer exists in DB"))
+            return
+        msgs = list_messages(cid)
+        n_user = sum(1 for m in msgs if m.role == "user")
+        n_asst = sum(1 for m in msgs if m.role == "assistant")
+        render_system_line(f"current chat: {style('accent', conv.id[:8])}")
+        render_system_line(style("muted", f"  title:    {conv.title}"))
+        render_system_line(style("muted",
+            f"  messages: {len(msgs)} ({n_user} user, {n_asst} assistant)"))
+        return
+
+    if sub == "list":
+        convs = list_conversations()
+        if not convs:
+            render_system_line("(no chats yet)")
+            return
+        active = ctx.state.get("conversation_id")
+        rows: list[list[str]] = []
+        # One COUNT-per-conversation query — unsorted then matched in Python.
+        counts = {
+            r[0]: r[1] for r in get_db().execute(
+                "SELECT conversation_id, COUNT(*) FROM messages GROUP BY conversation_id"
+            ).fetchall()
+        }
+        for c in convs[:30]:
+            mark = "*" if c.id == active else " "
+            rows.append([mark, c.id[:8], str(counts.get(c.id, 0)),
+                         c.title[:60]])
+        render_system_line("Chats (* = active):")
+        render_table(["", "id", "msgs", "title"], rows)
+        return
+
+    if sub == "new":
+        # Just create a fresh conversation; previous one stays in DB.
+        from agentcommander.db.repos import create_conversation
+        title = " ".join(args[1:])[:60].strip() or "new chat"
+        conv = create_conversation(title=title,
+                                    working_directory=ctx.state.get("working_dir"))
+        ctx.state["conversation_id"] = conv.id
+        audit("chat.new", {"id": conv.id, "title": title})
+        render_system_line(
+            f"started new chat: {style('accent', conv.id[:8])} "
+            + style("muted", f"({title})")
+        )
+        return
+
+    if sub in ("clear", "delete"):
+        cid = ctx.state.get("conversation_id")
+        if not cid:
+            render_system_line("no active chat to clear")
+            return
+        # Wipe scratchpad + messages, delete conversation, clear screen,
+        # start a fresh one. Per user spec: "wipe out the displayed text
+        # as well as the scratchboard".
+        try:
+            clear_scratchpad(cid)
+        except sqlite3.DatabaseError as exc:
+            render_system_line(style("warn", f"scratchpad clear failed: {exc}"))
+        # Delete messages + the conversation row (CASCADE wipes scratchpad
+        # too, but explicit clear above keeps things deterministic).
+        try:
+            get_db().execute("DELETE FROM messages WHERE conversation_id = ?", (cid,))
+            delete_conversation(cid)
+        except sqlite3.DatabaseError as exc:
+            render_system_line(style("warn", f"chat delete failed: {exc}"))
+
+        audit("chat.clear", {"id": cid})
+
+        # Reset state and refresh screen
+        ctx.state["conversation_id"] = None
+        # Clear screen + restore the bottom bar
+        write(CLEAR_SCREEN)
+        bar = get_status_bar()
+        bar.park_cursor()
+        bar.redraw()
+        render_system_line(style("muted",
+            f"  chat {cid[:8]} cleared — fresh slate. Send a prompt to start a new chat."))
+        return
+
+    if sub == "resume":
+        if len(args) < 2:
+            render_system_line("usage: /chat resume <id_prefix>")
+            return
+        prefix = args[1].strip().lower()
+        if not prefix:
+            render_system_line("usage: /chat resume <id_prefix>")
+            return
+        # Match against `id` LIKE prefix%
+        rows = get_db().execute(
+            "SELECT id, title FROM conversations WHERE archived = 0 "
+            "AND lower(id) LIKE ? ORDER BY updated_at DESC",
+            (prefix + "%",),
+        ).fetchall()
+        if not rows:
+            render_system_line(style("warn", f"no chat id starts with {prefix!r}"))
+            return
+        if len(rows) > 1:
+            render_system_line(f"ambiguous prefix {prefix!r} — {len(rows)} matches:")
+            for r in rows[:10]:
+                render_system_line(f"  {r['id'][:8]}  {r['title'][:60]}")
+            render_system_line(style("muted",
+                "  rerun with a longer id prefix"))
+            return
+        target = rows[0]
+        ctx.state["conversation_id"] = target["id"]
+        audit("chat.resume", {"id": target["id"]})
+        render_system_line(
+            f"resumed chat: {style('accent', target['id'][:8])} "
+            + style("muted", f"({target['title']})")
+        )
+        # Replay history so the user can see where they left off.
+        msgs = list_messages(target["id"])
+        if msgs:
+            render_system_line(style("muted",
+                f"  replaying {len(msgs)} message(s):"))
+            for m in msgs:
+                if m.role == "user":
+                    render_user_message(m.content)
+                elif m.role == "assistant":
+                    render_assistant_message(m.content, markdown=True)
+        return
+
+    if sub == "title":
+        cid = ctx.state.get("conversation_id")
+        if not cid:
+            render_system_line("no active chat to rename")
+            return
+        new_title = " ".join(args[1:])[:60].strip()
+        if not new_title:
+            render_system_line("usage: /chat title <new title>")
+            return
+        get_db().execute(
+            "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
+            (new_title, int(__import__("time").time() * 1000), cid),
+        )
+        audit("chat.rename", {"id": cid, "title": new_title})
+        render_system_line(
+            f"renamed chat to {style('accent', new_title)}"
+        )
+        return
+
+    if sub == "export":
+        if len(args) < 2:
+            render_system_line("usage: /chat export <path-to-markdown-file>")
+            return
+        cid = ctx.state.get("conversation_id")
+        if not cid:
+            render_system_line("no active chat to export")
+            return
+        target = args[1]
+        if os.path.exists(target):
+            render_system_line(style("warn",
+                f"refusing to overwrite existing file: {target}"))
+            return
+        conv = get_conversation(cid)
+        msgs = list_messages(cid)
+        try:
+            from datetime import datetime as _dt
+            with open(target, "w", encoding="utf-8") as f:
+                f.write(f"# {conv.title if conv else cid[:8]}\n\n")
+                f.write(f"_chat id: `{cid}`_\n\n")
+                for m in msgs:
+                    label = "User" if m.role == "user" else "Assistant"
+                    ts = _dt.fromtimestamp(m.created_at / 1000).isoformat(
+                        timespec="seconds")
+                    f.write(f"## {label}  · {ts}\n\n")
+                    f.write(m.content + "\n\n")
+            render_system_line(
+                f"exported {len(msgs)} message(s) to "
+                + style("accent", target)
+            )
+        except OSError as exc:
+            render_system_line(style("warn", f"export failed: {exc}"))
+        return
+
+    render_system_line(f"unknown sub-command: /chat {sub}")
+    render_system_line(style("muted",
+        "  try: /chat, /chat list, /chat new [<title>], /chat clear, "
+        "/chat resume <id>, /chat title <name>, /chat export <path>"))
+
+
 def cmd_history(ctx: CommandContext, _args: list[str]) -> None:
     from agentcommander.db.repos import list_conversations
     convs = list_conversations()
