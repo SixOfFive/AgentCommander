@@ -577,15 +577,20 @@ class StatusBar:
         plain_parts = [p for p in (role_part, token_part, ctx_part, run_part, total_part) if p]
         plain = "  ·  ".join(plain_parts)
 
-        # Build the LEFT-side block: mirror badge first, then OR balance,
-        # joined with two spaces if both present. This block gets pinned
-        # against the left edge with the right-aligned status block padded
-        # to fill the rest of the row.
+        # Build the LEFT-side block: mirror badge first, then retry pin
+        # (most urgent — pin first when present), then OR balance. This
+        # block gets pinned against the left edge with the right-aligned
+        # status block padded to fill the rest of the row.
         left_segments_plain: list[str] = []
         left_segments_styled: list[str] = []
         if mirror_badge_plain:
             left_segments_plain.append(mirror_badge_plain)
             left_segments_styled.append(style("warn", mirror_badge_plain))
+        if retry_pin_plain:
+            left_segments_plain.append(retry_pin_plain)
+            # Bright yellow — same color as the warn-tier ctx fill bar so
+            # the visual language is consistent ("we're throttled").
+            left_segments_styled.append("\x1b[93m" + retry_pin_plain + RESET)
         if or_balance_plain:
             left_segments_plain.append(or_balance_plain)
             # Color hint: green when comfortable, yellow under 25%, red
