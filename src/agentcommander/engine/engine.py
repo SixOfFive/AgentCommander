@@ -306,6 +306,7 @@ class PipelineRun:
             summary = call_role(
                 Role.SUMMARIZER,
                 user_input=prompt,
+                conversation_id=self.opts.conversation_id,
                 json_mode=False,
                 should_cancel=self.is_cancelled,
             )
