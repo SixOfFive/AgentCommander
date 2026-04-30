@@ -425,13 +425,14 @@ def has_data(tier: str) -> bool:
 
 
 def vote_after_rate_limit(tier: str, failed_model: str, role: str) -> int:
-    """Single batched vote: -1 the failed model, +1 every other model in
-    the same tier's catalog for ``role``. Returns the count of OTHER
-    models that got the +1.
+    """Single batched vote scoped to ONE role: -1 the failed model's
+    ``by_role[role].score``, +1 every other model's ``by_role[role].score``.
+    Returns the count of OTHER models that got the +1.
 
-    Counters tracked per entry: ``score`` (clamped), ``runs`` (every
-    bump), ``successes`` / ``rate_limits`` (separate counters so the
-    user can see why a model's score is what it is).
+    Critical: this is per-(model, role). A 429 on ``coder`` with model X
+    only affects every model's ``coder`` score. ``X.by_role['translator']``
+    stays untouched. That way a model that's a great coder but
+    rate-limited as the orchestrator can keep its coder ranking intact.
     """
     _check_tier(tier)
     if not failed_model or not role:
@@ -440,39 +441,28 @@ def vote_after_rate_limit(tier: str, failed_model: str, role: str) -> int:
     models = catalog["_models"]
     now_ms = int(time.time() * 1000)
 
-    # Penalize the failed model — register it on the fly if absent so a
-    # vote against a model the user typed manually still lands.
+    # Penalize the failed (model, role) pair only.
     if failed_model not in models:
         models[failed_model] = _empty_model_entry()
-    failed = models[failed_model]
-    fpref = failed.setdefault("preferred_for", [])
-    favoid = failed.setdefault("avoid_for", [])
-    if role not in favoid:
-        favoid.append(role)
-    if role in fpref:
-        fpref.remove(role)
-    failed["score"] = max(VOTE_MIN,
-                          int(failed.get("score", 0)) - VOTE_INCREMENT)
-    failed["rate_limits"] = int(failed.get("rate_limits", 0)) + 1
-    failed["runs"] = int(failed.get("runs", 0)) + 1
-    failed["lastBumpAt"] = now_ms
+    failed_stats = _ensure_role_stats(models[failed_model], role)
+    failed_stats["score"] = max(
+        VOTE_MIN, int(failed_stats.get("score", 0)) - VOTE_INCREMENT
+    )
+    failed_stats["rate_limits"] = int(failed_stats.get("rate_limits", 0)) + 1
+    failed_stats["runs"] = int(failed_stats.get("runs", 0)) + 1
+    failed_stats["lastBumpAt"] = now_ms
 
-    # Boost every other model in the catalog. "Other" = different id.
+    # Boost every other model FOR THIS ROLE only.
     boosted = 0
     for mid, entry in models.items():
         if mid == failed_model:
             continue
-        epref = entry.setdefault("preferred_for", [])
-        eavoid = entry.setdefault("avoid_for", [])
-        if role not in epref:
-            epref.append(role)
-        if role in eavoid:
-            eavoid.remove(role)
-        entry["score"] = min(VOTE_MAX,
-                             int(entry.get("score", 0)) + VOTE_INCREMENT)
-        entry["successes"] = int(entry.get("successes", 0)) + 1
-        entry["runs"] = int(entry.get("runs", 0)) + 1
-        entry["lastBumpAt"] = now_ms
+        stats = _ensure_role_stats(entry, role)
+        stats["score"] = min(VOTE_MAX,
+                              int(stats.get("score", 0)) + VOTE_INCREMENT)
+        stats["successes"] = int(stats.get("successes", 0)) + 1
+        stats["runs"] = int(stats.get("runs", 0)) + 1
+        stats["lastBumpAt"] = now_ms
         boosted += 1
 
     catalog["_meta"]["voteCount"] = (
