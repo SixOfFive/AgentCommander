@@ -301,6 +301,14 @@ def _run_pipeline(state: dict, user_message: str) -> None:
         live_tee.tee_role_end(role, model, prompt_tokens, completion_tokens,
                               conversation_id=conv_id,
                               run_id=run_id_holder["run_id"])
+        # Refresh the OpenRouter Paid balance on the bar after each call
+        # so the user can watch their account draw down in near-real time.
+        # Best-effort; no-op if no openrouter-paid provider is configured
+        # or the credits / auth-key endpoints are unreachable.
+        try:
+            _refresh_or_paid_balance(bar)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _on_role_delta(role: str, delta: str) -> None:
         # Tee FIRST (cheap, buffered) then forward to the screen renderer
