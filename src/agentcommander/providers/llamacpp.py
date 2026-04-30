@@ -109,6 +109,25 @@ class LlamaCppProvider(ProviderBase):
                             raw=obj,
                         )
                         return
+        except urllib.error.HTTPError as exc:
+            # 429 → ProviderRateLimited so the engine's backoff helper
+            # picks this up. llama-server itself doesn't rate-limit, but
+            # a proxy in front of it might.
+            if exc.code == 429:
+                retry_hdr = exc.headers.get("Retry-After") if exc.headers else None
+                retry_after: float | None = None
+                if retry_hdr:
+                    try:
+                        retry_after = float(retry_hdr)
+                    except (TypeError, ValueError):
+                        retry_after = None
+                raise ProviderRateLimited(
+                    f"llama.cpp rate-limited: HTTP {exc.code}",
+                    retry_after=retry_after,
+                ) from exc
+            raise ProviderError(
+                f"llama.cpp /v1/chat/completions failed: HTTP {exc.code} {exc.reason}"
+            ) from exc
         except urllib.error.URLError as exc:
             raise ProviderError(f"llama.cpp /v1/chat/completions failed: {exc}") from exc
 
