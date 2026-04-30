@@ -333,6 +333,18 @@ def run_mirror() -> int:
     typed: str = ""
     should_exit = False
 
+    # Paint an empty input prompt so the user sees "❯ " in the input row
+    # from the start. As they type, set_pending_input updates the buffer
+    # text — same mechanism the primary uses during a run, but in mirror
+    # mode we drive it ourselves since there's no engine generating events.
+    bar.set_pending_input("")
+
+    # Recognized commands at the mirror prompt. /exit, /quit, /q exit
+    # cleanly; anything else gets a "read-only" hint. Listed here so future
+    # mirror commands (e.g. /chat list, /history) can be added by appending
+    # to this set — input handling stays uniform.
+    MIRROR_EXIT_COMMANDS = {"/exit", "/quit", "/q"}
+
     with raw_mode():
         while not should_exit:
             try:
