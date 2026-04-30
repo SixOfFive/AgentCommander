@@ -499,7 +499,7 @@ def configure_llamacpp() -> bool:
 def configure_backend(backend: str, *, existing_key: str | None = None) -> bool:
     """Dispatch to the right configurator for the given backend code.
 
-    ``existing_key`` is forwarded to the OpenRouter path so an existing
+    ``existing_key`` is forwarded to the OpenRouter paths so an existing
     project DB's stored key surfaces as the default when the user re-runs
     /autoconfig clear.
     """
@@ -510,11 +510,7 @@ def configure_backend(backend: str, *, existing_key: str | None = None) -> bool:
     if backend == BACKEND_OPENROUTER_FREE:
         return configure_openrouter_free(existing_key=existing_key)
     if backend == BACKEND_OPENROUTER_PAID:
-        render_error(
-            "OpenRouter Paid is disabled. Add a paid provider manually "
-            "with /providers add and pin per-role models with /roles set."
-        )
-        return False
+        return configure_openrouter_paid(existing_key=existing_key)
     return False
 
 
