@@ -228,6 +228,21 @@ def _run_pipeline(state: dict, user_message: str) -> None:
     bar.reset_run()
     bar.set_running(True)
 
+    # Live tee: every engine event the user sees on this primary screen
+    # also lands in `pipeline_events` for `ac --mirror` to replay.
+    from agentcommander.engine import live_tee
+    run_id_holder: dict[str, str | None] = {"run_id": None}
+
+    # Mark a fresh user turn so mirror sees the user message in the live
+    # stream too (it'll also discover it via the messages table, but this
+    # keeps event ordering tidy).
+    live_tee.tee_event(
+        "user/message",
+        {"text": user_message, "message_id": user_msg.id},
+        conversation_id=conv_id,
+        flush_deltas=True,
+    )
+
     def _on_role_start(role: str, model: str, num_ctx: int | None = None) -> None:
         # Display cap precedence:
         #   1. Explicit num_ctx from /context override or
@@ -261,16 +276,33 @@ def _run_pipeline(state: dict, user_message: str) -> None:
                     if isinstance(raw, (int, float)) and raw > 0:
                         display_cap = int(raw)
         bar.set_role(role, model, num_ctx=display_cap)
+        live_tee.tee_role_start(role, model, display_cap,
+                                conversation_id=conv_id,
+                                run_id=run_id_holder["run_id"])
 
     def _on_role_end(role: str, model: str, prompt_tokens: int, completion_tokens: int) -> None:
         bar.add_tokens(prompt=prompt_tokens, completion=completion_tokens)
+        live_tee.tee_role_end(role, model, prompt_tokens, completion_tokens,
+                              conversation_id=conv_id,
+                              run_id=run_id_holder["run_id"])
+
+    def _on_role_delta(role: str, delta: str) -> None:
+        # Tee FIRST (cheap, buffered) then forward to the screen renderer
+        # so a slow terminal doesn't delay the mirror's view.
+        try:
+            live_tee.tee_delta(role, bar.state.model or "?", delta,
+                               conversation_id=conv_id,
+                               run_id=run_id_holder["run_id"])
+        except Exception:  # noqa: BLE001
+            pass
+        render_role_delta(role, delta)
 
     opts = RunOptions(
         conversation_id=conv_id,
         user_message=user_message,
         user_message_id=user_msg.id,
         working_directory=state.get("working_dir"),
-        on_role_delta=render_role_delta,
+        on_role_delta=_on_role_delta,
         on_role_start=_on_role_start,
         on_role_end=_on_role_end,
     )
@@ -278,6 +310,8 @@ def _run_pipeline(state: dict, user_message: str) -> None:
     cancel_event = threading.Event()
     run.cancel_event = cancel_event
     state["active_cancel"] = cancel_event
+    if getattr(run, "run_id", None):
+        run_id_holder["run_id"] = run.run_id
 
     events_q: queue.Queue = queue.Queue()
     final_holder: dict[str, str | None] = {"final": None}
@@ -286,6 +320,27 @@ def _run_pipeline(state: dict, user_message: str) -> None:
         try:
             for evt in run.events():
                 events_q.put(("event", evt))
+                # Tee non-delta engine events to the mirror stream. Delta
+                # events come in via the on_role_delta callback (already
+                # tee'd above with batching) — the engine doesn't yield
+                # discrete role_delta PipelineEvents on the hot path, but
+                # we filter just in case to avoid double-recording.
+                if evt.type != "role_delta":
+                    try:
+                        payload = {k: v for k, v in evt.__dict__.items()
+                                   if v is not None}
+                        live_tee.tee_event(
+                            f"engine/{evt.type}",
+                            payload,
+                            conversation_id=conv_id,
+                            run_id=run_id_holder["run_id"],
+                            # Don't force a flush before guard/iteration
+                            # markers — the next role/delta would just
+                            # re-flush moments later. Only flush at done.
+                            flush_deltas=(evt.type == "done"),
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
                 if evt.type == "done":
                     final_holder["final"] = evt.final
         except KeyboardInterrupt:
