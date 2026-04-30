@@ -523,16 +523,25 @@ def _print_role_assignments() -> None:
       - 'override': set by /roles set, persisted in DB
       - 'auto':     picked by /roles auto / startup autoconfigure (in-memory)
       - 'unset':    no binding from either source
+
+    'tok/s' is the running-average tokens-per-second for that model
+    (default 100 when no measurement exists yet — converges to the real
+    rate after a few calls).
     """
+    from agentcommander.db.repos import get_throughput
+    from agentcommander.tui.status_bar import _fmt_tps
+
     rows: list[list[str]] = []
     for role in ALL_ROLES:
         rr = resolve_role(role)
         if rr is None:
-            rows.append([role.value, "—", "—", style("warn", "unset")])
+            rows.append([role.value, "—", "—", "—", style("warn", "unset")])
         else:
-            rows.append([role.value, rr.model, rr.provider_id, rr.kind])
+            tps = get_throughput(rr.model)
+            rows.append([role.value, rr.model, rr.provider_id,
+                         _fmt_tps(tps), rr.kind])
     render_system_line("Role → model assignments:")
-    render_table(["role", "model", "provider", "kind"], rows)
+    render_table(["role", "model", "provider", "tok/s", "kind"], rows)
 
 
 def _run_startup_autoconfigure() -> None:
