@@ -191,4 +191,15 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
     except Exception:  # noqa: BLE001
         pass
 
+    # Update running-average tokens/second for this model. Per spec:
+    #   new_avg = (old_avg + completion_tokens/duration_seconds) / 2
+    # The repo helper handles the missing-row case (seeds with the 100 t/s
+    # default) and skips silently when inputs don't produce a meaningful
+    # measurement (zero tokens or zero duration).
+    try:
+        from agentcommander.db.repos import record_throughput
+        record_throughput(model, completion_tokens, duration_ms)
+    except Exception:  # noqa: BLE001
+        pass
+
     return "".join(collected)
