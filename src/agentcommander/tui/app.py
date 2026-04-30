@@ -462,6 +462,22 @@ def _run_pipeline(state: dict, user_message: str) -> None:
                 if kind == "end":
                     break
                 if kind == "event":
+                    # Pin retry countdowns to the bar so they survive
+                    # scroll churn. The first event for an attempt has
+                    # the full wait_seconds; later 15-second updates
+                    # are no-ops on the bar (which derives a smooth
+                    # per-second ticker from the wall clock). Retry
+                    # events also go to render_event so the scroll
+                    # area shows them once.
+                    if getattr(data, "type", None) == "retry":
+                        try:
+                            bar.set_retry_state(
+                                attempt=data.retry_attempt,
+                                max_a=data.retry_max,
+                                wait_s=data.retry_wait_seconds,
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
                     try:
                         render_event(data)
                     except Exception as exc:  # noqa: BLE001
