@@ -393,7 +393,11 @@ def _configure_openrouter_tier(
             role=role,
             provider_id=cfg.id,
             model=picked,
-            is_override=True,
+            # is_override=False marks this as an "auto-from-catalog" pick.
+            # Each AC startup re-runs pick_for_role for these roles so the
+            # picks track the latest votes. Manual /roles set commands
+            # store is_override=True and survive refresh.
+            is_override=False,
             context_window_tokens=ctx,
         )
         n_assigned += 1
