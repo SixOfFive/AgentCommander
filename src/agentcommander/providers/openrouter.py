@@ -37,12 +37,13 @@ from agentcommander.types import ProviderConfig
 
 _DEFAULT_ENDPOINT = "https://openrouter.ai/api/v1"
 
-# Default free model used when autoconfig fires for an openrouter-free
-# provider. Picked because (a) it's free, (b) it's a 70B-parameter model
-# so quality is reasonable for general orchestration, (c) it's been
-# stable in OpenRouter's catalog. The user can override per-role via
-# /roles set if they prefer a different free model.
-OPENROUTER_FREE_DEFAULT_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
+# Default model id used when autoconfig fires for an openrouter-free
+# provider. Pinned to ``openrouter/free`` per the user's spec — single
+# identifier covering the free tier rather than picking a specific
+# upstream model. If you'd rather hard-pin a particular free model
+# (e.g. ``meta-llama/llama-3.3-70b-instruct:free``), override per-role
+# via /roles set or edit this constant.
+OPENROUTER_FREE_DEFAULT_MODEL = "openrouter/free"
 
 
 def _headers(api_key: str | None) -> dict[str, str]:
