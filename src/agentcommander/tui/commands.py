@@ -1473,8 +1473,8 @@ def _build_registry() -> dict[str, SlashCommand]:
             ),
             examples=(
                 "/autoconfig",
-                "/autoconfig --mincontext 128k",
-                "/autoconfig --mincontext 32000",
+                "/autoconfig minctx 128k",
+                "/autoconfig minctx 32000",
                 "/autoconfig ban gemma3:1b",
                 "/autoconfig unban gemma3:1b",
                 "/autoconfig bans",
