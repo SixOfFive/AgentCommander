@@ -1071,6 +1071,10 @@ class PipelineRun:
             parsed = json.loads(raw)
             result = str(parsed.get("category", "question"))
         except (ProviderError, RoleNotAssigned, ValueError, json.JSONDecodeError):
+            # Router failed to produce a parseable category. Quality
+            # downvote (no sibling boost) so persistent router-format
+            # offenders sink in the rankings over time.
+            self._record_failure_vote("classify")
             result = "question"
         self._emit_role_end(Role.ROUTER, model_name, opts,
                             prompt_tokens, completion_tokens)
