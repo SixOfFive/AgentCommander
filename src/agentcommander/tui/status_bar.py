@@ -432,6 +432,26 @@ class StatusBar:
         # that this terminal is read-only no matter what else is on the row.
         mirror_badge_plain = "● MIRROR (read-only)" if self._mirror_mode else ""
 
+        # OpenRouter Paid balance — also pinned to the left, after the
+        # mirror badge if both are set. Hidden when no balance fields are
+        # populated (Ollama-only or OR-Free user). Format prefers daily
+        # remaining when a daily cap is configured; falls back to the raw
+        # account credits otherwise.
+        or_balance_plain = ""
+        if (s.or_daily_limit is not None
+                and s.or_daily_limit_remaining is not None):
+            or_balance_plain = (
+                f"$ {s.or_daily_limit_remaining:.2f} / "
+                f"{s.or_daily_limit:.2f} today"
+            )
+        elif s.or_credits_remaining is not None and s.or_credits_total is not None:
+            or_balance_plain = (
+                f"$ {s.or_credits_remaining:.2f} / "
+                f"{s.or_credits_total:.2f}"
+            )
+        elif s.or_credits_remaining is not None:
+            or_balance_plain = f"$ {s.or_credits_remaining:.2f} left"
+
         token_part = f"in {_humanize(s.tokens_in)}  out {_humanize(s.tokens_out)}"
 
         # Context: "ctx N/M" when both known; "ctx N" when only the running
