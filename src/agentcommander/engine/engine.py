@@ -704,6 +704,54 @@ class PipelineRun:
     _RATE_LIMIT_BACKOFF_S: tuple[int, ...] = (60, 120, 240, 480, 960)
     _RETRY_ANNOUNCE_INTERVAL_S: int = 15
 
+    def _record_rate_limit_vote(self, action_label: str) -> None:
+        """Best-effort vote-down for the model currently being throttled.
+
+        Maps ``action_label`` (which the call sites pass as the role
+        ``Role.value`` for orchestrator/coder/etc., or a generic string
+        like "classify"/"chat" for non-role calls) back to a Role to
+        look up the resolved provider/model. When the mapping fails
+        (generic label) we skip voting — there's no clean way to
+        attribute a 429 to a specific role without it.
+        """
+        try:
+            from agentcommander.providers.base import resolve as resolve_provider
+            from agentcommander.typecast.openrouter_catalog import (
+                vote_after_rate_limit_for_provider,
+            )
+        except Exception:  # noqa: BLE001
+            return
+        # Identify the role. ``action_label`` is the role.value for
+        # _dispatch_role calls, which is the case we care about most.
+        # Treat "classify" / "orchestrate" / "chat" as separate roles
+        # too so the router and orchestrator are votable.
+        try:
+            role_enum = Role(action_label)
+        except ValueError:
+            # Map the generic labels back to their actual roles.
+            label_map = {
+                "classify": Role.ROUTER,
+                "orchestrate": Role.ORCHESTRATOR,
+                "chat": Role.ORCHESTRATOR,
+            }
+            role_enum = label_map.get(action_label)
+            if role_enum is None:
+                return
+        rr = resolve_role(role_enum)
+        if rr is None:
+            return
+        try:
+            provider = resolve_provider(rr.provider_id)
+        except Exception:  # noqa: BLE001
+            return
+        provider_type = getattr(provider, "type", None)
+        try:
+            vote_after_rate_limit_for_provider(
+                provider_type, rr.model, role_enum.value,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
     def _retry_on_rate_limit(self, action_label: str,
                              fn) -> "Iterator[PipelineEvent]":
         """Generator wrapper that retries ``fn()`` on ProviderRateLimited.
