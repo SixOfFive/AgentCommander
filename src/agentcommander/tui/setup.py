@@ -1,13 +1,27 @@
 """First-run setup wizard.
 
-Triggered when the providers table is empty. Prompts for the Ollama
-endpoint (server address + port), validates lightly, and persists a
-`ollama-default` provider row to the user-data SQLite. After this completes,
-the rest of the boot sequence (TypeCast refresh + autoconfigure) runs as
-normal.
+Triggered when the providers table is empty. Offers a backend selection
+(Ollama / llama.cpp / OpenRouter Free / OpenRouter Paid) and runs the
+appropriate configurator for that backend. After this completes, the rest
+of the boot sequence (TypeCast refresh + autoconfigure) runs as normal.
 
-Pure stdlib — uses `input()`. Falls back to a hardcoded localhost endpoint
-if stdin is not a TTY (so piped smoke tests don't hang).
+Backend choices and what each one means:
+  - **Ollama** — local daemon. Prompt for endpoint URL; persist as
+    ``ollama-default``. Models picked by TypeCast threshold-cascade.
+  - **llama.cpp** — single-model local server. Prompt for endpoint URL;
+    persist as ``llamacpp-default``.
+  - **OpenRouter Free** — cloud OpenAI-compat API, free tier only.
+    Prompt for an API key; persist as ``openrouter-free`` and
+    auto-assign every text role to ``OPENROUTER_FREE_DEFAULT_MODEL``.
+    Vision / audio / image_gen are left ``unset`` because the free tier
+    only covers chat models.
+  - **OpenRouter Paid** — registered for completeness but currently
+    disabled at the wizard layer until best-guess role-to-model
+    selection is implemented.
+
+Pure stdlib — uses ``read_line_at_bottom``. Falls back to a hardcoded
+Ollama localhost endpoint if stdin isn't a TTY (so piped smoke tests
+don't hang).
 """
 from __future__ import annotations
 
@@ -24,8 +38,24 @@ from agentcommander.tui.status_bar import read_line_at_bottom
 from agentcommander.types import ProviderConfig
 
 DEFAULT_OLLAMA_ENDPOINT = "http://127.0.0.1:11434"
+DEFAULT_LLAMACPP_ENDPOINT = "http://127.0.0.1:8080"
 DEFAULT_PROVIDER_ID = "ollama-default"
 DEFAULT_PROVIDER_NAME = "Local Ollama"
+DEFAULT_LLAMACPP_PROVIDER_ID = "llamacpp-default"
+DEFAULT_LLAMACPP_PROVIDER_NAME = "Local llama.cpp"
+DEFAULT_OPENROUTER_FREE_PROVIDER_ID = "openrouter-free"
+DEFAULT_OPENROUTER_FREE_PROVIDER_NAME = "OpenRouter Free"
+DEFAULT_OPENROUTER_PAID_PROVIDER_ID = "openrouter-paid"
+DEFAULT_OPENROUTER_PAID_PROVIDER_NAME = "OpenRouter Paid"
+DEFAULT_OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1"
+
+# Backend selection codes. Returned by ``prompt_for_backend`` and consumed
+# by ``configure_backend`` to dispatch to the right configurator.
+BACKEND_OLLAMA = "ollama"
+BACKEND_LLAMACPP = "llamacpp"
+BACKEND_OPENROUTER_FREE = "openrouter-free"
+BACKEND_OPENROUTER_PAID = "openrouter-paid"
+BACKEND_CANCELLED = None
 
 
 def _normalize_endpoint(raw: str) -> str | None:
