@@ -1190,7 +1190,16 @@ class PipelineRun:
         prompt_tokens: int | None = None
         completion_tokens: int | None = None
         fallback_started = time.time()
-        try:
+
+        # Wrap the streaming call in a closure so the retry helper can
+        # re-invoke it cleanly on rate-limit. The closure resets the
+        # accumulators each attempt so a partial stream from a 429'd
+        # earlier attempt doesn't bleed into the next one.
+        def _do_stream() -> None:
+            nonlocal prompt_tokens, completion_tokens
+            collected.clear()
+            prompt_tokens = None
+            completion_tokens = None
             for chunk in provider.chat(
                 model=model_name, messages=messages,
                 num_ctx=num_ctx, json_mode=False,
@@ -1203,6 +1212,19 @@ class PipelineRun:
                 if chunk.done:
                     prompt_tokens = chunk.prompt_tokens
                     completion_tokens = chunk.completion_tokens
+
+        try:
+            yield from self._retry_on_rate_limit("chat", _do_stream)
+        except ProviderRateLimited:
+            # Retries exhausted. Surface a clean error WITHOUT including
+            # the rate-limit body — the message stays user-visible only
+            # via the retry events that fired during the wait.
+            yield PipelineEvent(
+                type="error",
+                error="chat fallback rate-limited (retries exhausted) — "
+                      "/autoconfig clear to switch providers, or wait and re-run",
+            )
+            return
         except (ProviderError, Exception) as exc:  # noqa: BLE001
             yield PipelineEvent(
                 type="error",
