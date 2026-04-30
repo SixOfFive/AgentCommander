@@ -730,7 +730,10 @@ class PipelineRun:
             raise last_exc
         raise ProviderRateLimited("rate limit retries exhausted")
 
-    def _classify_category(self, user_message: str, opts: "RunOptions") -> str:
+    def _classify_category(self, user_message: str,
+                           opts: "RunOptions") -> "Iterator[PipelineEvent]":
+        """Generator: yields retry events on rate-limit, returns the
+        category string via StopIteration.value (caller uses ``yield from``)."""
         if resolve_role(Role.ROUTER) is None:
             return "question"
         # Tell the bar the router is about to run, before the network call.
@@ -742,11 +745,14 @@ class PipelineRun:
             prompt_tokens = p or 0
             completion_tokens = c or 0
 
+        def _do_call() -> str:
+            return call_role(Role.ROUTER, user_input=user_message,
+                             conversation_id=self.opts.conversation_id,
+                             json_mode=True, on_finish=_capture,
+                             should_cancel=self.is_cancelled)
+
         try:
-            raw = call_role(Role.ROUTER, user_input=user_message,
-                            conversation_id=self.opts.conversation_id,
-                            json_mode=True, on_finish=_capture,
-                            should_cancel=self.is_cancelled)
+            raw = yield from self._retry_on_rate_limit("classify", _do_call)
             parsed = json.loads(raw)
             result = str(parsed.get("category", "question"))
         except (ProviderError, RoleNotAssigned, ValueError, json.JSONDecodeError):
