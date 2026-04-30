@@ -156,9 +156,9 @@ def prompt_for_backend(*, default: str = BACKEND_OLLAMA,
     render_system_line("    1) Ollama " + style("muted", "(local; recommended)"))
     render_system_line("    2) llama.cpp " + style("muted", "(local; single model per server)"))
     render_system_line("    3) OpenRouter Free " + style("muted", "(cloud; free tier — needs an API key)"))
-    render_system_line("    4) OpenRouter Paid " + style("muted", "(cloud; DISABLED — no per-role auto-pick yet)"))
+    render_system_line("    4) OpenRouter Paid " + style("muted", "(cloud; vote-driven per-role picks)"))
     render_system_line(style("muted",
-        "  Press Enter for option 1, or type 1/2/3."))
+        "  Press Enter for option 1, or type 1/2/3/4."))
 
     for _ in range(max_attempts):
         try:
@@ -180,13 +180,8 @@ def prompt_for_backend(*, default: str = BACKEND_OLLAMA,
         if choice in ("3", "openrouter-free", "openrouter free", "free"):
             return BACKEND_OPENROUTER_FREE
         if choice in ("4", "openrouter-paid", "openrouter paid", "paid"):
-            render_error(
-                "OpenRouter Paid is disabled — best-guess role-to-model "
-                "selection isn't implemented yet. Pick another backend or "
-                "hand-configure with /providers add + /roles set."
-            )
-            continue
-        render_error(f'unrecognized choice: "{raw}" — type 1, 2, or 3.')
+            return BACKEND_OPENROUTER_PAID
+        render_error(f'unrecognized choice: "{raw}" — type 1, 2, 3, or 4.')
 
     render_error(f"could not get a valid backend after {max_attempts} attempts")
     return None
