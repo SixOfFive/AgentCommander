@@ -81,17 +81,18 @@ def _wait_for_db(path: Path, *, on_tick) -> None:
 
 
 def _replay_conversation(conv_id: str | None) -> int:
-    """Render the active conversation's stored messages. Returns the id of
-    the last event we should treat as "already seen" — the high-water mark
-    primary's events stream is at right now, so polling starts AFTER it.
+    """Render the active conversation's stored messages, plus recent
+    pipeline events for that conversation, so a watcher reattaching mid-
+    run sees what's been happening (not just past completed turns).
 
-    Tolerant of: missing pipeline_events table (older DB pre-migration),
-    missing messages, transient DB errors. Returns 0 in any error path so
-    the next poll picks up everything new from id > 0.
+    Returns the id of the highest-rendered event so polling starts AFTER
+    it. Tolerant of: missing pipeline_events table (older DB), missing
+    messages, transient DB errors. Returns 0 on full failure.
     """
     from agentcommander.db.repos import (
         latest_pipeline_event_id,
         list_messages,
+        list_pipeline_events_after,
     )
 
     if not conv_id:
@@ -117,14 +118,42 @@ def _replay_conversation(conv_id: str | None) -> int:
         elif m.role == "assistant":
             render_assistant_message(m.content, markdown=True)
 
-    # Snap event cursor to "now" so we don't replay everything that's
-    # already on disk — only events that arrive AFTER attach. If the
-    # events table doesn't exist yet (older DB), 0 is the safe answer
-    # and the next tick will retry.
+    # Replay recent events for this conversation so a mid-run reattach
+    # picks up the iteration markers, role transitions, tool calls, and
+    # streamed text the watcher would otherwise miss. We pull everything
+    # in the events table (already pruned to ~1 hour by primary on
+    # startup), filter to this conversation, and render in id order. The
+    # cursor returned is the highest event id we rendered so subsequent
+    # poll() calls don't replay the same rows.
+    last_id = 0
     try:
-        return latest_pipeline_event_id()
+        # Pull a generous batch — pipeline_events is bounded by the
+        # 1-hour pruner, and we filter in-Python to the active conv.
+        recent = list_pipeline_events_after(0, limit=2000)
     except Exception:  # noqa: BLE001
-        return 0
+        recent = []
+    rendered_count = 0
+    for evt in recent:
+        if evt.get("conversation_id") != conv_id:
+            continue
+        try:
+            _render_event(evt, conv_id)
+            rendered_count += 1
+        except Exception:  # noqa: BLE001
+            pass
+        last_id = max(last_id, int(evt.get("id") or 0))
+    if rendered_count:
+        render_system_line(style("muted",
+            f"  replayed {rendered_count} live event(s) from this chat"))
+
+    if last_id == 0:
+        # No events for this conv yet — snap to the global high-water
+        # mark so we don't replay the entire (other-conversation) tail.
+        try:
+            last_id = latest_pipeline_event_id()
+        except Exception:  # noqa: BLE001
+            last_id = 0
+    return last_id
 
 
 def _apply_bar_state(snapshot: dict[str, Any] | None) -> None:
