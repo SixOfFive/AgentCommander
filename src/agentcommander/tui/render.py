@@ -202,6 +202,28 @@ def render_event(evt: PipelineEvent) -> None:
         _close_streaming()
         writeln(style("guard_label", f"  ⌫ guard:{evt.family}  ") +
                 style("muted", f"({evt.reason})"))
+    elif evt.type == "retry":
+        # Provider rate-limit backoff. Initial event for an attempt has
+        # the full wait_seconds; subsequent countdown events have the
+        # remaining seconds. Format both as a single user-visible line —
+        # the engine throttles announce frequency so this doesn't flood.
+        _close_streaming()
+        wait = evt.retry_wait_seconds or 0
+        attempt = evt.retry_attempt or 0
+        max_a = evt.retry_max or 5
+        # Compact mm:ss format for waits ≥ 60s.
+        if wait >= 60:
+            mm, ss = divmod(wait, 60)
+            time_str = f"{mm}:{ss:02d}"
+        else:
+            time_str = f"{wait}s"
+        action = evt.reason or "?"
+        writeln(
+            style("warn", "  ◌ rate-limited") +
+            style("muted", f"  ({action})  retrying in ") +
+            style("warn", time_str) +
+            style("muted", f"  attempt {attempt}/{max_a}")
+        )
     elif evt.type == "done":
         _close_streaming()
         if evt.final:
