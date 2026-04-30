@@ -671,6 +671,36 @@ def run_tui() -> int:
     # workdir may have changed during first-run/autoconfig; re-sync the bar.
     bar.set_workdir(state.get("working_dir"))
 
+    # Resume the most recent chat for this project so the conversation
+    # continues where the user left off. The user-view messages are
+    # replayed on screen; the model-side scratchpad is hydrated lazily by
+    # PipelineRun on the next prompt. /chat clear / /chat new break out
+    # of the resume path explicitly.
+    try:
+        from agentcommander.db.repos import (
+            list_conversations, list_messages,
+        )
+        recent = list_conversations()
+    except Exception:  # noqa: BLE001
+        recent = []
+    if recent:
+        most_recent = recent[0]
+        state["conversation_id"] = most_recent.id
+        try:
+            past_msgs = list_messages(most_recent.id)
+        except Exception:  # noqa: BLE001
+            past_msgs = []
+        if past_msgs:
+            render_system_line(style("muted",
+                f"  resuming chat {most_recent.id[:8]} "
+                f"({len(past_msgs)} message(s)) — "
+                "use /chat list to switch, /chat clear to start fresh"))
+            for m in past_msgs:
+                if m.role == "user":
+                    render_user_message(m.content)
+                elif m.role == "assistant":
+                    render_assistant_message(m.content, markdown=True)
+
     # Seed the bar's context cap AFTER autoconfig has run, so we read this
     # session's freshly persisted ceiling (not whatever stale value was in
     # the DB from a previous launch). Precedence matches _on_role_start:
