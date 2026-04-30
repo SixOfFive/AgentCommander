@@ -689,6 +689,7 @@ class PipelineRun:
             raw = call_role(Role.ORCHESTRATOR,
                             user_input=scratchpad_text or self.opts.user_message,
                             scratchpad_text=scratchpad_text,
+                            conversation_id=self.opts.conversation_id,
                             json_mode=True,
                             on_finish=_capture,
                             should_cancel=self.is_cancelled)
