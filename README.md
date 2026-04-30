@@ -169,15 +169,6 @@ Manual recovery: `/db check`, `/db reindex`, `/db vacuum`, `/db backup <path>`, 
 - **Per-model throughput tracking** — running EMA of tok/s shown everywhere a model is named
 - **Session context ceiling** — `min(contextLength)` across picked models becomes the announced cap; resolver falls through `/context override → per-role → ceiling → None`
 
-## Explicitly NOT in scope
-
-- Marketplace, escrow, ledger, drift watcher
-- `/v1/*` proxy with multiple key types
-- SSO / multi-tenant
-- Web PWA
-- Apache reverse proxy
-- ec_proxy_usage / ec_security_log multi-table audit (replaced by single `audit_log`)
-
 ## Modular layout
 
 ```
