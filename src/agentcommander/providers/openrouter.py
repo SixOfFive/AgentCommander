@@ -78,6 +78,84 @@ class OpenRouterProvider(ProviderBase):
         self.endpoint = (endpoint or _DEFAULT_ENDPOINT).rstrip("/")
         self.api_key = api_key
 
+    # ── Balance / credits ──
+
+    def get_balance(self) -> dict[str, Any] | None:
+        """Fetch credits + auth-key info so the status bar can show
+        "$ remaining / $ total" plus any daily usage cap.
+
+        Returns ``{"credits_remaining": float, "credits_total": float,
+        "credits_used": float, "daily_limit": float | None,
+        "daily_limit_remaining": float | None, "is_free_tier": bool}``,
+        or ``None`` on transport / auth failure (no key, network, 401).
+
+        Hits two endpoints:
+          - ``GET /credits`` → ``{"data": {"total_credits", "total_usage"}}``
+          - ``GET /auth/key`` → ``{"data": {"limit", "limit_remaining",
+            "usage", "is_free_tier", "rate_limit": {...}}}``
+
+        We tolerate a partial response (one endpoint up, the other down)
+        so the UI degrades gracefully rather than blanking on a hiccup.
+        """
+        if not self.api_key:
+            return None
+        out: dict[str, Any] = {
+            "credits_remaining": None,
+            "credits_total": None,
+            "credits_used": None,
+            "daily_limit": None,
+            "daily_limit_remaining": None,
+            "is_free_tier": None,
+        }
+        try:
+            req = urllib.request.Request(
+                f"{self.endpoint}/credits",
+                method="GET",
+                headers=_headers(self.api_key),
+            )
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            d = data.get("data") if isinstance(data, dict) else None
+            if isinstance(d, dict):
+                total = d.get("total_credits")
+                used = d.get("total_usage")
+                if isinstance(total, (int, float)):
+                    out["credits_total"] = float(total)
+                if isinstance(used, (int, float)):
+                    out["credits_used"] = float(used)
+                if (isinstance(total, (int, float))
+                        and isinstance(used, (int, float))):
+                    out["credits_remaining"] = float(total) - float(used)
+        except (urllib.error.URLError, OSError, ValueError):
+            pass
+        try:
+            req = urllib.request.Request(
+                f"{self.endpoint}/auth/key",
+                method="GET",
+                headers=_headers(self.api_key),
+            )
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            d = data.get("data") if isinstance(data, dict) else None
+            if isinstance(d, dict):
+                lim = d.get("limit")
+                rem = d.get("limit_remaining")
+                if isinstance(lim, (int, float)):
+                    out["daily_limit"] = float(lim)
+                if isinstance(rem, (int, float)):
+                    out["daily_limit_remaining"] = float(rem)
+                if isinstance(d.get("is_free_tier"), bool):
+                    out["is_free_tier"] = d.get("is_free_tier")
+        except (urllib.error.URLError, OSError, ValueError):
+            pass
+
+        # If both fetches failed, surface None so the caller can blank the
+        # display rather than show stale zeros.
+        if (out["credits_total"] is None
+                and out["daily_limit"] is None):
+            return None
+        return out
+
     # ── Health ──
 
     def health(self) -> bool:
