@@ -693,22 +693,22 @@ def cmd_autoconfig(ctx: CommandContext, args: list[str]) -> None:
 
         args = args[1:]
 
-    # Parse --mincontext N
+    # Parse minctx N (legacy: --mincontext / --min-context still accepted)
     min_context = 0
     i = 0
     while i < len(args):
         a = args[i]
-        if a in ("--mincontext", "--min-context"):
+        if a in ("minctx", "--mincontext", "--min-context"):
             if i + 1 >= len(args):
                 render_system_line(
-                    "usage: /autoconfig --mincontext <N>   "
+                    "usage: /autoconfig minctx <N>   "
                     "(e.g. 128k, 32K, or a raw token count like 32768)"
                 )
                 return
             parsed = _parse_token_count(args[i + 1])
             if parsed is None:
                 render_system_line(
-                    f'could not parse mincontext value: "{args[i + 1]}"  '
+                    f'could not parse minctx value: "{args[i + 1]}"  '
                     "(try 128k, 32K, or a raw token count)"
                 )
                 return
@@ -717,7 +717,7 @@ def cmd_autoconfig(ctx: CommandContext, args: list[str]) -> None:
             continue
         render_system_line(f"unknown argument to /autoconfig: {a}")
         render_system_line(
-            "usage: /autoconfig [--mincontext <N>]   |   /autoconfig clear"
+            "usage: /autoconfig [minctx <N>]   |   /autoconfig clear"
         )
         return
 
