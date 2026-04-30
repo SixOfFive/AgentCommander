@@ -6,6 +6,7 @@ modules that need persistence call these; nobody else writes raw SQL.
 from __future__ import annotations
 
 import json
+import sqlite3
 import time
 import uuid
 from typing import Any
