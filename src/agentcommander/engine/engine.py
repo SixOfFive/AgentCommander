@@ -1112,6 +1112,9 @@ class PipelineRun:
                 parsed = json.loads(raw)
                 decision = OrchestratorDecision.from_dict(parsed)
             except (json.JSONDecodeError, ValueError, TypeError):
+                # Model emitted invalid JSON for the orchestrator role.
+                # Quality failure → downvote (model, orchestrator) only.
+                self._record_failure_vote("orchestrate")
                 decision = OrchestratorDecision(
                     action="done",
                     reasoning="orchestrator returned invalid JSON; halting",
