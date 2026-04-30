@@ -343,18 +343,23 @@ def record_vote(tier: str, model_id: str, role: str, *,
 
 def pick_for_role(tier: str, role: str, *,
                    fallback: str | None = None) -> str | None:
-    """Return the best model for ``role`` from the catalog.
+    """Return the best model for ``role`` from the catalog, ranked by
+    that model's per-role score.
 
-    Selection rules:
-      1. Models with ``role in preferred_for`` rank first
-      2. Among those, highest ``score`` wins (ties broken by ``successes``,
-         then alphabetical for determinism)
-      3. If nothing has the role in preferred_for, fall back to the
-         single highest-scoring model overall (any positive score)
-      4. Final fallback: ``fallback`` argument
+    Selection rules (in order):
+      1. Models with positive ``by_role[role].score`` — highest wins,
+         tie-break by per-role ``successes``, then alphabetical.
+      2. Models with ``by_role[role].score == 0`` (untested for this
+         role specifically). Same tie-break.
+      3. Models with negative ``by_role[role].score`` are excluded
+         entirely — voting deliberately steers the picker AWAY from
+         these for THIS role only. They're still eligible for OTHER
+         roles where their per-role score is non-negative.
+      4. ``fallback`` argument when no eligible model exists (catalog
+         empty or every model has rate-limited for this role).
 
-    Returns ``None`` only when the catalog is empty AND no fallback
-    is provided.
+    Returns ``None`` only when ``fallback`` is None and the catalog has
+    no eligible models.
     """
     _check_tier(tier)
     catalog = load(tier)
@@ -362,44 +367,37 @@ def pick_for_role(tier: str, role: str, *,
     if not models:
         return fallback
 
-    role_lower = role.lower()
+    def _stats(entry: dict[str, Any]) -> dict[str, Any]:
+        return (entry.get("by_role") or {}).get(role, {}) or {}
 
     def _key(item: tuple[str, dict[str, Any]]) -> tuple:
         mid, entry = item
-        score = int(entry.get("score", 0))
-        succ = int(entry.get("successes", 0))
+        s = _stats(entry)
+        score = int(s.get("score", 0))
+        succ = int(s.get("successes", 0))
         return (-score, -succ, mid)
 
-    # Tier 1: explicit preferred_for hits
-    preferred = [
+    # Tier 1: positive per-role score
+    positive = [
         (mid, e) for mid, e in models.items()
-        if role_lower in [r.lower() for r in (e.get("preferred_for") or [])]
-        and role_lower not in [r.lower() for r in (e.get("avoid_for") or [])]
+        if int(_stats(e).get("score", 0)) > 0
     ]
-    if preferred:
-        preferred.sort(key=_key)
-        return preferred[0][0]
+    if positive:
+        positive.sort(key=_key)
+        return positive[0][0]
 
-    # Tier 2: any model with positive score (and not in avoid_for for this role)
-    scored = [
+    # Tier 2: zero per-role score (untested but not yet penalized for
+    # this role). Note we ALLOW models with negative scores for OTHER
+    # roles — only the per-role score matters here.
+    untested = [
         (mid, e) for mid, e in models.items()
-        if int(e.get("score", 0)) > 0
-        and role_lower not in [r.lower() for r in (e.get("avoid_for") or [])]
+        if int(_stats(e).get("score", 0)) == 0
     ]
-    if scored:
-        scored.sort(key=_key)
-        return scored[0][0]
+    if untested:
+        untested.sort(key=_key)
+        return untested[0][0]
 
-    # Tier 3: any model not in avoid_for (sort by score desc — even 0
-    # is fine since it just means "untested but allowed")
-    allowed = [
-        (mid, e) for mid, e in models.items()
-        if role_lower not in [r.lower() for r in (e.get("avoid_for") or [])]
-    ]
-    if allowed:
-        allowed.sort(key=_key)
-        return allowed[0][0]
-
+    # Every model has been rate-limited for this role.
     return fallback
 
 
