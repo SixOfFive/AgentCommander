@@ -85,6 +85,7 @@ _MIRRORED_BAR_FIELDS = (
     "context_now", "context_cap_min",
     "pipeline_running",
     "run_elapsed_ms", "total_elapsed_ms",
+    "model_tps",
 )
 
 
