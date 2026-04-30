@@ -398,27 +398,102 @@ def has_data(tier: str) -> bool:
     return bool(load(tier).get("_models"))
 
 
-# ─── Voting dispatcher ────────────────────────────────────────────────────
+# ─── Rate-limit voting (the only voting trigger) ──────────────────────────
+#
+# Voting model per the user's spec:
+#   - On HTTP 429 for (model X, role R):
+#       - X gets -1 (and role goes into avoid_for[X])
+#       - every OTHER model in the same tier gets +1 for R
+#         (and role goes into preferred_for[Y])
+#
+# Successful calls do NOT trigger voting. Only rate-limit events shift
+# the relative ranking. This keeps the catalog signal pure ("X gets
+# throttled, others don't") instead of accumulating monotonic +1s on
+# whichever model the user happens to call most.
+#
+# Implemented as a single load → mutate-everything → save pass so a
+# catalog with hundreds of models doesn't churn the disk.
 
 
-def vote_for_provider(provider_type: str | None, model: str | None,
-                       role: str, *, scope: str = "preferred") -> None:
-    """Route a vote to the right tier based on the provider type.
+def vote_after_rate_limit(tier: str, failed_model: str, role: str) -> int:
+    """Single batched vote: -1 the failed model, +1 every other model in
+    the same tier's catalog for ``role``. Returns the count of OTHER
+    models that got the +1.
 
-    Called from role_call.py (success path → preferred) and from
-    engine.py's retry helper (rate-limit path → avoid). Silently
-    no-ops for non-OR providers so Ollama / llama.cpp calls don't
-    accidentally write to the OR catalogs.
+    Counters tracked per entry: ``score`` (clamped), ``runs`` (every
+    bump), ``successes`` / ``rate_limits`` (separate counters so the
+    user can see why a model's score is what it is).
     """
-    if not model or not provider_type or not role:
-        return
+    _check_tier(tier)
+    if not failed_model or not role:
+        return 0
+    catalog = load(tier)
+    models = catalog["_models"]
+    now_ms = int(time.time() * 1000)
+
+    # Penalize the failed model — register it on the fly if absent so a
+    # vote against a model the user typed manually still lands.
+    if failed_model not in models:
+        models[failed_model] = _empty_model_entry()
+    failed = models[failed_model]
+    fpref = failed.setdefault("preferred_for", [])
+    favoid = failed.setdefault("avoid_for", [])
+    if role not in favoid:
+        favoid.append(role)
+    if role in fpref:
+        fpref.remove(role)
+    failed["score"] = max(VOTE_MIN,
+                          int(failed.get("score", 0)) - VOTE_INCREMENT)
+    failed["rate_limits"] = int(failed.get("rate_limits", 0)) + 1
+    failed["runs"] = int(failed.get("runs", 0)) + 1
+    failed["lastBumpAt"] = now_ms
+
+    # Boost every other model in the catalog. "Other" = different id.
+    boosted = 0
+    for mid, entry in models.items():
+        if mid == failed_model:
+            continue
+        epref = entry.setdefault("preferred_for", [])
+        eavoid = entry.setdefault("avoid_for", [])
+        if role not in epref:
+            epref.append(role)
+        if role in eavoid:
+            eavoid.remove(role)
+        entry["score"] = min(VOTE_MAX,
+                             int(entry.get("score", 0)) + VOTE_INCREMENT)
+        entry["successes"] = int(entry.get("successes", 0)) + 1
+        entry["runs"] = int(entry.get("runs", 0)) + 1
+        entry["lastBumpAt"] = now_ms
+        boosted += 1
+
+    catalog["_meta"]["voteCount"] = (
+        int(catalog["_meta"].get("voteCount", 0)) + boosted + 1
+    )
+    catalog["_meta"]["lastVoteAt"] = now_ms
+    save(tier, catalog)
+    return boosted
+
+
+def vote_after_rate_limit_for_provider(provider_type: str | None,
+                                       failed_model: str | None,
+                                       role: str) -> int:
+    """Dispatch the batched 429 vote to the right tier based on the
+    provider's ``type`` field. Silent no-op for non-OR providers
+    (Ollama / llama.cpp 429s — rare but possible — don't write to the
+    OR catalogs).
+
+    Returns the number of models boosted (0 when no-op or empty catalog).
+    """
+    if not provider_type or not failed_model or not role:
+        return 0
     if provider_type == "openrouter-free":
         try:
-            record_vote(TIER_FREE, model, role, scope=scope)
+            return vote_after_rate_limit(TIER_FREE, failed_model, role)
         except Exception:  # noqa: BLE001
-            pass
-    elif provider_type == "openrouter-paid":
+            return 0
+    if provider_type == "openrouter-paid":
         try:
-            record_vote(TIER_PAID, model, role, scope=scope)
+            return vote_after_rate_limit(TIER_PAID, failed_model, role)
         except Exception:  # noqa: BLE001
-            pass
+            return 0
+    return 0
