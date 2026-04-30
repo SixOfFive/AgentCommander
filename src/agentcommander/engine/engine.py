@@ -787,14 +787,16 @@ class PipelineRun:
                         exclude: set[str]) -> str | None:
         """Pick the next-best model from the appropriate catalog for
         ``role``, skipping any model in ``exclude`` (rate-limited
-        this run) and any model with a per-role score below zero
-        (deliberately steered away from for THIS role).
+        this run) and any model whose composite (vote + capability)
+        rank for THIS role is below zero.
 
-        Reads ``by_role[role.value]`` for per-role rank, NOT the legacy
-        global ``score`` field — that field is gone in the new schema.
-        Returns None if every model in the catalog has been tried or
-        permanently steered away from for this role.
+        Composite ranking matches ``pick_for_role`` so a swap during
+        a run lands on the same model the next ``/autoconfig`` would
+        — consistent behaviour avoids surprises.
         """
+        from agentcommander.typecast.agent_requirements import (
+            is_eligible, score_match,
+        )
         from agentcommander.typecast.openrouter_catalog import (
             TIER_FREE, TIER_PAID, load,
         )
@@ -807,20 +809,26 @@ class PipelineRun:
         def _stats(entry):
             return (entry.get("by_role") or {}).get(role_key, {}) or {}
 
-        candidates = [
-            (mid, e) for mid, e in models.items()
-            if mid not in exclude
-            and int(_stats(e).get("score", 0)) >= 0
-        ]
+        candidates = []
+        for mid, e in models.items():
+            if mid in exclude:
+                continue
+            if not is_eligible(role_key, mid, e):
+                continue
+            per_role = int(_stats(e).get("score", 0))
+            bonus = score_match(role_key, mid, e)
+            composite = per_role + bonus
+            if composite < 0:
+                continue
+            candidates.append((mid, e, composite))
+
         if not candidates:
             return None
 
         def _key(item):
-            mid, e = item
-            s = _stats(e)
-            score = int(s.get("score", 0))
-            succ = int(s.get("successes", 0))
-            return (-score, -succ, mid)
+            mid, e, composite = item
+            succ = int(_stats(e).get("successes", 0))
+            return (-composite, -succ, mid)
 
         candidates.sort(key=_key)
         return candidates[0][0]
