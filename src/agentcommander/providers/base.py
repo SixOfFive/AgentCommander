@@ -19,6 +19,27 @@ class ProviderError(Exception):
     """Raised by provider implementations on transport/auth/format errors."""
 
 
+class ProviderRateLimited(ProviderError):
+    """Raised when a provider rejects a request with a rate-limit response.
+
+    The engine catches this distinctly from generic ``ProviderError`` so it
+    can run an exponential-backoff retry loop INSTEAD of pushing the error
+    text into the scratchpad as a "${role}_failed" nudge. Rate-limit errors
+    are infrastructure noise — they belong in the user-facing UI countdown,
+    not in the model's context.
+
+    ``retry_after`` (seconds) carries the server's hint when present (e.g.
+    OpenRouter's ``Retry-After`` HTTP header). The engine uses ``max(retry_after,
+    its-own-schedule)`` so we never wait shorter than what the upstream
+    requested, and never longer than our backoff cap.
+    """
+
+    def __init__(self, message: str = "rate limited", *,
+                 retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 @dataclass
 class ChatMessage:
     role: Literal["system", "user", "assistant", "tool"]
