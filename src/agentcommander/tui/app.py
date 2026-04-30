@@ -767,6 +767,11 @@ def run_tui() -> int:
         most_recent = recent[0]
         state["conversation_id"] = most_recent.id
         try:
+            from agentcommander.db.repos import set_active_conversation_id
+            set_active_conversation_id(most_recent.id)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
             past_msgs = list_messages(most_recent.id)
         except Exception:  # noqa: BLE001
             past_msgs = []
