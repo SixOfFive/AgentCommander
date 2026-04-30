@@ -170,6 +170,24 @@ class OllamaProvider(ProviderBase):
                     return
                 if content:
                     yield ChatChunk(content=content, done=False, raw=chunk)
+        except urllib.error.HTTPError as exc:
+            # 429 → bubble as ProviderRateLimited so the engine's retry
+            # helper kicks in instead of treating this as a final failure.
+            # Ollama rarely rate-limits (it's local), but a remote daemon
+            # behind a proxy could; surface it cleanly when it happens.
+            if exc.code == 429:
+                retry_hdr = exc.headers.get("Retry-After") if exc.headers else None
+                retry_after: float | None = None
+                if retry_hdr:
+                    try:
+                        retry_after = float(retry_hdr)
+                    except (TypeError, ValueError):
+                        retry_after = None
+                raise ProviderRateLimited(
+                    f"Ollama rate-limited: HTTP {exc.code}",
+                    retry_after=retry_after,
+                ) from exc
+            raise ProviderError(f"Ollama /api/chat failed: HTTP {exc.code} {exc.reason}") from exc
         except urllib.error.URLError as exc:
             raise ProviderError(f"Ollama /api/chat failed: {exc}") from exc
 
