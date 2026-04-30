@@ -761,7 +761,14 @@ class PipelineRun:
                             prompt_tokens, completion_tokens)
         return result
 
-    def _orchestrate(self, opts: "RunOptions") -> OrchestratorDecision:
+    def _orchestrate(self, opts: "RunOptions") -> "Iterator[PipelineEvent]":
+        """Generator: yields retry events on rate-limit, returns
+        OrchestratorDecision via StopIteration.value.
+
+        The retry helper raises ProviderRateLimited if all attempts are
+        exhausted — let it propagate so events() catches it and emits
+        the run-failure error.
+        """
         if resolve_role(Role.ORCHESTRATOR) is None:
             return OrchestratorDecision(action="done",
                                         reasoning="orchestrator role is not assigned to a model")
@@ -775,14 +782,17 @@ class PipelineRun:
             completion_tokens = c or 0
 
         scratchpad_text = compact_scratchpad(self.state.scratchpad)
+
+        def _do_call() -> str:
+            return call_role(Role.ORCHESTRATOR,
+                             user_input=scratchpad_text or self.opts.user_message,
+                             scratchpad_text=scratchpad_text,
+                             conversation_id=self.opts.conversation_id,
+                             json_mode=True,
+                             on_finish=_capture,
+                             should_cancel=self.is_cancelled)
         try:
-            raw = call_role(Role.ORCHESTRATOR,
-                            user_input=scratchpad_text or self.opts.user_message,
-                            scratchpad_text=scratchpad_text,
-                            conversation_id=self.opts.conversation_id,
-                            json_mode=True,
-                            on_finish=_capture,
-                            should_cancel=self.is_cancelled)
+            raw = yield from self._retry_on_rate_limit("orchestrate", _do_call)
             try:
                 parsed = json.loads(raw)
                 decision = OrchestratorDecision.from_dict(parsed)
