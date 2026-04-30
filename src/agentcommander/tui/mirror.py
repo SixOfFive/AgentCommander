@@ -327,7 +327,8 @@ def run_mirror() -> int:
 
     active_conv_id: str | None = _resolve_active()
     last_event_id = _replay_conversation(active_conv_id)
-    _apply_bar_state(get_bar_state())
+    last_bar_snapshot: dict | None = get_bar_state()
+    _apply_bar_state(last_bar_snapshot)
 
     typed: str = ""
     should_exit = False
