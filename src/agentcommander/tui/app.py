@@ -887,6 +887,12 @@ def run_tui() -> int:
     if seed_cap is not None:
         bar.set_context(cap_min=seed_cap)
 
+    # Seed the OR Paid balance so it's visible before the first role call.
+    try:
+        _refresh_or_paid_balance(bar)
+    except Exception:  # noqa: BLE001
+        pass
+
     while not state["should_exit"]:
         # Drain any prompt the user pre-typed during the previous run before
         # asking for fresh input.
