@@ -185,6 +185,13 @@ class StatusBar:
                 self.state.run_elapsed_ms = final_ms
                 self.state.total_elapsed_ms += final_ms
             self.state.run_started_at = None
+            # Clear the live context-use reading on run end. context_now
+            # holds the LAST role's prompt-token count; when no model is
+            # active anymore that number is stale (showing "7.8k/8.2k"
+            # with a red bar suggests something is loaded — nothing is).
+            # The cap_min stays so the bar shows "ctx —/8.2k" — the
+            # configured ceiling is still relevant info.
+            self.state.context_now = 0
         self.redraw()
 
     def set_context(self, *, now: int | None = None, cap_min: int | None = None) -> None:
