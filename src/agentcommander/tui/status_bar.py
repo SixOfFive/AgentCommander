@@ -494,6 +494,29 @@ class StatusBar:
         # that this terminal is read-only no matter what else is on the row.
         mirror_badge_plain = "● MIRROR (read-only)" if self._mirror_mode else ""
 
+        # Retry pin — when the engine is in a rate-limit backoff sleep,
+        # show a smooth per-second countdown so the watcher knows the
+        # run is alive and waiting (the scroll-area announce only fires
+        # every 15 s and gets pushed up by other content). Computed
+        # from the wall clock instead of a stored "remaining" so the
+        # ticker advances even if no retry events arrive.
+        retry_pin_plain = ""
+        if (s.retry_attempt is not None
+                and s.retry_started_at is not None
+                and s.retry_wait_total_s is not None):
+            elapsed = time.time() - s.retry_started_at
+            remaining = max(0, int(s.retry_wait_total_s - elapsed))
+            if remaining > 0:
+                if remaining >= 60:
+                    mm, ss = divmod(remaining, 60)
+                    countdown = f"{mm}:{ss:02d}"
+                else:
+                    countdown = f"{remaining}s"
+                retry_pin_plain = (
+                    f"◌ retry {s.retry_attempt}/{s.retry_max or 5}  "
+                    f"in {countdown}"
+                )
+
         # OpenRouter Paid balance — also pinned to the left, after the
         # mirror badge if both are set. Hidden when no balance fields are
         # populated (Ollama-only or OR-Free user). Format prefers daily
