@@ -84,6 +84,16 @@ class StatusState:
     or_credits_total: float | None = None
     or_daily_limit: float | None = None
     or_daily_limit_remaining: float | None = None
+    # Rate-limit retry pin — set when the engine is sleeping in the
+    # backoff helper. The bar derives a per-second countdown from
+    # ``retry_started_at`` + ``retry_wait_total_s`` so the watcher sees a
+    # smooth ticker even though the engine only emits one event per
+    # 15-second announce. Cleared automatically when the next role-start
+    # fires (retry succeeded) or set_running(False) (run ended).
+    retry_attempt: int | None = None
+    retry_max: int | None = None
+    retry_wait_total_s: int | None = None
+    retry_started_at: float | None = None
 
 
 # Fields to persist to / load from `config.bar_state_json` so a mirror can
