@@ -491,18 +491,49 @@ class StatusBar:
 
         plain_parts = [p for p in (role_part, token_part, ctx_part, run_part, total_part) if p]
         plain = "  ·  ".join(plain_parts)
-        # Right-align: pad with spaces on the left, but reserve the left
-        # edge for the mirror badge when present.
-        right_width = max(0, cols - len(plain))
+
+        # Build the LEFT-side block: mirror badge first, then OR balance,
+        # joined with two spaces if both present. This block gets pinned
+        # against the left edge with the right-aligned status block padded
+        # to fill the rest of the row.
+        left_segments_plain: list[str] = []
+        left_segments_styled: list[str] = []
         if mirror_badge_plain:
-            # Badge + at least 2 spaces of separation from the right block.
-            badge_w = len(mirror_badge_plain) + 2
-            right_width = max(0, cols - badge_w - len(plain))
-            badge_pad = " " * right_width
+            left_segments_plain.append(mirror_badge_plain)
+            left_segments_styled.append(style("warn", mirror_badge_plain))
+        if or_balance_plain:
+            left_segments_plain.append(or_balance_plain)
+            # Color hint: green when comfortable, yellow under 25%, red
+            # under 5% — same gradient as the ctx fill bar.
+            credit_ratio = None
+            if (s.or_daily_limit is not None
+                    and s.or_daily_limit_remaining is not None
+                    and s.or_daily_limit > 0):
+                credit_ratio = s.or_daily_limit_remaining / s.or_daily_limit
+            elif (s.or_credits_total is not None
+                  and s.or_credits_remaining is not None
+                  and s.or_credits_total > 0):
+                credit_ratio = s.or_credits_remaining / s.or_credits_total
+            if credit_ratio is not None and credit_ratio < 0.05:
+                left_segments_styled.append("\x1b[91m" + or_balance_plain + RESET)
+            elif credit_ratio is not None and credit_ratio < 0.25:
+                left_segments_styled.append("\x1b[93m" + or_balance_plain + RESET)
+            else:
+                left_segments_styled.append(style("accent", or_balance_plain))
+        left_plain = "  ".join(left_segments_plain)
+        left_styled = "  ".join(left_segments_styled)
+        left_w = len(left_plain)
+
+        # Right-align the data block; reserve room for the left block when
+        # present so the two never collide.
+        if left_w:
+            right_width = max(0, cols - left_w - 2 - len(plain))
+        else:
+            right_width = max(0, cols - len(plain))
 
         if not supports_color():
-            if mirror_badge_plain:
-                return mirror_badge_plain + "  " + badge_pad + plain
+            if left_w:
+                return left_plain + "  " + (" " * right_width) + plain
             return (" " * right_width) + plain
 
         # Re-render with ANSI so the role marker pops.
@@ -517,9 +548,8 @@ class StatusBar:
         sep = style("rule", "  ·  ")
         styled = sep.join(styled_parts)
 
-        if mirror_badge_plain:
-            badge_styled = style("warn", mirror_badge_plain)
-            return badge_styled + "  " + badge_pad + styled
+        if left_w:
+            return left_styled + "  " + (" " * right_width) + styled
         return (" " * right_width) + styled
 
 
