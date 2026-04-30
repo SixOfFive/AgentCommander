@@ -1418,7 +1418,7 @@ def _build_registry() -> dict[str, SlashCommand]:
             summary="run TypeCast autoconfigure with optional context-window filter",
             handler=cmd_autoconfig,
             usage="/autoconfig                            # default in-memory autoconfig\n"
-                  "/autoconfig --mincontext <N>           # filter by ctx + persist picks\n"
+                  "/autoconfig minctx <N>                 # filter by ctx + persist picks\n"
                   "/autoconfig ban <model_id>             # exclude a model + re-run\n"
                   "/autoconfig unban <model_id>           # re-allow a model + re-run\n"
                   "/autoconfig bans                       # list banned models\n"
