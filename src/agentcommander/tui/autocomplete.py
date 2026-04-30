@@ -43,8 +43,8 @@ SUB_COMMANDS: dict[str, list[CompletionMatch]] = {
     "/autoconfig": [
         CompletionMatch(name="clear",
                         summary="wipe role assignments + re-prompt for the Ollama endpoint, then redo"),
-        CompletionMatch(name="--mincontext",
-                        summary="filter to models with at least N context tokens (e.g. --mincontext 128k)"),
+        CompletionMatch(name="minctx",
+                        summary="filter to models with at least N context tokens (e.g. minctx 128k)"),
         CompletionMatch(name="ban",
                         summary="exclude <model_id> from autoconfig picks, then re-run"),
         CompletionMatch(name="unban",
