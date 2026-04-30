@@ -96,6 +96,8 @@ _MIRRORED_BAR_FIELDS = (
     "pipeline_running",
     "run_elapsed_ms", "total_elapsed_ms",
     "model_tps",
+    "or_credits_remaining", "or_credits_total",
+    "or_daily_limit", "or_daily_limit_remaining",
 )
 
 
