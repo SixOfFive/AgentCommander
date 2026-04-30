@@ -30,6 +30,7 @@ from agentcommander.providers.base import (
     ChatMessage,
     ProviderBase,
     ProviderError,
+    ProviderRateLimited,
     provider_factory,
 )
 from agentcommander.types import ProviderConfig
