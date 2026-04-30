@@ -657,6 +657,79 @@ class PipelineRun:
             except Exception:  # noqa: BLE001
                 pass
 
+    # ── Rate-limit retry helper ──────────────────────────────────────
+    #
+    # Provider rate-limits (HTTP 429) bubble up as ProviderRateLimited.
+    # Generic ProviderErrors stay generic and surface as run failures
+    # (with scratchpad nudges), but rate-limits are infra noise — we
+    # want to wait, retry, and keep the model's context clean.
+    #
+    # Schedule: 60s, 120s, 240s, 480s, 960s (1 / 2 / 4 / 8 / 16 min).
+    # After 5 retries we give up and yield a real error event. Server
+    # ``Retry-After`` hints raise the wait above the schedule when
+    # they're longer; never below.
+
+    _RATE_LIMIT_BACKOFF_S: tuple[int, ...] = (60, 120, 240, 480, 960)
+    _RETRY_ANNOUNCE_INTERVAL_S: int = 15
+
+    def _retry_on_rate_limit(self, action_label: str,
+                             fn) -> "Iterator[PipelineEvent]":
+        """Generator wrapper that retries ``fn()`` on ProviderRateLimited.
+
+        Usage from another generator method::
+
+            result = yield from self._retry_on_rate_limit("classify",
+                lambda: call_role(...))
+
+        Yields ``retry`` PipelineEvents at retry-start and during the
+        wait (every ~15 s). Honors ``self.is_cancelled()`` so /stop
+        breaks out of the wait immediately. After the schedule is
+        exhausted, re-raises the last ProviderRateLimited so the caller
+        can fall through to its normal error path.
+        """
+        schedule = self._RATE_LIMIT_BACKOFF_S
+        last_exc: ProviderRateLimited | None = None
+        for attempt, base_wait in enumerate(schedule, start=1):
+            try:
+                return fn()
+            except ProviderRateLimited as exc:
+                last_exc = exc
+                # Server-suggested wait wins if it's longer than our slot.
+                wait = max(int(base_wait), int(exc.retry_after or 0))
+                # Initial announcement for this attempt.
+                yield PipelineEvent(
+                    type="retry",
+                    reason=action_label,
+                    retry_attempt=attempt,
+                    retry_max=len(schedule),
+                    retry_wait_seconds=wait,
+                )
+                # Cancellation-aware sleep with periodic countdown.
+                elapsed = 0.0
+                next_announce_at = wait - self._RETRY_ANNOUNCE_INTERVAL_S
+                while elapsed < wait:
+                    if self.is_cancelled():
+                        # Re-raise so the caller's surrounding try/except
+                        # flows can convert this to a "cancelled" event.
+                        raise
+                    time.sleep(1.0)
+                    elapsed += 1.0
+                    remaining = int(wait - elapsed)
+                    if remaining > 0 and remaining <= next_announce_at:
+                        yield PipelineEvent(
+                            type="retry",
+                            reason=action_label,
+                            retry_attempt=attempt,
+                            retry_max=len(schedule),
+                            retry_wait_seconds=remaining,
+                        )
+                        next_announce_at = remaining - self._RETRY_ANNOUNCE_INTERVAL_S
+        # All attempts exhausted — let the caller decide what to do
+        # (typically: yield a final error event and stop the pipeline).
+        if last_exc is not None:
+            raise last_exc
+        raise ProviderRateLimited("rate limit retries exhausted")
+
     def _classify_category(self, user_message: str, opts: "RunOptions") -> str:
         if resolve_role(Role.ROUTER) is None:
             return "question"
