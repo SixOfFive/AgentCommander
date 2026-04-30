@@ -124,7 +124,7 @@ Only `/exit` and `/quit` are accepted as input. On exit the mirror does NOT call
 ## What's persistent across runs
 
 - **Conversations + messages** — auto-resume the most recent chat for the project on launch. `/chat new` starts fresh; `/chat clear` is destructive.
-- **Scratchpad** — the model-facing memory (router decisions, role outputs, tool results) survives across turns and across program restarts. Auto-compacted via the summarizer role when it would exceed `num_ctx × 0.5`.
+- **Scratchpad** — the model-facing memory (router decisions, role outputs, tool results) survives across turns and across program restarts. Auto-compacted via the summarizer role when it would exceed `num_ctx × 0.9` — compaction fires near the ceiling so the model keeps as much real history as possible before the summarizer trims it.
 - **Provider configs + role assignments** — endpoints and per-role overrides survive in the DB.
 - **Per-model throughput** — running-average tokens/second per model, displayed everywhere a model is shown. Updated after every call via `new_avg = (old_avg + completion_tokens / duration) / 2`. Default 100 tok/s for never-measured models.
 - **Filesystem permissions** — "always allow" decisions for read/write/execute, with subtree scope. `Y once` decisions live in-memory only.
