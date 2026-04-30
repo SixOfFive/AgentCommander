@@ -1545,7 +1545,9 @@ def cmd_status(ctx: CommandContext, _args: list[str]) -> None:
     so a noisy older chat doesn't drown out the current session.
     """
     from agentcommander.db.connection import get_db
+    from agentcommander.db.repos import get_throughput
     from agentcommander.tui.ansi import RESET, fg256
+    from agentcommander.tui.status_bar import _fmt_tps
 
     cid = ctx.state.get("conversation_id")
     if not cid:
