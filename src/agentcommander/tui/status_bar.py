@@ -74,6 +74,16 @@ class StatusState:
     # from this model right now. None == not yet known (display omits the
     # rate); 100.0 is the seed default for never-measured models.
     model_tps: float | None = None
+    # OpenRouter Paid balance — pinned at the bottom-left of the status
+    # row when set. All four fields are USD; the daily_* fields come from
+    # a per-key cap configured on openrouter.ai/keys and are None when no
+    # daily limit is set on the key. Refreshed after each role-end via the
+    # provider's get_balance() so the watcher sees draw-down in near-real
+    # time without us hammering the API on every redraw.
+    or_credits_remaining: float | None = None
+    or_credits_total: float | None = None
+    or_daily_limit: float | None = None
+    or_daily_limit_remaining: float | None = None
 
 
 # Fields to persist to / load from `config.bar_state_json` so a mirror can
