@@ -308,6 +308,32 @@ class StatusBar:
         self.state.workdir = workdir
         self.redraw()
 
+    def set_or_balance(
+        self,
+        *,
+        credits_remaining: float | None = None,
+        credits_total: float | None = None,
+        daily_limit: float | None = None,
+        daily_limit_remaining: float | None = None,
+    ) -> None:
+        """Refresh the OpenRouter Paid balance segment.
+
+        Pass ``None`` for any field to clear it. The display is hidden when
+        all four are None — that way Ollama-only / OR-Free users never see
+        an empty "$ —" placeholder taking up the bottom-left.
+        """
+        self.state.or_credits_remaining = credits_remaining
+        self.state.or_credits_total = credits_total
+        self.state.or_daily_limit = daily_limit
+        self.state.or_daily_limit_remaining = daily_limit_remaining
+        self.redraw()
+        if not self._mirror_mode:
+            try:
+                from agentcommander.engine import live_tee
+                live_tee.maybe_tee_bar_state(_state_to_dict(self.state), force=True)
+            except Exception:  # noqa: BLE001
+                pass
+
     def set_pending_input(self, text: str | None) -> None:
         """Update the in-flight typing buffer painted on the input row.
 
