@@ -474,23 +474,40 @@ def insert_pipeline_event(
 
     Cheap-by-design: a single INSERT, no joins, no triggers. ``payload`` is
     serialized to JSON; pass dataclass dicts (asdict) or plain dicts.
+
+    Returns 0 on any DB error (locked, table missing on a half-migrated
+    DB, etc.). The tee path swallows non-zero failures silently — losing
+    a mirror event must never break the primary's pipeline.
     """
     body = json.dumps(payload or {}, default=_json_default)
-    cur = get_db().execute(
-        "INSERT INTO pipeline_events (conversation_id, run_id, event_type, payload, created_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (conversation_id, run_id, event_type, body, _now_ms()),
-    )
-    return int(cur.lastrowid or 0)
+    try:
+        cur = get_db().execute(
+            "INSERT INTO pipeline_events (conversation_id, run_id, event_type, payload, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (conversation_id, run_id, event_type, body, _now_ms()),
+        )
+        return int(cur.lastrowid or 0)
+    except sqlite3.DatabaseError:
+        return 0
 
 
 def list_pipeline_events_after(last_id: int, *, limit: int = 1000) -> list[dict[str, Any]]:
-    """Mirror-side poll: return events with ``id > last_id`` in id order."""
-    rows = get_db().execute(
-        "SELECT id, conversation_id, run_id, event_type, payload, created_at "
-        "FROM pipeline_events WHERE id > ? ORDER BY id ASC LIMIT ?",
-        (last_id, limit),
-    ).fetchall()
+    """Mirror-side poll: return events with ``id > last_id`` in id order.
+
+    Returns ``[]`` if the table doesn't exist yet — this happens when the
+    mirror attaches to a DB created by an older AgentCommander build that
+    pre-dates the migration. Once primary opens the DB once with the new
+    schema, the table appears and the mirror picks up live events on its
+    next tick.
+    """
+    try:
+        rows = get_db().execute(
+            "SELECT id, conversation_id, run_id, event_type, payload, created_at "
+            "FROM pipeline_events WHERE id > ? ORDER BY id ASC LIMIT ?",
+            (last_id, limit),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
     out: list[dict[str, Any]] = []
     for r in rows:
         try:
@@ -509,14 +526,19 @@ def list_pipeline_events_after(last_id: int, *, limit: int = 1000) -> list[dict[
 
 
 def latest_pipeline_event_id() -> int:
-    """Highest id in the events table, or 0 if empty.
+    """Highest id in the events table, or 0 if empty / missing.
 
     Mirror calls this once at startup so it doesn't replay the entire
     historical event stream — only events that arrive AFTER mirror attached.
+    Returns 0 when the table doesn't exist (older DB, mirror attaches
+    before primary's first run with the new schema).
     """
-    row = get_db().execute(
-        "SELECT MAX(id) AS m FROM pipeline_events"
-    ).fetchone()
+    try:
+        row = get_db().execute(
+            "SELECT MAX(id) AS m FROM pipeline_events"
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return 0
     if row is None or row["m"] is None:
         return 0
     return int(row["m"])
@@ -527,13 +549,17 @@ def prune_pipeline_events(older_than_ms: int) -> int:
 
     Called once on primary startup to keep the DB from growing unboundedly
     across long sessions. Mirror sees only the live tail anyway, so trimming
-    history is harmless.
+    history is harmless. Returns 0 silently when the table doesn't exist
+    (fresh DB during migration window).
     """
-    cur = get_db().execute(
-        "DELETE FROM pipeline_events WHERE created_at < ?",
-        (older_than_ms,),
-    )
-    return cur.rowcount or 0
+    try:
+        cur = get_db().execute(
+            "DELETE FROM pipeline_events WHERE created_at < ?",
+            (older_than_ms,),
+        )
+        return cur.rowcount or 0
+    except sqlite3.DatabaseError:
+        return 0
 
 
 # ─── Status bar state mirror ───────────────────────────────────────────────
