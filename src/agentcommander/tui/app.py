@@ -84,6 +84,16 @@ def _bootstrap() -> None:
         refresh_catalog()
     except Exception:  # noqa: BLE001 — never crash startup
         pass
+    # Trim the live-event stream so the DB doesn't grow unbounded across
+    # long sessions. Mirror only consumes the live tail (events arriving
+    # after attach) so older rows are useless.
+    try:
+        import time as _t
+        from agentcommander.db.repos import prune_pipeline_events
+        cutoff_ms = int((_t.time() - 3600) * 1000)  # 1 hour
+        prune_pipeline_events(cutoff_ms)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _ensure_conversation(state: dict) -> str:
