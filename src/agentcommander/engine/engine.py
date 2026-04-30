@@ -37,6 +37,7 @@ from agentcommander.engine.scratchpad import build_final_output, compact_scratch
 from agentcommander.providers.base import (
     ChatMessage,
     ProviderError,
+    ProviderRateLimited,
     resolve as resolve_provider,
 )
 from agentcommander.tools.dispatcher import invoke as invoke_tool
