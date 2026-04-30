@@ -61,7 +61,8 @@
       "Bash(timeout 300 ../ac.bat)",
       "Bash(timeout 60 ../ac.bat)",
       "Bash(break)",
-      "Bash(timeout 900 ../ac.bat)"
+      "Bash(timeout 900 ../ac.bat)",
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest discover tests)"
     ]
   }
 }
