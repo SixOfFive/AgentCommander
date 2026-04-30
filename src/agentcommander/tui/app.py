@@ -184,6 +184,45 @@ def _consume_input_chunk(buffer: str, chunk: str) -> tuple[str, tuple[str, str] 
     return new_buf, None
 
 
+def _refresh_or_paid_balance(bar) -> None:  # noqa: ANN001 - StatusBar local
+    """Pull the OpenRouter Paid balance from the first configured provider
+    of that type and push it into the status bar.
+
+    Silent-no-op when:
+      - no openrouter-paid provider is configured (Ollama / OR-Free users)
+      - the provider's get_balance() returns None (transport / auth fail)
+
+    Cheap-by-design: at most one HTTP call per role-end. We don't
+    aggregate across multiple OR Paid providers; only the first wins.
+    Users wanting multi-account balances can extend later.
+    """
+    try:
+        from agentcommander.providers.base import list_active
+    except Exception:  # noqa: BLE001
+        return
+    for provider in list_active():
+        if getattr(provider, "type", None) != "openrouter-paid":
+            continue
+        if not hasattr(provider, "get_balance"):
+            continue
+        try:
+            balance = provider.get_balance()
+        except Exception:  # noqa: BLE001
+            return
+        if not balance:
+            return
+        try:
+            bar.set_or_balance(
+                credits_remaining=balance.get("credits_remaining"),
+                credits_total=balance.get("credits_total"),
+                daily_limit=balance.get("daily_limit"),
+                daily_limit_remaining=balance.get("daily_limit_remaining"),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        return
+
+
 def _unload_active_models() -> None:
     """Best-effort: ask each provider to evict its loaded models. Used when
     the user halts mid-run (/stop, /exit, /quit) so VRAM frees right away
