@@ -17,6 +17,12 @@ from pathlib import Path
 _db: sqlite3.Connection | None = None
 _db_path: Path | None = None
 
+# True when the active connection was opened via init_db_readonly() — the
+# mirror codepath. Several shutdown / maintenance steps (wal_checkpoint,
+# REINDEX) require write access and are skipped when this is set, so a
+# mirror process never tries to write to the DB it's only meant to follow.
+_is_readonly: bool = False
+
 # Open file handle backing the per-DB single-instance lock. Held for the
 # lifetime of the process; released on graceful shutdown via close_db.
 _lock_handle = None  # type: ignore[var-annotated]
