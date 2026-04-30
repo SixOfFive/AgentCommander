@@ -1604,9 +1604,11 @@ def cmd_status(ctx: CommandContext, _args: list[str]) -> None:
         share = r["total_tokens"] / grand_tokens * 100
         chip = fg256(color) + "█" + RESET
         secs = (r["total_ms"] or 0) / 1000
+        tps = get_throughput(r["model"])
         render_system_line(
             f"  {chip} {r['model']:<{model_w}s}  "
             f"{share:5.1f}%  "
+            f"{_fmt_tps(tps):>10s}  "
             f"in {r['prompt_tokens']:>6,} · "
             f"out {r['completion_tokens']:>5,} · "
             f"{r['calls']:>3d} call(s) · "
