@@ -334,6 +334,10 @@ class StatusBar:
         else:
             role_part = "· idle"
 
+        # Mirror badge — pinned to the FAR LEFT so the watcher can't miss
+        # that this terminal is read-only no matter what else is on the row.
+        mirror_badge_plain = "● MIRROR (read-only)" if self._mirror_mode else ""
+
         token_part = f"in {_humanize(s.tokens_in)}  out {_humanize(s.tokens_out)}"
 
         # Context: "ctx N/M" when both known; "ctx N" when only the running
