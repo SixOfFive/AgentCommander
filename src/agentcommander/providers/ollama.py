@@ -147,7 +147,8 @@ class OllamaProvider(ProviderBase):
 
         url = f"{self.endpoint}/api/chat"
         try:
-            for chunk in _post_stream(url, body, should_cancel=should_cancel):
+            stream = _post_stream(url, body, should_cancel=should_cancel)
+            for chunk in stream:
                 # Cancellation check after each chunk — closes the socket
                 # via the _post_stream context manager so the daemon stops
                 # generating tokens for this request.
