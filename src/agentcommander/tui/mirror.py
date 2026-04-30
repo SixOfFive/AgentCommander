@@ -396,8 +396,16 @@ def run_mirror() -> int:
                 chunk = poll_chars()
                 if chunk:
                     typed, line = _drain_input(typed, chunk)
+                    # Echo the in-flight buffer to the input row so the
+                    # user can see what they're typing — without this they
+                    # have to type /exit blind.
+                    bar.set_pending_input(typed)
                     if line is not None:
-                        if line in ("/exit", "/quit", "/q"):
+                        # Submitted: reset the visible buffer regardless of
+                        # whether we accept the command, so the next prompt
+                        # starts fresh on the next keystroke.
+                        bar.set_pending_input("")
+                        if line in MIRROR_EXIT_COMMANDS:
                             should_exit = True
                         elif line:
                             render_system_line(style("muted",
