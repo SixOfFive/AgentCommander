@@ -656,51 +656,88 @@ def cmd_autoconfig(ctx: CommandContext, args: list[str]) -> None:
         )
         args = []  # noqa: F841 — fall through to default autoconfigure
 
-    # Subcommand: clear → wipe DB role assignments, re-prompt for the Ollama
-    # endpoint (rescanning against the new server if it changed), then fall
-    # through to default in-memory autoconfigure.
+    # Subcommand: clear → wipe DB role assignments, then offer a backend
+    # menu (Ollama / llama.cpp / OpenRouter Free; Paid is disabled). The
+    # selected backend's configurator handles the rest:
+    #   - Ollama / llama.cpp: prompt for endpoint, persist provider, then
+    #     fall through to the threshold-cascade autoconfigurer below
+    #   - OpenRouter Free: prompt for API key, persist provider, AND
+    #     directly assign every text role to the free model (no TypeCast
+    #     scan — the free tier is one model). We then return early
+    #     because role_assignments is already populated.
     if args and args[0] == "clear":
+        from agentcommander.tui.setup import (
+            BACKEND_OPENROUTER_FREE, BACKEND_OPENROUTER_PAID,
+            BACKEND_OLLAMA, BACKEND_LLAMACPP,
+            DEFAULT_OPENROUTER_FREE_PROVIDER_ID,
+            configure_backend, prompt_for_backend,
+        )
+
         removed = clear_role_assignments()
         audit("autoconfig.clear", {"removed_rows": removed})
         render_system_line(style("warn",
             f"cleared {removed} persisted role assignment(s) from the DB"))
 
-        # Find the existing Ollama provider so we can show its endpoint as
-        # the default and only upsert when the user actually changes it.
+        # Default backend = whichever provider type is currently configured
+        # (so re-running /autoconfig clear in an Ollama project defaults
+        # back to Ollama, not always to the first menu option).
         all_providers = list_providers()
-        ollama_provider = next(
-            (p for p in all_providers if p.type == "ollama"), None
-        )
-        current_endpoint = ollama_provider.endpoint if ollama_provider else None
-
-        new_endpoint = prompt_for_ollama_endpoint(default=current_endpoint)
-        if new_endpoint is None:
-            render_system_line(style("warn",
-                "endpoint prompt cancelled — leaving server unchanged; "
-                "running autoconfigure against the existing provider"))
-        elif new_endpoint != current_endpoint:
-            cfg = ProviderConfig(
-                id=ollama_provider.id if ollama_provider else DEFAULT_PROVIDER_ID,
-                type="ollama",
-                name=ollama_provider.name if ollama_provider else DEFAULT_PROVIDER_NAME,
-                endpoint=new_endpoint,
-                api_key=ollama_provider.api_key if ollama_provider else None,
-                enabled=True,
-            )
-            upsert_provider(cfg)
-            rebuild_from_db()
-            audit("autoconfig.endpoint_change", {
-                "provider_id": cfg.id,
-                "from": current_endpoint,
-                "to": new_endpoint,
-            })
-            render_system_line(style("muted",
-                f"  endpoint updated: {current_endpoint or '(none)'}  →  {new_endpoint}"))
-            render_system_line(style("muted",
-                "  rescanning installed models against the new server…"))
+        existing_types = {p.type for p in all_providers}
+        if "openrouter-free" in existing_types:
+            default_backend = BACKEND_OPENROUTER_FREE
+        elif "llamacpp" in existing_types:
+            default_backend = BACKEND_LLAMACPP
         else:
+            default_backend = BACKEND_OLLAMA
+
+        backend = prompt_for_backend(default=default_backend)
+        if backend is None:
+            render_system_line(style("warn",
+                "backend selection cancelled — leaving providers unchanged; "
+                "running autoconfigure against the existing setup"))
+        elif backend == BACKEND_OPENROUTER_FREE:
+            # Forward the existing key so the user can press Enter to
+            # keep it instead of pasting it again.
+            existing_or_provider = next(
+                (p for p in all_providers if p.id == DEFAULT_OPENROUTER_FREE_PROVIDER_ID),
+                None,
+            )
+            existing_key = existing_or_provider.api_key if existing_or_provider else None
+            ok = configure_backend(backend, existing_key=existing_key)
+            if not ok:
+                render_system_line(style("warn",
+                    "OpenRouter Free configuration cancelled — no roles "
+                    "were assigned. Try /autoconfig clear again."))
+                return
+            # OpenRouter Free populates role_assignments directly; rebuild
+            # the in-memory autoconfig table to match and bail out before
+            # the threshold-cascade path below would overwrite our picks.
+            from agentcommander.engine.role_resolver import set_autoconfig
+            from agentcommander.db.repos import list_role_assignments
+            in_memory: dict[Role, tuple[str, str]] = {}
+            for r in list_role_assignments():
+                try:
+                    in_memory[Role(r["role"])] = (r["provider_id"], r["model"])
+                except ValueError:
+                    continue
+            set_autoconfig(in_memory)
             render_system_line(style("muted",
-                f"  endpoint unchanged ({current_endpoint})"))
+                "  OpenRouter Free is single-model — skipping TypeCast "
+                "threshold cascade."))
+            return
+        elif backend == BACKEND_OPENROUTER_PAID:
+            # Should never reach here — prompt_for_backend rejects "4"
+            # with a notice and re-prompts — but guard anyway.
+            render_system_line(style("warn",
+                "OpenRouter Paid is disabled (no per-role auto-pick yet). "
+                "Configure manually with /providers add + /roles set."))
+            return
+        else:
+            ok = configure_backend(backend)
+            if not ok:
+                render_system_line(style("warn",
+                    "backend configuration cancelled — running "
+                    "autoconfigure against the existing provider"))
 
         args = args[1:]
 
