@@ -290,6 +290,64 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     return conn
 
 
+def init_db_readonly(db_path: Path | str) -> sqlite3.Connection:
+    """Open the project DB in **read-only mirror mode**.
+
+    Used by ``ac --mirror`` — a passive follower that watches a primary
+    AgentCommander process. Differences from ``init_db``:
+
+      - **No lock acquired.** The single-instance lock exists to prevent
+        two writers from racing the WAL. The mirror never writes, so it
+        deliberately skips the lock — that's why it can coexist with a
+        running primary, or start before primary exists.
+      - **SQLite-enforced read-only** via the ``file:<path>?mode=ro`` URI.
+        The connection physically refuses INSERT/UPDATE/DELETE — belt and
+        braces with the lock skip.
+      - **No schema execute, no REINDEX, no PRAGMA writes.** The primary
+        owns DB shape; mirror just reads what's there.
+      - **No checkpoint on close.** ``wal_checkpoint`` requires write
+        access, which the mirror doesn't have. The ``_is_readonly`` flag
+        is set so ``close_db`` skips that step.
+
+    Caller must ensure the file exists. The mirror's startup polls for
+    the file's appearance before calling this.
+    """
+    global _db, _db_path, _is_readonly
+
+    if _db is not None:
+        return _db
+
+    target = Path(db_path)
+    if not target.exists():
+        raise FileNotFoundError(f"DB file not found: {target}")
+
+    uri = f"file:{target.as_posix()}?mode=ro"
+    conn = sqlite3.connect(
+        uri,
+        uri=True,
+        check_same_thread=False,
+        isolation_level=None,
+        timeout=5.0,
+    )
+    conn.row_factory = sqlite3.Row
+    # foreign_keys is per-connection, not per-DB — turning it on for our
+    # SELECTs is harmless. We do NOT set journal_mode (would require write).
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+    except sqlite3.DatabaseError:
+        pass
+
+    _db = conn
+    _db_path = target
+    _is_readonly = True
+    return conn
+
+
+def is_readonly() -> bool:
+    """True when the active connection was opened via ``init_db_readonly``."""
+    return _is_readonly
+
+
 def close_db() -> None:
     """Close the connection cleanly: WAL checkpoint, close handle, release
     the file lock. Idempotent — safe to call multiple times.
@@ -297,18 +355,24 @@ def close_db() -> None:
     Critical for corruption-avoidance: a process killed without checkpointing
     can leave WAL/main-DB out of sync. close_db forces a TRUNCATE checkpoint
     so the WAL is fully merged before the handle goes away.
+
+    Mirror mode: ``wal_checkpoint`` requires write access, so when the
+    connection was opened read-only we skip it. There's nothing to flush —
+    the mirror never wrote anything.
     """
-    global _db, _db_path
+    global _db, _db_path, _is_readonly
     if _db is not None:
         try:
-            try:
-                _db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            except sqlite3.DatabaseError:
-                pass
+            if not _is_readonly:
+                try:
+                    _db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                except sqlite3.DatabaseError:
+                    pass
             _db.close()
         finally:
             _db = None
             _db_path = None
+            _is_readonly = False
     _release_db_lock()
 
 
