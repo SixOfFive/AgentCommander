@@ -884,6 +884,18 @@ def run_tui() -> int:
     # After first-run setup, attempt to auto-assign roles using TypeCast scores.
     # Existing per-role overrides (is_override=1) are preserved.
     if list_providers():
+        # Program-driven OR refresh: re-pick non-override OR roles from
+        # the latest catalog so accumulated votes (from prior sessions
+        # AND prior runs in this same session via the swap path) drive
+        # which models get used. Manual /roles set pins survive.
+        try:
+            n_refreshed = _refresh_or_role_picks_from_catalog()
+            if n_refreshed:
+                render_system_line(style("muted",
+                    f"  catalog-driven refresh: {n_refreshed} OR role(s) "
+                    "re-pinned from latest votes"))
+        except Exception:  # noqa: BLE001
+            pass
         _run_startup_autoconfigure()
         _print_role_assignments()
 
