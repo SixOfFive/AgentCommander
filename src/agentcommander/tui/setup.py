@@ -289,22 +289,46 @@ def prompt_for_openrouter_api_key(*, default: str | None = None,
     return None
 
 
-def configure_openrouter_free(*, existing_key: str | None = None) -> bool:
-    """Persist an ``openrouter-free`` provider and assign every text role
-    to ``OPENROUTER_FREE_DEFAULT_MODEL``.
+def _configure_openrouter_tier(
+    tier: str,
+    *,
+    provider_id: str,
+    provider_name: str,
+    fallback_model: str,
+    existing_key: str | None,
+    msg_no_models_explainer: str,
+) -> bool:
+    """Shared core for configure_openrouter_{free,paid}.
 
-    Roles ``vision``, ``audio``, ``image_gen`` are intentionally left
-    unset — the free tier only covers chat completions, so pinning them
-    to a free chat model would just produce nonsense replies. Users who
-    need those roles add a separate provider via /providers add.
+    Steps:
+      1. Prompt for API key (or reuse the existing one with Enter)
+      2. Persist the provider row + rebuild instance cache
+      3. Fetch /v1/models and populate the tier's catalog with metadata
+         (preserving any accumulated votes)
+      4. Pin every text role to the highest-voted model from the catalog
+         (DB rows that the user manually overrides via /roles set
+         survive subsequent /autoconfig clear runs that pick this same
+         tier — but on a fresh assign-all, the catalog wins)
 
-    Returns True on success, False on cancel / error.
+    ``tier`` is "free" or "paid". The two configs differ only in:
+      - which models show up in the catalog (filtered by :free suffix)
+      - the fallback model used when the catalog is empty (first run
+        before the populate succeeds)
+
+    Returns True on success, False on cancel / hard failure.
     """
-    from agentcommander.providers.openrouter import OPENROUTER_FREE_DEFAULT_MODEL
     from agentcommander.db.repos import (
         clear_role_assignments,
         set_config,
         set_role_assignment,
+    )
+    from agentcommander.providers.base import resolve as resolve_provider
+    from agentcommander.providers.openrouter import OpenRouterProvider
+    from agentcommander.typecast.openrouter_catalog import (
+        TIER_FREE,
+        load as load_or_catalog,
+        pick_for_role,
+        populate_from_openrouter,
     )
     from agentcommander.types import ALL_ROLES, Role
 
@@ -313,60 +337,128 @@ def configure_openrouter_free(*, existing_key: str | None = None) -> bool:
         return False
 
     cfg = ProviderConfig(
-        id=DEFAULT_OPENROUTER_FREE_PROVIDER_ID,
-        type="openrouter-free",
-        name=DEFAULT_OPENROUTER_FREE_PROVIDER_NAME,
+        id=provider_id,
+        type=f"openrouter-{tier}",
+        name=provider_name,
         endpoint=DEFAULT_OPENROUTER_ENDPOINT,
         api_key=api_key,
         enabled=True,
     )
     upsert_provider(cfg)
     rebuild_from_db()
-    audit("setup.openrouter_free", {
-        "provider_id": cfg.id,
-        "model": OPENROUTER_FREE_DEFAULT_MODEL,
-    })
+    audit(f"setup.openrouter_{tier}", {"provider_id": cfg.id})
 
-    # Conservative ctx ceiling for the free tier. ``openrouter/free`` is an
-    # auto-router that picks among many free models with varying context
-    # windows (8k–32k). 16k splits the difference: most free models honor
-    # it, the bar shows a meaningful "ctx N/16k" indicator, and the user
-    # can raise it with /context 32k if they know the routed model handles
-    # more.
-    OR_FREE_CTX_DEFAULT = 16384
+    # Fetch the catalog from OpenRouter and refresh local metadata. We
+    # use the live provider instance so /v1/models goes through the
+    # same auth + endpoint config the rest of the engine will.
+    populated = 0
+    try:
+        provider = resolve_provider(cfg.id)
+        if isinstance(provider, OpenRouterProvider):
+            models = provider.list_models()
+            populated = populate_from_openrouter(tier, models)
+            render_system_line(style("muted",
+                f"  populated catalog: {populated} {tier} model(s) from "
+                "openrouter.ai/models"))
+    except Exception as exc:  # noqa: BLE001
+        render_system_line(style("warn",
+            f"  catalog populate failed: {type(exc).__name__}: {exc}  "
+            "(continuing with fallback model + accumulated votes)"))
 
-    # Wipe any prior role assignments and pin every TEXT role to the
-    # default free model. This is direct (no TypeCast threshold cascade)
-    # because there's exactly one model on offer.
+    # Conservative ctx ceiling for the free tier — openrouter/free
+    # routes to many models with varying windows (8k–32k); 16k splits
+    # the difference. Paid tier: pull the contextLength from the
+    # CATALOG entry of whichever model the picker returns for the
+    # ORCHESTRATOR (the most ctx-hungry role). Falls back to 16k if
+    # that fails.
+    or_ctx_default = 16384
+
+    # Wipe prior role_assignments and re-pin from the catalog.
     skipped = {Role.VISION, Role.AUDIO, Role.IMAGE_GEN}
     clear_role_assignments()
     n_assigned = 0
+    catalog = load_or_catalog(tier)
     for role in ALL_ROLES:
         if role in skipped:
             continue
+        # Pick: vote-driven highest scorer, falling back to the
+        # tier-specific default when the catalog has no usable pick
+        # (typically first-time setup before any votes).
+        picked = pick_for_role(tier, role.value, fallback=fallback_model)
+        if picked is None:
+            continue
+        # Per-role context override: pull from catalog metadata when
+        # available so the bar shows the model's actual training cap.
+        entry = catalog.get("_models", {}).get(picked)
+        ctx = (
+            int(entry.get("contextLength")) if entry and isinstance(entry.get("contextLength"), int)
+            else or_ctx_default
+        )
         set_role_assignment(
             role=role,
             provider_id=cfg.id,
-            model=OPENROUTER_FREE_DEFAULT_MODEL,
+            model=picked,
             is_override=True,
-            context_window_tokens=OR_FREE_CTX_DEFAULT,
+            context_window_tokens=ctx,
         )
         n_assigned += 1
 
-    # Persist the same value as the session ceiling so the bar's idle
-    # display shows ``ctx —/16k`` immediately on next launch (without
-    # waiting for the first role call to backfill it).
-    set_config("session_ceiling_tokens", OR_FREE_CTX_DEFAULT)
+    set_config("session_ceiling_tokens", or_ctx_default)
 
     render_system_line(
-        f"added provider {style('accent', cfg.id)} → "
-        f"{style('accent', OPENROUTER_FREE_DEFAULT_MODEL)} "
-        f"{style('muted', f'(ctx {OR_FREE_CTX_DEFAULT // 1024}k)')}"
+        f"added provider {style('accent', cfg.id)} "
+        f"{style('muted', f'(ctx {or_ctx_default // 1024}k default)')}"
     )
+    if populated == 0:
+        render_system_line(style("muted",
+            f"  {msg_no_models_explainer}"))
     render_system_line(style("muted",
-        f"  assigned {n_assigned} text role(s) to this free model "
-        f"(vision/audio/image_gen left unset — free tier is chat-only)"))
+        f"  assigned {n_assigned} text role(s) "
+        "(vision/audio/image_gen left unset — chat-only)"))
     return True
+
+
+def configure_openrouter_free(*, existing_key: str | None = None) -> bool:
+    """Persist an ``openrouter-free`` provider, fetch the OpenRouter
+    catalog, and pin every text role to the highest-voted ``:free``
+    model (or the fallback when no votes exist yet).
+
+    Roles ``vision``, ``audio``, ``image_gen`` are intentionally left
+    unset — the free tier covers chat models only.
+    """
+    from agentcommander.providers.openrouter import OPENROUTER_FREE_DEFAULT_MODEL
+    return _configure_openrouter_tier(
+        "free",
+        provider_id=DEFAULT_OPENROUTER_FREE_PROVIDER_ID,
+        provider_name=DEFAULT_OPENROUTER_FREE_PROVIDER_NAME,
+        fallback_model=OPENROUTER_FREE_DEFAULT_MODEL,
+        existing_key=existing_key,
+        msg_no_models_explainer=(
+            "no :free models populated yet (network failed or empty "
+            "catalog) — falling back to the default. /autoconfig clear "
+            "→ OpenRouter Free will retry the fetch."
+        ),
+    )
+
+
+def configure_openrouter_paid(*, existing_key: str | None = None) -> bool:
+    """Same machinery as the free configurator, but populates the paid
+    catalog (excludes ``:free`` models). On first setup (no votes yet)
+    every role gets pinned to the fallback model; voting refines the
+    picks over time.
+    """
+    return _configure_openrouter_tier(
+        "paid",
+        provider_id=DEFAULT_OPENROUTER_PAID_PROVIDER_ID,
+        provider_name=DEFAULT_OPENROUTER_PAID_PROVIDER_NAME,
+        fallback_model="anthropic/claude-sonnet-4.5",
+        existing_key=existing_key,
+        msg_no_models_explainer=(
+            "no paid models populated yet (network failed) — falling "
+            "back to claude-sonnet-4.5. /autoconfig clear → OpenRouter "
+            "Paid will retry the fetch."
+        ),
+    )
 
 
 def configure_ollama() -> bool:
