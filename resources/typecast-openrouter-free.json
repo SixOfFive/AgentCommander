@@ -1,0 +1,15 @@
+{
+  "_meta": {
+    "tier": "free",
+    "description": "OpenRouter free-tier (:free) model scores per agent role. Fetched from OpenRouter /v1/models on configure; votes accumulated from live runs.",
+    "registrySource": "openrouter.ai/models",
+    "voteIncrement": 1,
+    "voteMax": 1000000,
+    "voteMin": -1000000,
+    "lastFetchedAt": null,
+    "lastVoteAt": null,
+    "voteCount": 0,
+    "modelCount": 0
+  },
+  "_models": {}
+}
