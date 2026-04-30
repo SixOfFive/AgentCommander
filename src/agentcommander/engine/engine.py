@@ -852,14 +852,34 @@ class PipelineRun:
             usage_holder["prompt"] = prompt_tokens
             usage_holder["completion"] = completion_tokens
 
+        def _do_call() -> str:
+            return call_role(role,
+                             user_input=decision.input or opts.user_message,
+                             scratchpad_text=compact_scratchpad(self.state.scratchpad),
+                             conversation_id=opts.conversation_id,
+                             on_delta=on_delta,
+                             on_finish=on_finish,
+                             should_cancel=self.is_cancelled)
+
         try:
-            output = call_role(role,
-                               user_input=decision.input or opts.user_message,
-                               scratchpad_text=compact_scratchpad(self.state.scratchpad),
-                               conversation_id=opts.conversation_id,
-                               on_delta=on_delta,
-                               on_finish=on_finish,
-                               should_cancel=self.is_cancelled)
+            output = yield from self._retry_on_rate_limit(role.value, _do_call)
+        except ProviderRateLimited as exc:
+            # Retries exhausted on a rate-limit. Surface a clean error WITHOUT
+            # push_nudge — rate-limit text must never enter the scratchpad
+            # (would teach the model to "see" infrastructure problems as part
+            # of its task context). The mirror still saw the countdown via
+            # the retry events that fired during the wait.
+            if opts.on_role_end is not None:
+                try:
+                    opts.on_role_end(role.value, model_name, 0, 0)
+                except Exception:  # noqa: BLE001
+                    pass
+            yield PipelineEvent(
+                type="error", role=role.value,
+                error="rate-limited (provider blocked our retries) — "
+                      "/autoconfig clear to switch providers, or wait and re-run",
+            )
+            return
         except (ProviderError, RoleNotAssigned) as exc:
             push_nudge(self.state.scratchpad, iteration, f"{role.value}_failed",
                        f"Role {role.value} call failed: {exc}")
