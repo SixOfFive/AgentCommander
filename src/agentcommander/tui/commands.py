@@ -1458,7 +1458,7 @@ def _build_registry() -> dict[str, SlashCommand]:
                 "bans              prints the current ban list.\n"
                 "\n"
                 "clear             deletes every row in role_assignments — both\n"
-                "                  /roles set overrides AND prior --mincontext\n"
+                "                  /roles set overrides AND prior minctx\n"
                 "                  picks — then re-prompts for the Ollama\n"
                 "                  server URL (Enter keeps the current one). If\n"
                 "                  the URL changed, updates the provider record\n"
