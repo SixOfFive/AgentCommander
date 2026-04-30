@@ -74,7 +74,15 @@ def _fallback_prompt(role: Role) -> str:
 
 
 def get_role_prompt(role: Role) -> str:
-    """Return the system prompt for a role. Cached per role."""
+    """Return the system prompt for a role. Cached per role.
+
+    Special case: the orchestrator prompt has a "Workflow Recipes" section
+    that points at ``RECIPES.md`` ("loaded from RECIPES.md"). The loader
+    doesn't process include directives, so we explicitly read RECIPES.md
+    and concatenate its body onto the orchestrator prompt at first load.
+    Without this the orchestrator's prompt promises content it never
+    delivers — the recipes never reach the model.
+    """
     if role in _cache:
         return _cache[role]
     filename = _ROLE_TO_FILE.get(role)
@@ -86,6 +94,24 @@ def get_role_prompt(role: Role) -> str:
             content = path.read_text(encoding="utf-8")
         except (FileNotFoundError, OSError):
             content = _fallback_prompt(role)
+
+    if role is Role.ORCHESTRATOR:
+        recipes_path = _prompt_dir() / "RECIPES.md"
+        try:
+            recipes = recipes_path.read_text(encoding="utf-8")
+            # Strip RECIPES.md's leading "# Workflow Recipes" H1 since the
+            # orchestrator prompt already has its own "## Workflow Recipes"
+            # header — keeping both produces a duplicate heading the model
+            # has to skim past.
+            stripped = recipes.lstrip()
+            if stripped.startswith("# "):
+                first_break = stripped.find("\n\n")
+                if first_break != -1:
+                    stripped = stripped[first_break + 2:]
+            content = content.rstrip() + "\n\n" + stripped + "\n"
+        except (FileNotFoundError, OSError):
+            pass
+
     _cache[role] = content
     return content
 
