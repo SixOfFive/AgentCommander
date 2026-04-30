@@ -1071,8 +1071,9 @@ class PipelineRun:
         # call too. Without this row the bar would underrepresent
         # casual-conversation turns where the orchestrator-as-chat path
         # produces the answer directly.
+        fallback_duration_ms = int((time.time() - fallback_started) * 1000)
         try:
-            from agentcommander.db.repos import insert_token_usage
+            from agentcommander.db.repos import insert_token_usage, record_throughput
             insert_token_usage(
                 conversation_id=opts.conversation_id,
                 role=marker_role,
@@ -1080,8 +1081,12 @@ class PipelineRun:
                 model=model_name,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
-                duration_ms=int((time.time() - fallback_started) * 1000),
+                duration_ms=fallback_duration_ms,
             )
+            # Same running-average update the role_call path does, so the
+            # bar's "@ N t/s" stays accurate even when the chat fallback
+            # is what drove this turn.
+            record_throughput(model_name, completion_tokens, fallback_duration_ms)
         except Exception:  # noqa: BLE001
             pass
 
