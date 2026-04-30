@@ -188,20 +188,25 @@ def save(tier: str, catalog: dict[str, Any]) -> bool:
         return False
 
 
-def _empty_model_entry() -> dict[str, Any]:
-    """Per-model row default. ``preferred_for`` / ``avoid_for`` mirror
-    the existing TypeCast schema; ``successes`` and ``rate_limits``
-    are extra debug counters so the user can see why a model's score
-    is what it is.
-    """
+def _empty_role_stats() -> dict[str, Any]:
+    """Per-(model, role) stats. Each role tracked independently so a
+    model that's great at coder doesn't get credit for the orchestrator
+    role, and vice versa. ``score`` is what the picker reads — built
+    from successes/rate_limits per role."""
     return {
-        "preferred_for": [],
-        "avoid_for": [],
         "score": 0,
-        "runs": 0,
         "successes": 0,
         "rate_limits": 0,
+        "runs": 0,
         "lastBumpAt": 0,
+    }
+
+
+def _empty_model_entry() -> dict[str, Any]:
+    """Per-model row default. Stats are now nested under ``by_role`` —
+    a flat ``score`` field is gone. Metadata fields stay flat (they're
+    intrinsic properties of the model, not per-role)."""
+    return {
         # Metadata (filled by ``populate_from_openrouter``):
         "name": None,
         "contextLength": None,
@@ -210,7 +215,23 @@ def _empty_model_entry() -> dict[str, Any]:
         "pricing_completion": None,
         "modality": None,
         "supported_params": [],
+        # Per-role voting stats — added on first vote for that role.
+        # Shape: {role_name: {score, successes, rate_limits, runs, lastBumpAt}}
+        "by_role": {},
     }
+
+
+def _ensure_role_stats(entry: dict[str, Any], role: str) -> dict[str, Any]:
+    """Reach into ``entry["by_role"][role]``, initializing if absent.
+    Returns the per-role stats dict for direct mutation by the caller.
+    Also handles legacy entries that have ``score`` at the top level
+    (pre-by-role schema) by silently dropping the global field."""
+    by_role = entry.setdefault("by_role", {})
+    stats = by_role.get(role)
+    if stats is None:
+        stats = _empty_role_stats()
+        by_role[role] = stats
+    return stats
 
 
 def populate_from_openrouter(tier: str,
