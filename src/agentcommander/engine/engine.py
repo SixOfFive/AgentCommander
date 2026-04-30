@@ -90,7 +90,7 @@ class RunOptions:
 class PipelineEvent:
     """Streamed from engine → CLI for live rendering."""
 
-    type: str  # iteration | role | role_delta | tool | guard | done | error
+    type: str  # iteration | role | role_delta | tool | guard | done | error | retry
     iteration: int | None = None
     action: str | None = None
     role: str | None = None
@@ -102,6 +102,13 @@ class PipelineEvent:
     final: str | None = None
     family: str | None = None
     reason: str | None = None
+    # Retry events (rate-limit backoff): which attempt + how long to wait.
+    # The renderer formats these as a countdown line that updates every
+    # 15 s during the wait — e.g. "rate-limited; retrying in 1:45 (attempt
+    # 2/5)". Don't pollute scratchpad / messages with these.
+    retry_attempt: int | None = None
+    retry_max: int | None = None
+    retry_wait_seconds: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
