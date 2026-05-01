@@ -1010,12 +1010,17 @@ def run_tui() -> int:
             # countdowns the user saw live. With it, /chat resume gives
             # the same transcript as if you'd been watching the run.
             try:
-                from agentcommander.db.repos import list_pipeline_events_after
-                all_events = list_pipeline_events_after(0, limit=5000)
-                events_for_conv = [
-                    e for e in all_events
-                    if e.get("conversation_id") == most_recent.id
-                ]
+                # Use the conv-scoped helper that returns the MOST RECENT
+                # events for this conversation. Without that, we were
+                # scanning the earliest 5000 events globally and filtering
+                # in Python — which would miss recent activity once the
+                # events table grew past 5000 rows from prior sessions.
+                from agentcommander.db.repos import (
+                    list_recent_pipeline_events_for_conv,
+                )
+                events_for_conv = list_recent_pipeline_events_for_conv(
+                    most_recent.id, limit=5000,
+                )
             except Exception:  # noqa: BLE001
                 events_for_conv = []
             # Build a lookup of message_id → events that fired DURING that
