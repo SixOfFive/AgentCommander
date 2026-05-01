@@ -342,6 +342,12 @@ def _configure_openrouter_tier(
     upsert_provider(cfg)
     rebuild_from_db()
     audit(f"setup.openrouter_{tier}", {"provider_id": cfg.id})
+    _set_preferred_backend(f"openrouter-{tier}")
+
+    # Health check before the catalog fetch — if the API key is wrong or
+    # OpenRouter is unreachable, surface that clearly NOW instead of
+    # letting the catalog populate fail silently.
+    _check_health_and_warn(cfg.id, DEFAULT_OPENROUTER_ENDPOINT)
 
     # Fetch the catalog from OpenRouter and refresh local metadata. We
     # use the live provider instance so /v1/models goes through the
