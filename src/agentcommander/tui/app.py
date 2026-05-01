@@ -734,12 +734,30 @@ def _run_startup_autoconfigure() -> None:
     next start picks it up automatically. User overrides set via `/roles set`
     survive in the DB and beat the autoconfig at resolve time.
     """
-    from agentcommander.db.repos import audit, get_role_assignment as _gra
+    from agentcommander.db.repos import audit, get_role_assignment as _gra, get_config
     from agentcommander.providers.base import list_active
 
     providers = list_active()
     if not providers:
         return
+
+    # Filter providers to the user's last-chosen backend. Without this,
+    # threshold-cascade picks the highest-scoring model across ALL
+    # enabled providers — so a user who picked Ollama via /autoconfig
+    # clear but still has llamacpp/openrouter providers configured
+    # would see those re-take role assignments on every startup.
+    preferred = get_config("preferred_backend", None)
+    if isinstance(preferred, str) and preferred:
+        candidates = [p for p in providers if p.type == preferred]
+        if candidates:
+            providers = candidates
+            render_system_line(style("muted",
+                f"  preferred backend: {preferred} "
+                f"({len(candidates)} provider(s))"))
+        else:
+            render_system_line(style("warn",
+                f"  preferred backend {preferred!r} has no enabled "
+                f"provider — falling back to all {len(providers)} provider(s)"))
 
     applied = apply_autoconfigure(
         providers=providers,
