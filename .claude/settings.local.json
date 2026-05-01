@@ -68,7 +68,8 @@
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 /tmp/bench-cycle.py)",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(timeout 540 cmd.exe //c \"..\\\\ac.bat\")"
     ]
   }
 }
