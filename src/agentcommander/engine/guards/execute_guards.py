@@ -669,6 +669,9 @@ def run_execute_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         pip_npm_command_guard, file_path_guard, package_manager_flag_guard,
         tmp_path_guard, secrets_in_code_guard, sleep_cap_guard,
         infinite_loop_guard, absolute_path_guard, requests_error_handling_guard,
+        # Catch "wrote linked_list.py, executes linkedlist.py" before the
+        # run burns 30 iterations on FileNotFound retries.
+        file_typo_guard,
         repeated_execute_failure_guard,
     ]
     for guard in guards:
