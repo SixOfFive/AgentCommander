@@ -188,28 +188,43 @@ def _refresh_or_paid_balance(bar) -> None:  # noqa: ANN001 - StatusBar local
     """Pull the OpenRouter Paid balance from the first configured provider
     of that type and push it into the status bar.
 
-    Silent-no-op when:
-      - no openrouter-paid provider is configured (Ollama / OR-Free users)
-      - the provider's get_balance() returns None (transport / auth fail)
+    When no openrouter-paid provider is configured (user switched to
+    Ollama / OR-Free), CLEARS the bar's balance fields so the stale
+    "$ 6.81 / 10.00 today" pin doesn't linger forever. Same when the
+    provider's get_balance() returns None on transport / auth fail.
 
     Cheap-by-design: at most one HTTP call per role-end. We don't
     aggregate across multiple OR Paid providers; only the first wins.
-    Users wanting multi-account balances can extend later.
     """
     try:
         from agentcommander.providers.base import list_active
     except Exception:  # noqa: BLE001
         return
+
+    def _clear() -> None:
+        try:
+            bar.set_or_balance(
+                credits_remaining=None, credits_total=None,
+                daily_limit=None, daily_limit_remaining=None,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    found = False
     for provider in list_active():
         if getattr(provider, "type", None) != "openrouter-paid":
             continue
+        found = True
         if not hasattr(provider, "get_balance"):
-            continue
+            _clear()
+            return
         try:
             balance = provider.get_balance()
         except Exception:  # noqa: BLE001
+            _clear()
             return
         if not balance:
+            _clear()
             return
         try:
             bar.set_or_balance(
@@ -220,6 +235,11 @@ def _refresh_or_paid_balance(bar) -> None:  # noqa: ANN001 - StatusBar local
             )
         except Exception:  # noqa: BLE001
             pass
+        return
+    # No OR Paid provider exists at all — clear any stale pin from a
+    # previous session where one WAS configured.
+    if not found:
+        _clear()
         return
 
 
