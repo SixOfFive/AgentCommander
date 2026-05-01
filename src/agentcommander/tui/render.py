@@ -168,7 +168,18 @@ def _close_streaming() -> None:
 
 
 def render_event(evt: PipelineEvent) -> None:
-    """Live-render a single PipelineEvent during a run."""
+    """Live-render a single PipelineEvent during a run.
+
+    Wrapped in ``stdout_atomic`` so a multi-write event render (e.g. an
+    iteration marker that emits 2 lines, or a guard event with a label
+    + reason) can't be split by a worker-thread role-delta write.
+    """
+    from agentcommander.tui.ansi import stdout_atomic
+    with stdout_atomic():
+        _render_event_inner(evt)
+
+
+def _render_event_inner(evt: PipelineEvent) -> None:
     if evt.type == "iteration":
         if evt.action:
             _close_streaming()
