@@ -512,6 +512,26 @@ def _run_pipeline(state: dict, user_message: str) -> None:
 
     bar.set_pending_input(None)
     state.pop("active_cancel", None)
+
+    # Always persist SOMETHING as the assistant turn — even if the run
+    # errored out. Without this, /chat resume shows a one-sided history
+    # (just "You" lines, no replies). The placeholder is short, honest,
+    # and tells the user what happened so they can decide whether to
+    # retry or move on.
+    if not final_holder["final"]:
+        err = final_holder.get("error") or ""
+        if "rate-limit" in err.lower() or "rate limit" in err.lower():
+            placeholder = "(no reply — provider rate-limited; try again later)"
+        elif "max iterations" in err.lower():
+            placeholder = "(no reply — pipeline gave up after max iterations)"
+        elif "cancelled" in err.lower() or "/stop" in err.lower():
+            placeholder = "(reply cancelled)"
+        elif err:
+            placeholder = f"(no reply — {err[:140]})"
+        else:
+            placeholder = "(no reply — pipeline ended without producing output)"
+        final_holder["final"] = placeholder
+
     if final_holder["final"]:
         # Persist the assistant turn into the user-view (`messages`) AND
         # drop a synthetic scratchpad entry pointing at it. The scratchpad
