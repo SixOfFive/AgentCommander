@@ -526,6 +526,48 @@ def list_pipeline_events_after(last_id: int, *, limit: int = 1000) -> list[dict[
     return out
 
 
+def list_recent_pipeline_events_for_conv(
+    conversation_id: str, *, limit: int = 2000,
+) -> list[dict[str, Any]]:
+    """Return the ``limit`` MOST-RECENT events for a single conversation,
+    in chronological (id ASC) order.
+
+    Used for mirror reattach + primary resume — both want "what just
+    happened in this chat" without scanning unrelated events. Without
+    this helper, callers were doing ``list_pipeline_events_after(0, limit=N)``
+    which pulls the EARLIEST N events globally — wrong when the table
+    has more than N total rows from prior sessions.
+    """
+    if not conversation_id:
+        return []
+    try:
+        rows = get_db().execute(
+            "SELECT id, conversation_id, run_id, event_type, payload, created_at "
+            "FROM pipeline_events WHERE conversation_id = ? "
+            "ORDER BY id DESC LIMIT ?",
+            (conversation_id, limit),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        try:
+            payload = json.loads(r["payload"])
+        except (TypeError, ValueError):
+            payload = {}
+        out.append({
+            "id": r["id"],
+            "conversation_id": r["conversation_id"],
+            "run_id": r["run_id"],
+            "event_type": r["event_type"],
+            "payload": payload,
+            "created_at": r["created_at"],
+        })
+    # Caller wants chronological order; SQL gave us reverse, flip it.
+    out.reverse()
+    return out
+
+
 def latest_pipeline_event_id() -> int:
     """Highest id in the events table, or 0 if empty / missing.
 
