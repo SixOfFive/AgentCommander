@@ -230,6 +230,11 @@ CREATE TABLE IF NOT EXISTS pipeline_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pipeline_events_id ON pipeline_events(id);
+-- Secondary index for conv-scoped recent-events queries (mirror replay,
+-- primary resume). Without it, fetching "last N events for conv X"
+-- table-scans the whole pipeline_events table.
+CREATE INDEX IF NOT EXISTS idx_pipeline_events_conv_id
+  ON pipeline_events(conversation_id, id DESC);
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- Per-model throughput — running average tokens/second across calls.
