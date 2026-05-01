@@ -270,6 +270,14 @@ class StatusBar:
                 self.state.model_tps = get_throughput(self.state.model)
             except Exception:  # noqa: BLE001
                 pass
+        # Successful role completion → any pending retry countdown is
+        # stale (the call that was being retried just succeeded). Clear
+        # it so the bar drops the "◌ retry N/M in 0:45" pin immediately
+        # instead of waiting for the next role-start to flush it.
+        self.state.retry_attempt = None
+        self.state.retry_max = None
+        self.state.retry_wait_total_s = None
+        self.state.retry_started_at = None
         self.redraw()
 
     def reset_run(self) -> None:
