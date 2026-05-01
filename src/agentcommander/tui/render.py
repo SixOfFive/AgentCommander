@@ -123,34 +123,41 @@ _streaming_state: dict = {"role": None, "had_chars": False}
 def render_role_delta(role: str, delta: str) -> None:
     """Print a streaming token delta for `role` immediately.
 
-    Called from the engine's on_role_delta hook (synchronous). Adds a
-    one-time role header on first delta of a new role, then streams chars
-    raw (no markdown). When the role finishes, render_event(role) clears
-    and re-renders with full markdown formatting.
+    Called from the engine's on_role_delta hook (synchronous, on the
+    worker thread). Adds a one-time role header on first delta of a new
+    role, then streams chars raw (no markdown). When the role finishes,
+    render_event(role) clears and re-renders with full markdown formatting.
+
+    Wrapped in ``stdout_atomic`` so a delta render can't be interleaved
+    with the main thread's status-bar repaint (which would otherwise
+    cause delta text to land on the wrong row).
     """
     if not delta:
         return
-    if _streaming_state["role"] != role:
-        if _streaming_state["had_chars"]:
-            writeln()
-        writeln()
-        writeln(style("role_label", f"  ▸ {role}"))
-        write("    ")
-        _streaming_state["role"] = role
-        _streaming_state["had_chars"] = False
-    # Replace newlines with newline + indent so streamed prose stays aligned.
-    if "\n" in delta:
-        parts = delta.split("\n")
-        for i, p in enumerate(parts):
-            if i > 0:
+    from agentcommander.tui.ansi import stdout_atomic
+    with stdout_atomic():
+        if _streaming_state["role"] != role:
+            if _streaming_state["had_chars"]:
                 writeln()
-                write("    ")
-            if p:
-                write(style("assistant_text", p))
-                _streaming_state["had_chars"] = True
-    else:
-        write(style("assistant_text", delta))
-        _streaming_state["had_chars"] = True
+            writeln()
+            writeln(style("role_label", f"  ▸ {role}"))
+            write("    ")
+            _streaming_state["role"] = role
+            _streaming_state["had_chars"] = False
+        # Replace newlines with newline + indent so streamed prose stays
+        # aligned with the role's indent.
+        if "\n" in delta:
+            parts = delta.split("\n")
+            for i, p in enumerate(parts):
+                if i > 0:
+                    writeln()
+                    write("    ")
+                if p:
+                    write(style("assistant_text", p))
+                    _streaming_state["had_chars"] = True
+        else:
+            write(style("assistant_text", delta))
+            _streaming_state["had_chars"] = True
 
 
 def _close_streaming() -> None:
