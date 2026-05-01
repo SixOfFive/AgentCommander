@@ -111,6 +111,71 @@ class TestPromptInjection(unittest.TestCase):
         self.assertIsNone(detect_prompt_injection("The weather is nice today."))
 
 
+class TestFileTypoGuard(unittest.TestCase):
+    """Catches the orchestrator referencing a file that doesn't exist
+    when a similar-named one was just written this run.
+
+    Live failure mode this fixes: orchestrator writes ``linked_list.py``
+    then tries ``python linkedlist.py`` over and over, burning iterations
+    on FileNotFound until max-iter cap.
+    """
+
+    def _ctx(self, code: str, registry: dict[str, str]) -> dict:
+        from agentcommander.types import ScratchpadEntry  # noqa: F401
+        return {
+            "code": code,
+            "language": "python",
+            "scratchpad": [],
+            "iteration": 5,
+            "working_directory": tempfile.gettempdir(),
+            "file_write_registry": registry,
+        }
+
+    def test_typo_caught_with_registry_match(self) -> None:
+        from agentcommander.engine.guards.execute_guards import file_typo_guard, _Input
+        ctx = self._ctx(
+            "python linkedlist.py",
+            {"/tmp/linked_list.py": "class LinkedList: pass"},
+        )
+        inp = _Input(
+            code=ctx["code"], language=ctx["language"],
+            scratchpad=ctx["scratchpad"], iteration=ctx["iteration"],
+            working_directory=ctx["working_directory"],
+            file_write_registry=ctx["file_write_registry"],
+        )
+        result = file_typo_guard(inp)
+        self.assertEqual(result["verdict"]["action"], "continue")
+
+    def test_real_file_passes_through(self) -> None:
+        from agentcommander.engine.guards.execute_guards import file_typo_guard, _Input
+        with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as f:
+            f.write(b"x = 1\n")
+            real_path = f.name
+        try:
+            inp = _Input(
+                code=f"python {os.path.basename(real_path)}",
+                language="python",
+                scratchpad=[], iteration=5,
+                working_directory=os.path.dirname(real_path),
+                file_write_registry={real_path: ""},
+            )
+            result = file_typo_guard(inp)
+            self.assertEqual(result["verdict"]["action"], "pass")
+        finally:
+            os.unlink(real_path)
+
+    def test_no_registry_passes_through(self) -> None:
+        from agentcommander.engine.guards.execute_guards import file_typo_guard, _Input
+        inp = _Input(
+            code="python somefile.py", language="python",
+            scratchpad=[], iteration=5,
+            working_directory=tempfile.gettempdir(),
+            file_write_registry={},
+        )
+        result = file_typo_guard(inp)
+        self.assertEqual(result["verdict"]["action"], "pass")
+
+
 class TestEngineImports(unittest.TestCase):
     """Sanity check: every layer imports without errors."""
 
