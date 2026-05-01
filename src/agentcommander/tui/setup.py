@@ -496,7 +496,57 @@ def configure_ollama() -> bool:
     audit("setup.ollama", {"provider_id": cfg.id, "endpoint": endpoint})
     _set_preferred_backend("ollama")
     render_system_line(f'added provider {style("accent", cfg.id)} → {endpoint}')
+    # Verify reachability — silent failure here was leading to "I picked
+    # Ollama but it never works" with no visible reason. Surface the
+    # health-check result so the user sees it immediately.
+    _check_health_and_warn(cfg.id, endpoint)
     return True
+
+
+def _check_health_and_warn(provider_id: str, endpoint: str | None) -> None:
+    """Run ``provider.health()`` and surface a clear warning if it fails.
+
+    Called right after upserting + rebuilding a provider in any of the
+    configurators. A failed health check doesn't roll back the provider
+    (the user may want to keep it for when the daemon comes online), but
+    it tells them up-front that the next pipeline call is going to fail.
+    """
+    try:
+        from agentcommander.providers.base import resolve as resolve_provider
+        provider = resolve_provider(provider_id)
+    except Exception as exc:  # noqa: BLE001
+        render_error(
+            f"could not load provider {provider_id!r}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return
+    try:
+        ok = provider.health()
+    except Exception as exc:  # noqa: BLE001
+        ok = False
+        render_error(
+            f"health check raised: {type(exc).__name__}: {exc}"
+        )
+        return
+    if not ok:
+        render_error(
+            f"provider {provider_id!r} reachable check FAILED at "
+            f"{endpoint or '?'} — pipeline calls will fail until this is fixed."
+        )
+        # Common-cause hints:
+        if endpoint and "127.0.0.1" in endpoint or endpoint and "localhost" in endpoint:
+            render_system_line(style("muted",
+                "  is the daemon running on this host?"))
+        elif endpoint and ("openrouter.ai" in endpoint):
+            render_system_line(style("muted",
+                "  api key may be missing / invalid, "
+                "or rate limit hit on /models endpoint"))
+        else:
+            render_system_line(style("muted",
+                "  network reachable? endpoint URL correct?"))
+    else:
+        render_system_line(style("muted",
+            f"  provider {provider_id!r} health check OK"))
 
 
 def configure_llamacpp() -> bool:
