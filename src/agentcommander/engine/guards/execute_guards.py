@@ -536,34 +536,42 @@ def file_typo_guard(input_: _Input) -> dict[str, Any]:
             else ref
         )
         if os.path.isfile(full):
-            continue  # exists, no typo
-        # Match against in-registry paths (compare basenames since the
-        # registry stores absolute paths from write_file)
+            continue  # exists on disk → no typo to catch
+        # Doesn't exist. If the registry has the EXACT basename, the
+        # file was written this run (possibly to a different working
+        # directory). Let it through — execute will surface the real
+        # path issue, no typo here.
+        ref_basename = os.path.basename(ref)
+        if any(os.path.basename(p) == ref_basename for p in written_paths):
+            continue
+        # Look for a fuzzy match in the registry. Same slug after
+        # normalization (linkedlist ⇔ linked_list) = the typo we want
+        # to catch. Substring match + bounded Levenshtein ≤ 3 cover
+        # other near-misses (linkedlst ⇔ linked_list, etc.).
         ref_slug = _slug(ref)
         if not ref_slug:
             continue
-        if any(_slug(p) == ref_slug for p in written_paths):
-            continue  # exact slug match — same file by another name
-        # Find a fuzzy match in the registry
-        candidates = []
+        candidates: list[str] = []
         for written in written_paths:
             written_slug = _slug(written)
             if not written_slug:
                 continue
-            # substring match (linkedlist ⊂ linked_list_v2 etc.)
+            if written_slug == ref_slug:
+                candidates.append(written)
+                continue
             if ref_slug in written_slug or written_slug in ref_slug:
                 candidates.append(written)
                 continue
-            # bounded Levenshtein on slugs
             if _levenshtein(ref_slug, written_slug, cap=4) <= 3:
                 candidates.append(written)
         if candidates:
             suggestion = candidates[0]
+            sug_base = os.path.basename(suggestion)
             push_system_nudge(
                 input_.scratchpad, input_.iteration, "file_typo",
                 f"You're trying to execute {ref!r} but it doesn't exist. "
-                f"You wrote {os.path.basename(suggestion)!r} this run. "
-                f"Did you mean to use {os.path.basename(suggestion)!r}?",
+                f"You wrote {sug_base!r} this run. "
+                f"Use {sug_base!r} in your execute command.",
             )
             return _continue(input_)
 
