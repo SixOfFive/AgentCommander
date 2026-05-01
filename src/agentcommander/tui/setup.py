@@ -567,6 +567,7 @@ def configure_llamacpp() -> bool:
     audit("setup.llamacpp", {"provider_id": cfg.id, "endpoint": endpoint})
     _set_preferred_backend("llamacpp")
     render_system_line(f'added provider {style("accent", cfg.id)} → {endpoint}')
+    _check_health_and_warn(cfg.id, endpoint)
     return True
 
 
