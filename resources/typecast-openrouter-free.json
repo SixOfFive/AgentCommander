@@ -7,8 +7,8 @@
     "voteMax": 1000000,
     "voteMin": -1000000,
     "lastFetchedAt": 1777577956174,
-    "lastVoteAt": 1777579085088,
-    "voteCount": 986,
+    "lastVoteAt": 1777587266622,
+    "voteCount": 1407,
     "modelCount": 29
   },
   "_models": {
@@ -22,18 +22,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -47,18 +47,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -72,18 +72,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -97,18 +97,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
-          "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "score": 35,
+          "successes": 37,
+          "rate_limits": 2,
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -122,18 +122,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -147,18 +147,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
-          "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "score": 8,
+          "successes": 9,
+          "rate_limits": 1,
+          "runs": 10,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
-          "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "score": 36,
+          "successes": 38,
+          "rate_limits": 2,
+          "runs": 40,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -172,18 +172,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
-          "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "score": 7,
+          "successes": 8,
+          "rate_limits": 1,
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
-          "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "score": 35,
+          "successes": 37,
+          "rate_limits": 2,
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -197,18 +197,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
-          "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "score": 7,
+          "successes": 8,
+          "rate_limits": 1,
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
-          "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "score": 35,
+          "successes": 37,
+          "rate_limits": 2,
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -222,18 +222,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -247,18 +247,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -272,18 +272,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -297,18 +297,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
-          "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "score": 33,
+          "successes": 38,
+          "rate_limits": 5,
+          "runs": 43,
+          "lastBumpAt": 1777587266622
         }
       }
     },
@@ -322,18 +322,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -347,18 +347,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -372,18 +372,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 0,
-          "successes": 1,
+          "score": 7,
+          "successes": 8,
           "rate_limits": 1,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -397,18 +397,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -422,18 +422,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -447,18 +447,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -472,18 +472,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -497,18 +497,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -522,18 +522,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
-          "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "score": 7,
+          "successes": 8,
+          "rate_limits": 1,
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
-          "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "score": 35,
+          "successes": 37,
+          "rate_limits": 2,
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -547,18 +547,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
-          "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "score": 7,
+          "successes": 8,
+          "rate_limits": 1,
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -572,18 +572,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
-          "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "score": 4,
+          "successes": 8,
+          "rate_limits": 4,
+          "runs": 12,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -597,18 +597,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
-          "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "score": 4,
+          "successes": 9,
+          "rate_limits": 5,
+          "runs": 14,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
-          "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "score": 35,
+          "successes": 37,
+          "rate_limits": 2,
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -622,18 +622,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
-          "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "score": 6,
+          "successes": 8,
+          "rate_limits": 2,
+          "runs": 10,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
-          "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "score": 35,
+          "successes": 37,
+          "rate_limits": 2,
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -647,18 +647,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
-          "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "score": 7,
+          "successes": 8,
+          "rate_limits": 1,
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
-          "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "score": 35,
+          "successes": 37,
+          "rate_limits": 2,
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -672,18 +672,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 0,
-          "successes": 1,
+          "score": 7,
+          "successes": 8,
           "rate_limits": 1,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 26,
-          "successes": 29,
+          "score": 33,
+          "successes": 36,
           "rate_limits": 3,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -697,18 +697,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 30,
-          "successes": 31,
+          "score": 37,
+          "successes": 38,
           "rate_limits": 1,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     },
@@ -722,18 +722,18 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 2,
-          "successes": 2,
+          "score": 9,
+          "successes": 9,
           "rate_limits": 0,
-          "runs": 2,
-          "lastBumpAt": 1777579083090
+          "runs": 9,
+          "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 28,
-          "successes": 30,
+          "score": 35,
+          "successes": 37,
           "rate_limits": 2,
-          "runs": 32,
-          "lastBumpAt": 1777579085088
+          "runs": 39,
+          "lastBumpAt": 1777587119645
         }
       }
     }
