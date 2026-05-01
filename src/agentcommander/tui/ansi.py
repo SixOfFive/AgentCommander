@@ -160,9 +160,22 @@ def style(name: str, text: str) -> str:
     return f"{code}{text}{RESET}" if code else text
 
 
+# Module-level reentrant lock around every stdout write. The TUI runs
+# the engine pipeline on a worker thread that calls ``render_role_delta``
+# during streaming; the main thread concurrently paints the status bar
+# and renders engine events. Without serialization, one thread's writes
+# can land at the cursor position the OTHER thread just moved to —
+# resulting in streamed tokens being clobbered by status-bar repaints.
+# RLock lets the same thread enter multiple times (e.g. ``writeln`` calls
+# ``write`` internally; without RLock that'd self-deadlock).
+import threading
+_io_lock = threading.RLock()
+
+
 def write(s: str = "") -> None:
-    sys.stdout.write(s)
-    sys.stdout.flush()
+    with _io_lock:
+        sys.stdout.write(s)
+        sys.stdout.flush()
 
 
 def writeln(s: str = "") -> None:
@@ -177,3 +190,21 @@ def writeln(s: str = "") -> None:
     interleaving in the rendered output.
     """
     write(s + "\x1b[K\n")
+
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def stdout_atomic():
+    """Context manager that holds ``_io_lock`` for the duration of a
+    multi-write logical sequence (e.g. status-bar repaint, role-delta
+    render, engine-event render). Use whenever a caller emits more than
+    one cursor-move-plus-write that must not be interleaved with another
+    thread's writes.
+
+    Per-call ``write()``/``writeln()`` already lock individually; this
+    extends the critical section to cover several of them in a row.
+    """
+    with _io_lock:
+        yield
