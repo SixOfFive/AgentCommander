@@ -377,12 +377,16 @@ def _run_pipeline(state: dict, user_message: str) -> None:
         run_id_holder["run_id"] = run.run_id
 
     events_q: queue.Queue = queue.Queue()
-    final_holder: dict[str, str | None] = {"final": None}
+    final_holder: dict[str, str | None] = {"final": None, "error": None}
 
     def _runner() -> None:
         try:
             for evt in run.events():
                 events_q.put(("event", evt))
+                if evt.type == "error" and evt.error:
+                    # Capture the last error so we can store a placeholder
+                    # assistant message if the run ends without a done.
+                    final_holder["error"] = evt.error
                 # Tee non-delta engine events to the mirror stream. Delta
                 # events come in via the on_role_delta callback (already
                 # tee'd above with batching) — the engine doesn't yield
