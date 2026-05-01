@@ -120,22 +120,20 @@ def _replay_conversation(conv_id: str | None) -> int:
 
     # Replay recent events for this conversation so a mid-run reattach
     # picks up the iteration markers, role transitions, tool calls, and
-    # streamed text the watcher would otherwise miss. We pull everything
-    # in the events table (already pruned to ~1 hour by primary on
-    # startup), filter to this conversation, and render in id order. The
-    # cursor returned is the highest event id we rendered so subsequent
-    # poll() calls don't replay the same rows.
+    # streamed text the watcher would otherwise miss. Use the dedicated
+    # helper that returns the MOST-RECENT 2000 events for THIS conv —
+    # the previous implementation used ``list_pipeline_events_after(0)``
+    # which returns the earliest 2000 events globally (wrong: misses
+    # latest activity when prior sessions left thousands of events
+    # behind).
     last_id = 0
     try:
-        # Pull a generous batch — pipeline_events is bounded by the
-        # 1-hour pruner, and we filter in-Python to the active conv.
-        recent = list_pipeline_events_after(0, limit=2000)
+        from agentcommander.db.repos import list_recent_pipeline_events_for_conv
+        recent = list_recent_pipeline_events_for_conv(conv_id, limit=2000)
     except Exception:  # noqa: BLE001
         recent = []
     rendered_count = 0
     for evt in recent:
-        if evt.get("conversation_id") != conv_id:
-            continue
         try:
             _render_event(evt, conv_id)
             rendered_count += 1
