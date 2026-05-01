@@ -464,6 +464,112 @@ def file_path_guard(input_: _Input) -> dict[str, Any]:
     return _pass(input_)
 
 
+def file_typo_guard(input_: _Input) -> dict[str, Any]:
+    """Catch the orchestrator referencing a file that doesn't exist but a
+    similar-named one was written this run.
+
+    Real-world failure mode: orchestrator writes ``linked_list.py`` then
+    tries ``python linkedlist.py``. The execute fails with FileNotFound,
+    orchestrator retries the same wrong path, ~30 failures accumulate
+    before the run gives up. This guard catches it before dispatch.
+
+    Detection logic:
+      1. Pull every ``<name>.<ext>`` token referenced in the execute code
+      2. For each referenced file:
+         - skip if it exists on disk (real)
+         - skip if file_write_registry has it (just written this run)
+         - look for a similar name in the registry (Levenshtein ≤ 3 OR
+           one contains the other after stripping non-alphanumerics)
+         - if found, nudge: "you said X, but you wrote Y — fix it"
+    """
+    if not input_.file_write_registry:
+        return _pass(input_)
+
+    # Tokenize file references in the code. Match `name.ext` with a
+    # word-boundary on either side so we don't pick up substrings of
+    # paths like /etc/hosts.
+    refs = set(re.findall(r"\b([\w.\-/]+\.(?:py|js|ts|sh|rb|go|rs))\b",
+                          input_.code))
+    if not refs:
+        return _pass(input_)
+
+    written_paths = set(input_.file_write_registry.keys())
+    if not written_paths:
+        return _pass(input_)
+
+    def _slug(name: str) -> str:
+        """Strip dirs, extension, and non-alphanumerics — coder/coder_v2/
+        Coder all collapse to 'coder'. Used for fuzzy comparison."""
+        base = os.path.basename(name)
+        base, _ = os.path.splitext(base)
+        return re.sub(r"[^a-z0-9]", "", base.lower())
+
+    def _levenshtein(a: str, b: str, *, cap: int = 4) -> int:
+        """Bounded Levenshtein — returns ``cap`` if distance ≥ cap.
+        Cheaper than the full O(mn) version for our short-string case
+        and lets us bail out early."""
+        if a == b:
+            return 0
+        m, n = len(a), len(b)
+        if abs(m - n) >= cap:
+            return cap
+        # Two-row DP
+        prev = list(range(n + 1))
+        for i, ca in enumerate(a, 1):
+            curr = [i] + [0] * n
+            min_in_row = curr[0]
+            for j, cb in enumerate(b, 1):
+                cost = 0 if ca == cb else 1
+                curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+                if curr[j] < min_in_row:
+                    min_in_row = curr[j]
+            if min_in_row >= cap:
+                return cap
+            prev = curr
+        return min(prev[n], cap)
+
+    for ref in refs:
+        # Resolve to absolute path under working_directory and check disk
+        full = (
+            os.path.join(input_.working_directory, ref)
+            if input_.working_directory and not os.path.isabs(ref)
+            else ref
+        )
+        if os.path.isfile(full):
+            continue  # exists, no typo
+        # Match against in-registry paths (compare basenames since the
+        # registry stores absolute paths from write_file)
+        ref_slug = _slug(ref)
+        if not ref_slug:
+            continue
+        if any(_slug(p) == ref_slug for p in written_paths):
+            continue  # exact slug match — same file by another name
+        # Find a fuzzy match in the registry
+        candidates = []
+        for written in written_paths:
+            written_slug = _slug(written)
+            if not written_slug:
+                continue
+            # substring match (linkedlist ⊂ linked_list_v2 etc.)
+            if ref_slug in written_slug or written_slug in ref_slug:
+                candidates.append(written)
+                continue
+            # bounded Levenshtein on slugs
+            if _levenshtein(ref_slug, written_slug, cap=4) <= 3:
+                candidates.append(written)
+        if candidates:
+            suggestion = candidates[0]
+            push_system_nudge(
+                input_.scratchpad, input_.iteration, "file_typo",
+                f"You're trying to execute {ref!r} but it doesn't exist. "
+                f"You wrote {os.path.basename(suggestion)!r} this run. "
+                f"Did you mean to use {os.path.basename(suggestion)!r}?",
+            )
+            return _continue(input_)
+
+    return _pass(input_)
+
+
 def repeated_execute_failure_guard(input_: _Input) -> dict[str, Any]:
     failures = [
         e for e in input_.scratchpad
