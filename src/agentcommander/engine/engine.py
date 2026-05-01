@@ -921,21 +921,30 @@ class PipelineRun:
                              fn) -> "Iterator[PipelineEvent]":
         """Generator wrapper that retries ``fn()`` on ProviderRateLimited.
 
-        Two strategies, picked automatically by provider type:
+        Three phases, picked automatically:
 
-        1. **OR providers** (openrouter-free / openrouter-paid) — fast
-           swap. On 429: vote (-1 failing model, +1 siblings), look up
-           the next-best alternate from the catalog excluding models
-           we've already rate-limited THIS RUN, swap the role's DB
-           assignment, retry immediately. Repeat until success or the
-           catalog is exhausted. No backoff sleep — moving to a fresh
-           model is faster than waiting on the same one.
+        **Phase 1: Fast-swap (OR providers only)** — on 429, vote
+        (-1 failing, +1 siblings), pick next-best from catalog
+        excluding rate-limited-this-run, swap role's DB assignment,
+        retry immediately. Loop until success or catalog exhausts.
+        No sleep — rotating to a fresh model is faster than waiting
+        on a throttled one.
 
-        2. **Local providers** (Ollama / llama.cpp) — backoff schedule.
-           60s → 120s → 240s → 480s → 960s with /stop-aware sleep and
-           a 15-second countdown announce.
+        **Phase 2: Slow backoff** — kicks in when phase 1 exhausts
+        the catalog (every model in this tier hit 429), or
+        immediately for non-OR providers (Ollama / llama.cpp don't
+        have catalog alternatives). Schedule 60→120→240→480→960s,
+        /stop-aware sleep, 15-second countdown announces. Up to ~16
+        minutes total wait spread across 5 attempts. Before each
+        retry the OR variant re-picks the best-voted model from the
+        catalog so the wait gives every model a chance to recover.
 
-        ``self.is_cancelled()`` honored both paths.
+        **Phase 3: Surrender** — after backoff exhausts, re-raise
+        ProviderRateLimited so the caller can yield a clean error
+        event and end the run.
+
+        ``self.is_cancelled()`` honored throughout — /stop breaks the
+        sleep within ~1 second.
 
         Usage::
 
@@ -945,12 +954,9 @@ class PipelineRun:
         role = self._label_to_role(action_label)
         or_provider_type = self._is_or_provider_for(role)
 
-        # ── Fast swap path for OR providers ─────────────────────────
+        # ── Phase 1: Fast swap for OR providers ─────────────────────
         if or_provider_type and role is not None:
             rate_limited_this_run: set[str] = set()
-            # Cap iterations at the catalog size + 1 so we exit
-            # cleanly after exhausting all models, even if something
-            # weird like an empty catalog races the loop.
             from agentcommander.typecast.openrouter_catalog import (
                 TIER_FREE, TIER_PAID, load,
             )
@@ -959,6 +965,7 @@ class PipelineRun:
 
             from agentcommander.db.repos import get_role_assignment
 
+            catalog_exhausted = False
             for attempt in range(1, max_attempts + 1):
                 try:
                     return fn()
@@ -976,12 +983,15 @@ class PipelineRun:
                     alt = self._pick_alternate(or_provider_type, role,
                                                 rate_limited_this_run)
                     if alt is None:
-                        # Catalog exhausted — re-raise so the caller
-                        # can yield a clean error.
-                        raise
+                        # Catalog exhausted — fall through to Phase 2
+                        # (slow backoff). Don't raise yet; the wait
+                        # gives throttled models a chance to recover.
+                        catalog_exhausted = True
+                        break
                     # Swap and retry.
                     if not self._swap_role_to(role, alt):
-                        raise
+                        catalog_exhausted = True
+                        break
                     yield PipelineEvent(
                         type="swap",
                         role=role.value,
@@ -990,16 +1000,45 @@ class PipelineRun:
                         retry_attempt=attempt,
                         retry_max=max_attempts,
                     )
-            # Exhausted all models in the catalog.
-            raise ProviderRateLimited(
-                f"all {or_provider_type} models in the catalog hit rate-limits "
-                f"during this run"
-            )
+            # If we hit max_attempts without breaking, treat as exhausted.
+            if not catalog_exhausted:
+                catalog_exhausted = True
 
-        # ── Backoff path for local providers ────────────────────────
+            # Tell the user we're switching to slow mode so the long
+            # wait isn't a surprise. One-line announcement before the
+            # backoff schedule kicks in.
+            yield PipelineEvent(
+                type="retry",
+                reason=f"{action_label} (catalog exhausted; falling back to slow retries)",
+                retry_attempt=0,
+                retry_max=len(self._RATE_LIMIT_BACKOFF_S),
+                retry_wait_seconds=self._RATE_LIMIT_BACKOFF_S[0],
+            )
+            # Reset the per-run set so phase 2 can try ANY model again
+            # — enough time will pass during the sleep that previously
+            # throttled models may have recovered their per-minute quota.
+            rate_limited_this_run.clear()
+
+        # ── Phase 2: Slow backoff schedule ──────────────────────────
+        # Used as fall-through after OR catalog exhausts AND as the
+        # primary path for non-OR providers (Ollama / llama.cpp).
         schedule = self._RATE_LIMIT_BACKOFF_S
         last_exc: ProviderRateLimited | None = None
         for attempt, base_wait in enumerate(schedule, start=1):
+            # For OR providers in fall-through, re-pick the best-voted
+            # model from the catalog before each retry. The slow wait
+            # gave throttled models a chance to recover; we want to
+            # retry the most reliable one, not the last-failed one.
+            if or_provider_type and role is not None:
+                from agentcommander.typecast.openrouter_catalog import (
+                    pick_for_role,
+                )
+                tier = (
+                    "free" if or_provider_type == "openrouter-free" else "paid"
+                )
+                best = pick_for_role(tier, role.value, fallback=None)
+                if best:
+                    self._swap_role_to(role, best)
             try:
                 return fn()
             except ProviderRateLimited as exc:
