@@ -775,6 +775,18 @@ def cmd_autoconfig(ctx: CommandContext, args: list[str]) -> None:
         render_system_line("no active providers — add one with /providers add")
         return
 
+    # Filter providers to the user's last-chosen backend. Same fix as
+    # _run_startup_autoconfigure — without it, the threshold cascade
+    # picks from ALL enabled providers, so a user who chose Ollama via
+    # /autoconfig clear but still has llamacpp configured would see
+    # llamacpp models re-take role assignments here.
+    from agentcommander.db.repos import get_config
+    preferred = get_config("preferred_backend", None)
+    if isinstance(preferred, str) and preferred:
+        candidates = [p for p in providers if p.type == preferred]
+        if candidates:
+            providers = candidates
+
     # When persisting with a new threshold, drop any rows the previous
     # autoconfig persisted (they carry a non-null context_window_tokens) so
     # this run can re-pick them. Rows from /roles set keep that column NULL
