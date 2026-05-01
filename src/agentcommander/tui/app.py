@@ -960,9 +960,94 @@ def run_tui() -> int:
                 f"  resuming chat {most_recent.id[:8]} "
                 f"({len(past_msgs)} message(s)) — "
                 "use /chat list to switch, /chat clear to start fresh"))
-            for m in past_msgs:
+            # Replay the chat by interleaving user/assistant messages with
+            # the pipeline events that happened between them. Without the
+            # events we'd show only "You: …" / "AC: …" — losing the iter
+            # markers, role traces, swap activity, tool calls, retry
+            # countdowns the user saw live. With it, /chat resume gives
+            # the same transcript as if you'd been watching the run.
+            try:
+                from agentcommander.db.repos import list_pipeline_events_after
+                all_events = list_pipeline_events_after(0, limit=5000)
+                events_for_conv = [
+                    e for e in all_events
+                    if e.get("conversation_id") == most_recent.id
+                ]
+            except Exception:  # noqa: BLE001
+                events_for_conv = []
+            # Build a lookup of message_id → events that fired DURING that
+            # message's turn. We use a simple time-window heuristic: events
+            # between this user message's created_at and the next user
+            # message (or end of stream) belong to this turn.
+            msg_list = list(past_msgs)
+            user_anchors: list[tuple[int, int, int]] = []  # (idx, start_ts, end_ts)
+            for i, m in enumerate(msg_list):
+                if m.role != "user":
+                    continue
+                start_ts = m.created_at
+                # Next user message marks the end of this turn
+                end_ts = float("inf")
+                for j in range(i + 1, len(msg_list)):
+                    if msg_list[j].role == "user":
+                        end_ts = msg_list[j].created_at
+                        break
+                user_anchors.append((i, start_ts, end_ts))
+
+            from agentcommander.tui.render import render_event as _render_event_obj
+            from agentcommander.engine.engine import PipelineEvent as _PE
+
+            def _replay_turn_events(start_ts: int, end_ts: float) -> int:
+                """Render any pipeline events whose created_at is in this
+                turn's window. Returns count rendered."""
+                n = 0
+                for evt in events_for_conv:
+                    ts = evt.get("created_at") or 0
+                    if ts < start_ts or ts >= end_ts:
+                        continue
+                    payload = evt.get("payload") or {}
+                    et = evt.get("event_type") or ""
+                    # Skip the user/message and assistant/final tee events —
+                    # they're already rendered as messages above.
+                    if et in ("user/message", "assistant/final"):
+                        continue
+                    # Reconstruct a PipelineEvent shape that render_event
+                    # understands. Strip the engine/ prefix.
+                    if et.startswith("engine/"):
+                        kind = et[len("engine/"):]
+                        try:
+                            pe = _PE(type=kind, **{
+                                k: v for k, v in payload.items()
+                                if k in ("iteration", "action", "role", "output",
+                                          "delta", "tool", "ok", "error",
+                                          "final", "family", "reason",
+                                          "retry_attempt", "retry_max",
+                                          "retry_wait_seconds",
+                                          "swap_from_model", "swap_to_model",
+                                          "extra")
+                            })
+                            _render_event_obj(pe)
+                            n += 1
+                        except Exception:  # noqa: BLE001
+                            pass
+                    elif et == "role/delta":
+                        # Skip live deltas in replay — they'd duplicate
+                        # the assistant final that already rendered.
+                        continue
+                    elif et in ("role/start", "role/end"):
+                        continue  # implicit in role/delta replay above
+                return n
+
+            # Render the chat in chronological order. For each user message,
+            # render it, then replay events that fired during that turn,
+            # then render the assistant reply.
+            anchor_idx = 0
+            for i, m in enumerate(msg_list):
                 if m.role == "user":
                     render_user_message(m.content)
+                    if anchor_idx < len(user_anchors):
+                        _, ts0, ts1 = user_anchors[anchor_idx]
+                        _replay_turn_events(ts0, ts1)
+                        anchor_idx += 1
                 elif m.role == "assistant":
                     render_assistant_message(m.content, markdown=True)
 
