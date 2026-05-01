@@ -460,6 +460,24 @@ def configure_openrouter_paid(*, existing_key: str | None = None) -> bool:
     )
 
 
+PREFERRED_BACKEND_CONFIG_KEY = "preferred_backend"
+
+
+def _set_preferred_backend(backend_type: str) -> None:
+    """Persist the user's backend choice so subsequent startup autoconf
+    restricts model picks to providers of THIS type. Without it, the
+    threshold-cascade picker would pick the highest-scoring model from
+    ANY enabled provider — so a user who picks Ollama but still has
+    llamacpp configured would see llamacpp models (which often score
+    high in TypeCast) re-take the role assignments on next launch.
+    """
+    from agentcommander.db.repos import set_config
+    try:
+        set_config(PREFERRED_BACKEND_CONFIG_KEY, backend_type)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def configure_ollama() -> bool:
     """Run the Ollama-specific configurator. Returns True on success."""
     endpoint = prompt_for_ollama_endpoint()
@@ -476,6 +494,7 @@ def configure_ollama() -> bool:
     upsert_provider(cfg)
     rebuild_from_db()
     audit("setup.ollama", {"provider_id": cfg.id, "endpoint": endpoint})
+    _set_preferred_backend("ollama")
     render_system_line(f'added provider {style("accent", cfg.id)} → {endpoint}')
     return True
 
@@ -496,6 +515,7 @@ def configure_llamacpp() -> bool:
     upsert_provider(cfg)
     rebuild_from_db()
     audit("setup.llamacpp", {"provider_id": cfg.id, "endpoint": endpoint})
+    _set_preferred_backend("llamacpp")
     render_system_line(f'added provider {style("accent", cfg.id)} → {endpoint}')
     return True
 
