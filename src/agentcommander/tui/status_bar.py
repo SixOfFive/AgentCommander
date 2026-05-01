@@ -446,42 +446,52 @@ class StatusBar:
             self._cols, self._rows = cols, rows
             self._set_scroll_region(1, self.scroll_bottom_row())
 
-        write("\x1b7")  # save cursor
+        # CRITICAL: the redraw is a multi-write sequence (save cursor,
+        # move + clear + paint each of the 3 bottom rows, restore
+        # cursor). Without serialization, a worker-thread render_role_delta
+        # could land between our move-to-row-X and the actual paint —
+        # the delta would write at row X, then be clobbered by our
+        # paint of that row. ``stdout_atomic`` holds the I/O lock for
+        # the whole sequence so this can't happen.
+        from agentcommander.tui.ansi import stdout_atomic
+        with stdout_atomic():
+            write("\x1b7")  # save cursor
 
-        # Separator rule
-        rule_color = fg256(238) if supports_color() else ""
-        rule = ("─" * cols) if rule_color else ("-" * cols)
-        write(f"\x1b[{self.rule_row()};1H\x1b[2K")
-        if rule_color:
-            write(f"{rule_color}{rule}{RESET}")
-        else:
-            write(rule)
-
-        # Status row — right-aligned data block.
-        write(f"\x1b[{self.status_row()};1H\x1b[2K")
-        write(self._compose_status_row(cols))
-
-        # Input row — clear and (optionally) re-paint the in-flight typing
-        # buffer so the user can see what they're typing while the pipeline
-        # streams output above. When pending_input is None we leave the row
-        # blank so `read_line_at_bottom` can paint its own prompt.
-        write(f"\x1b[{self.input_row()};1H\x1b[2K")
-        if self.state.pending_input is not None:
-            prompt_text = "❯ "
-            if supports_color():
-                write(style("user_label", prompt_text))
+            # Separator rule
+            rule_color = fg256(238) if supports_color() else ""
+            rule = ("─" * cols) if rule_color else ("-" * cols)
+            write(f"\x1b[{self.rule_row()};1H\x1b[2K")
+            if rule_color:
+                write(f"{rule_color}{rule}{RESET}")
             else:
-                write(prompt_text)
-            cap = max(0, cols - len(prompt_text) - 1)
-            txt = self.state.pending_input
-            if cap == 0:
-                txt = ""
-            elif len(txt) > cap:
-                txt = ("…" + txt[-(cap - 1):]) if cap > 1 else "…"
-            write(txt)
+                write(rule)
 
-        write("\x1b8")  # restore cursor
-        sys.stdout.flush()
+            # Status row — right-aligned data block.
+            write(f"\x1b[{self.status_row()};1H\x1b[2K")
+            write(self._compose_status_row(cols))
+
+            # Input row — clear and (optionally) re-paint the in-flight
+            # typing buffer so the user can see what they're typing while
+            # the pipeline streams output above. When pending_input is
+            # None we leave the row blank so `read_line_at_bottom` can
+            # paint its own prompt.
+            write(f"\x1b[{self.input_row()};1H\x1b[2K")
+            if self.state.pending_input is not None:
+                prompt_text = "❯ "
+                if supports_color():
+                    write(style("user_label", prompt_text))
+                else:
+                    write(prompt_text)
+                cap = max(0, cols - len(prompt_text) - 1)
+                txt = self.state.pending_input
+                if cap == 0:
+                    txt = ""
+                elif len(txt) > cap:
+                    txt = ("…" + txt[-(cap - 1):]) if cap > 1 else "…"
+                write(txt)
+
+            write("\x1b8")  # restore cursor
+            sys.stdout.flush()
 
     def _compose_status_row(self, cols: int) -> str:
         s = self.state
