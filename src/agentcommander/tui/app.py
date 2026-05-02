@@ -94,6 +94,17 @@ def _bootstrap() -> None:
         prune_pipeline_events(cutoff_ms)
     except Exception:  # noqa: BLE001
         pass
+    # Same treatment for audit_log — every guard nudge, every tool call,
+    # every role failure writes a row. Without a cap, a long-running
+    # session (or a test loop) accumulates thousands of rows that
+    # nobody reads. Default: drop rows older than 30 days, plus a hard
+    # 100k-row ceiling so a runaway burst can't fill the disk before
+    # the next prune fires.
+    try:
+        from agentcommander.db.repos import prune_audit_log
+        prune_audit_log()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _ensure_conversation(state: dict) -> str:
