@@ -210,7 +210,9 @@ def _project_db_dir() -> Path:
     return Path.cwd() / ".agentcommander"
 
 
-def get_db() -> sqlite3.Connection:
+def get_db() -> "_LockedConnection":
+    """Return the shared connection wrapper. Type-compatible with
+    sqlite3.Connection — the proxy forwards every attribute access."""
     if _db is None:
         raise RuntimeError("Database not initialized — call init_db() during startup")
     return _db
