@@ -587,6 +587,57 @@ def latest_pipeline_event_id() -> int:
     return int(row["m"])
 
 
+def prune_audit_log(older_than_ms: int | None = None,
+                    keep_last: int | None = None) -> int:
+    """Trim the audit_log so it doesn't grow unbounded across long sessions.
+
+    Two strategies, applied in order:
+      - ``older_than_ms``: delete rows whose ``created_at`` is older than
+        this epoch-ms cutoff (e.g. 30 days ago). Default: 30 days.
+      - ``keep_last``: after the time-based prune, if the table still has
+        more than ``keep_last`` rows, delete the oldest until only
+        ``keep_last`` remain. Acts as a hard ceiling so a runaway-event
+        burst (test loops, debug spam) can't fill the disk before the
+        next time-based prune fires. Default: 100,000.
+
+    Returns total rowcount deleted. Silent on DB errors — auditing is a
+    side-channel; failures here must never crash startup.
+    """
+    import time as _t
+    cutoff = (
+        older_than_ms
+        if older_than_ms is not None
+        else int((_t.time() - 30 * 24 * 3600) * 1000)
+    )
+    keep_n = keep_last if keep_last is not None else 100_000
+    db = get_db()
+    n_total = 0
+    try:
+        cur = db.execute(
+            "DELETE FROM audit_log WHERE created_at < ?", (cutoff,),
+        )
+        n_total += cur.rowcount or 0
+    except sqlite3.DatabaseError:
+        return n_total
+    # Hard ceiling: if too many rows remain, drop the oldest.
+    try:
+        row = db.execute(
+            "SELECT COUNT(*) AS c FROM audit_log"
+        ).fetchone()
+        n = int(row["c"]) if row else 0
+        if n > keep_n:
+            cur = db.execute(
+                "DELETE FROM audit_log WHERE id IN ("
+                "  SELECT id FROM audit_log ORDER BY created_at ASC LIMIT ?"
+                ")",
+                (n - keep_n,),
+            )
+            n_total += cur.rowcount or 0
+    except sqlite3.DatabaseError:
+        pass
+    return n_total
+
+
 def prune_pipeline_events(older_than_ms: int) -> int:
     """Delete events older than the given epoch-ms cutoff. Returns rowcount.
 
