@@ -445,6 +445,139 @@ class TestProviderStreamRobustness(unittest.TestCase):
         self.assertIn("real", content)
 
 
+class TestToolSchemaValidation(unittest.TestCase):
+    """Round 18 regression: invoke() must validate tool payloads against
+    the descriptor's input_schema BEFORE calling the handler. Without
+    this, a buggy model emitting wrong-type or out-of-range fields
+    produces opaque AttributeErrors deep in the handler instead of a
+    clean `field: required field missing` / `must be one of [...]` error.
+    """
+
+    def test_validator_missing_required(self) -> None:
+        from agentcommander.tools.dispatcher import _validate_payload
+        schema = {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["path", "content"],
+        }
+        err = _validate_payload({"path": "a"}, schema)
+        self.assertIsNotNone(err)
+        assert err is not None
+        self.assertIn("content", err)
+        self.assertIn("required", err)
+
+    def test_validator_wrong_type(self) -> None:
+        from agentcommander.tools.dispatcher import _validate_payload
+        schema = {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        }
+        err = _validate_payload({"path": 123}, schema)
+        self.assertIsNotNone(err)
+        assert err is not None
+        self.assertIn("string", err)
+
+    def test_validator_enum(self) -> None:
+        from agentcommander.tools.dispatcher import _validate_payload
+        schema = {"type": "string", "enum": ["a", "b", "c"]}
+        err = _validate_payload("d", schema)
+        self.assertIsNotNone(err)
+        assert err is not None
+        self.assertIn("one of", err)
+
+    def test_validator_numeric_bounds(self) -> None:
+        from agentcommander.tools.dispatcher import _validate_payload
+        schema = {"type": "integer", "minimum": 1, "maximum": 600}
+        self.assertIsNone(_validate_payload(300, schema))
+        err_low = _validate_payload(0, schema)
+        err_high = _validate_payload(9999, schema)
+        self.assertIsNotNone(err_low)
+        self.assertIsNotNone(err_high)
+        assert err_low is not None and err_high is not None
+        self.assertIn(">=", err_low)
+        self.assertIn("<=", err_high)
+
+    def test_validator_integer_rejects_bool(self) -> None:
+        # In Python, ``isinstance(True, int)`` is True — but JSON Schema
+        # treats booleans as a separate type from integers. Without an
+        # explicit bool check, ``timeout_s: True`` would slip past as 1.
+        from agentcommander.tools.dispatcher import _validate_payload
+        schema = {"type": "integer"}
+        err = _validate_payload(True, schema)
+        self.assertIsNotNone(err)
+
+    def test_validator_passes_valid_payload(self) -> None:
+        from agentcommander.tools.dispatcher import _validate_payload
+        schema = {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["path", "content"],
+        }
+        self.assertIsNone(_validate_payload(
+            {"path": "a.txt", "content": "hello"}, schema,
+        ))
+
+    def test_invoke_blocks_invalid_payload(self) -> None:
+        from agentcommander.tools.dispatcher import bootstrap_builtins, invoke
+        from agentcommander.db.connection import init_db
+        init_db()
+        bootstrap_builtins()
+        td = tempfile.mkdtemp(prefix="ac-schema-")
+        from agentcommander.tui.permissions import grant_subtree
+        grant_subtree(td, "write", decision="allow")
+        # Missing required: should be blocked at validator, NOT reach handler
+        r = invoke("write_file", {"path": "a"},
+                   working_directory=td, conversation_id="c")
+        self.assertFalse(r.ok)
+        assert r.error is not None
+        self.assertIn("content", r.error)
+
+
+class TestDeleteConversationActiveCleared(unittest.TestCase):
+    """Round 18 regression: deleting the active conversation MUST clear
+    the active_conversation_id config so callers don't silently get
+    empty message lists for a dead id."""
+
+    def test_active_cleared_on_delete(self) -> None:
+        from agentcommander.db.connection import init_db
+        from agentcommander.db.repos import (
+            create_conversation, delete_conversation,
+            set_active_conversation_id, get_active_conversation_id,
+        )
+        init_db()
+        td = tempfile.mkdtemp(prefix="ac-active-")
+        conv = create_conversation("test", working_directory=td)
+        set_active_conversation_id(conv.id)
+        self.assertEqual(get_active_conversation_id(), conv.id)
+        delete_conversation(conv.id)
+        # After delete, active should NOT still point at the dead id.
+        self.assertIsNone(get_active_conversation_id(),
+                            "active_conversation_id must be cleared "
+                            "when its conversation is deleted")
+
+    def test_active_unchanged_when_other_conv_deleted(self) -> None:
+        from agentcommander.db.connection import init_db
+        from agentcommander.db.repos import (
+            create_conversation, delete_conversation,
+            set_active_conversation_id, get_active_conversation_id,
+        )
+        init_db()
+        td = tempfile.mkdtemp(prefix="ac-active2-")
+        conv_a = create_conversation("a", working_directory=td)
+        conv_b = create_conversation("b", working_directory=td)
+        set_active_conversation_id(conv_a.id)
+        delete_conversation(conv_b.id)  # deleting B should NOT touch active
+        self.assertEqual(get_active_conversation_id(), conv_a.id)
+        delete_conversation(conv_a.id)
+
+
 class TestAnsiSanitization(unittest.TestCase):
     """The streaming renderer must strip ANSI from model output before
     passing it to the terminal. A model that emits raw escapes could
