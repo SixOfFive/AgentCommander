@@ -70,7 +70,8 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "Bash(timeout 540 cmd.exe //c \"..\\\\ac.bat\")",
-      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test.py)"
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test.py)",
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_2.py)"
     ]
   }
 }
