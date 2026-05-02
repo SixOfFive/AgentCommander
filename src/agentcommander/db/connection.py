@@ -427,10 +427,10 @@ def init_db_readonly(db_path: Path | str) -> sqlite3.Connection:
     except sqlite3.DatabaseError:
         pass
 
-    _db = conn
+    _db = _LockedConnection(conn)
     _db_path = target
     _is_readonly = True
-    return conn
+    return _db
 
 
 def is_readonly() -> bool:
