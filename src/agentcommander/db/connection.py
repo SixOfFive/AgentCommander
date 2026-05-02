@@ -14,7 +14,67 @@ import sqlite3
 import time
 from pathlib import Path
 
-_db: sqlite3.Connection | None = None
+import threading
+
+
+class _LockedConnection:
+    """Thin proxy around sqlite3.Connection that serializes ``execute``,
+    ``executemany``, ``executescript``, ``commit``, and ``close``.
+
+    Python's sqlite3 module is at threadsafety level 1: threads may share
+    the module, but NOT connections. With ``check_same_thread=False`` you
+    can SHARE a connection across threads, but you must serialize access
+    yourself — otherwise interleaved ``execute`` calls collide on
+    connection-level statement state and surface as cryptic
+    "bad parameter or other API misuse" errors (only some calls survive,
+    the rest fail).
+
+    Wrapping every callable through an RLock fixes this without changing
+    any caller. RLock so a context that already holds the lock (e.g.
+    init_db's schema execute that runs while the lock is held) doesn't
+    self-deadlock when it nests.
+    """
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        object.__setattr__(self, "_conn", conn)
+        object.__setattr__(self, "_lock", threading.RLock())
+
+    def execute(self, *args, **kwargs):
+        with self._lock:
+            return self._conn.execute(*args, **kwargs)
+
+    def executemany(self, *args, **kwargs):
+        with self._lock:
+            return self._conn.executemany(*args, **kwargs)
+
+    def executescript(self, *args, **kwargs):
+        with self._lock:
+            return self._conn.executescript(*args, **kwargs)
+
+    def commit(self):
+        with self._lock:
+            return self._conn.commit()
+
+    def rollback(self):
+        with self._lock:
+            return self._conn.rollback()
+
+    def close(self):
+        with self._lock:
+            return self._conn.close()
+
+    def __getattr__(self, name):
+        # row_factory, isolation_level, in_transaction, etc.
+        return getattr(self._conn, name)
+
+    def __setattr__(self, name, value):
+        if name in ("_conn", "_lock"):
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._conn, name, value)
+
+
+_db: "_LockedConnection | None" = None
 _db_path: Path | None = None
 
 # True when the active connection was opened via init_db_readonly() — the
