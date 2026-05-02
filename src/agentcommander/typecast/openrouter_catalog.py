@@ -446,40 +446,41 @@ def vote_after_rate_limit(tier: str, failed_model: str, role: str) -> int:
     _check_tier(tier)
     if not failed_model or not role:
         return 0
-    catalog = load(tier)
-    models = catalog["_models"]
-    now_ms = int(time.time() * 1000)
+    with _catalog_lock:
+        catalog = load(tier)
+        models = catalog["_models"]
+        now_ms = int(time.time() * 1000)
 
-    # Penalize the failed (model, role) pair only.
-    if failed_model not in models:
-        models[failed_model] = _empty_model_entry()
-    failed_stats = _ensure_role_stats(models[failed_model], role)
-    failed_stats["score"] = max(
-        VOTE_MIN, int(failed_stats.get("score", 0)) - VOTE_INCREMENT
-    )
-    failed_stats["rate_limits"] = int(failed_stats.get("rate_limits", 0)) + 1
-    failed_stats["runs"] = int(failed_stats.get("runs", 0)) + 1
-    failed_stats["lastBumpAt"] = now_ms
+        # Penalize the failed (model, role) pair only.
+        if failed_model not in models:
+            models[failed_model] = _empty_model_entry()
+        failed_stats = _ensure_role_stats(models[failed_model], role)
+        failed_stats["score"] = max(
+            VOTE_MIN, int(failed_stats.get("score", 0)) - VOTE_INCREMENT
+        )
+        failed_stats["rate_limits"] = int(failed_stats.get("rate_limits", 0)) + 1
+        failed_stats["runs"] = int(failed_stats.get("runs", 0)) + 1
+        failed_stats["lastBumpAt"] = now_ms
 
-    # Boost every other model FOR THIS ROLE only.
-    boosted = 0
-    for mid, entry in models.items():
-        if mid == failed_model:
-            continue
-        stats = _ensure_role_stats(entry, role)
-        stats["score"] = min(VOTE_MAX,
-                              int(stats.get("score", 0)) + VOTE_INCREMENT)
-        stats["successes"] = int(stats.get("successes", 0)) + 1
-        stats["runs"] = int(stats.get("runs", 0)) + 1
-        stats["lastBumpAt"] = now_ms
-        boosted += 1
+        # Boost every other model FOR THIS ROLE only.
+        boosted = 0
+        for mid, entry in models.items():
+            if mid == failed_model:
+                continue
+            stats = _ensure_role_stats(entry, role)
+            stats["score"] = min(VOTE_MAX,
+                                  int(stats.get("score", 0)) + VOTE_INCREMENT)
+            stats["successes"] = int(stats.get("successes", 0)) + 1
+            stats["runs"] = int(stats.get("runs", 0)) + 1
+            stats["lastBumpAt"] = now_ms
+            boosted += 1
 
-    catalog["_meta"]["voteCount"] = (
-        int(catalog["_meta"].get("voteCount", 0)) + boosted + 1
-    )
-    catalog["_meta"]["lastVoteAt"] = now_ms
-    save(tier, catalog)
-    return boosted
+        catalog["_meta"]["voteCount"] = (
+            int(catalog["_meta"].get("voteCount", 0)) + boosted + 1
+        )
+        catalog["_meta"]["lastVoteAt"] = now_ms
+        save(tier, catalog)
+        return boosted
 
 
 def vote_after_rate_limit_for_provider(provider_type: str | None,
