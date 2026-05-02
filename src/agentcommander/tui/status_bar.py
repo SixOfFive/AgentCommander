@@ -118,8 +118,16 @@ def _state_to_dict(state: StatusState) -> dict:
     return {k: getattr(state, k) for k in _MIRRORED_BAR_FIELDS}
 
 
-def _apply_dict_to_state(state: StatusState, d: dict) -> None:
-    """Copy mirror-relevant fields from a dict into a StatusState in-place."""
+def _apply_dict_to_state(state: StatusState, d: dict | None) -> None:
+    """Copy mirror-relevant fields from a dict into a StatusState in-place.
+
+    Tolerates ``None`` and non-dict ``d`` — bar_state_json that's missing,
+    serialized as ``null``, or corrupted is treated as "no update" rather
+    than a crash. The mirror polls this regularly and a single bad read
+    must not take it down.
+    """
+    if not isinstance(d, dict):
+        return
     for k in _MIRRORED_BAR_FIELDS:
         if k in d:
             setattr(state, k, d[k])
