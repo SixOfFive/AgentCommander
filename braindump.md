@@ -472,11 +472,12 @@ The user's real role/model pairings discovered from the audit log:
 
 ## Important: when you continue with tests
 
-- The user said: **"use agenttesting as the base workdir"** — chdir to `AgentTesting/` directly, do NOT make a tempdir under it for round-20. (Earlier rounds 10–19 use tempdirs under AgentTesting/, that's fine — they need fresh empty DBs. Round 20 specifically uses the user's real DB.)
-- The user said: **"the changes you just made (copying the db) NEVER gets to github, that contains an api key for openrouter"** — confirmed safe by audit; the new round-20 code does NOT copy the DB anywhere. **Do not introduce `upsert_provider` from snapshot data** when refactoring again — go directly through the user's gitignored real DB.
+- The user invokes round-20 **from inside AgentTesting/** — that's where the real DB lives. The script uses `Path.cwd()` (no `os.chdir`) so wherever the user is when they invoke it IS the workdir. Earlier rounds 10–19 still create their own tempdirs under AgentTesting/ — they need fresh empty DBs and that's fine. Only round 20 uses the user's real DB directly.
+- The user said: **"the changes you just made (copying the db) NEVER gets to github, that contains an api key for openrouter"** — confirmed safe by audit; the round-20 code does NOT copy the DB anywhere. **Do not introduce `upsert_provider` from snapshot data** when refactoring again — go directly through the user's gitignored real DB.
 - The user is running `ac --mirror` in a separate window (PID 17148/10680 last we saw). It's read-only, never blocks anything. Don't kill it.
 - Auto-commit hook fires on every Edit/Write — your changes commit themselves. Push only when explicitly asked.
-- The runaway round-20 process showed why hard timeouts matter — set them BEFORE running again.
+- The runaway round-20 process (5+ min hammering the GPU) showed why hard timeouts matter — `_budget_cancel()` is now wired in, but if any future test ever calls `provider.chat()` without passing `should_cancel=_budget_cancel`, the budget won't enforce. Audit any new model-call site you add.
+- AgentTesting/ files (including stress_test_*.py) are gitignored — when you Edit/Write them, the auto-commit hook will still fire but the changes never enter the index. They live only on disk. That's intentional: no test code or test DB ever lands in git.
 
 ## File map for new code (rounds 11–19 + popout)
 
