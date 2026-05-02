@@ -113,6 +113,11 @@ def _wrap_text(text: str, width: int, indent: str = "") -> Iterator[str]:
     # original. For simplicity here, wrap on visible text after inline
     # transforms — accept that wrap points may shift slightly when escapes
     # are dense. Good enough for terminal output.
+    # Guard: deeply-nested lists or narrow terminals can produce width <= 0;
+    # textwrap.wrap raises ValueError in that case, so just emit unwrapped.
+    if width <= 0:
+        yield indent + text
+        return
     visible = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text)
     if len(visible) <= width:
         yield indent + text
