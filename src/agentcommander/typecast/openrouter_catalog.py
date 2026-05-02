@@ -36,6 +36,7 @@ extend it.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,16 @@ from typing import Any
 
 TIER_FREE = "free"
 TIER_PAID = "paid"
+
+# Process-level lock around the load → modify → save cycle for the
+# catalog files. Voting helpers do that read-modify-write sequence and
+# without serialization, two threads can lose each other's changes
+# (last-writer-wins on save). The engine's pipeline is single-threaded
+# today so this is mostly belt-and-braces — but the cost is one mutex
+# per vote, negligible. Cross-process safety is provided by the existing
+# single-instance DB lock which prevents two AC primaries from running
+# against the same project at all.
+_catalog_lock = threading.RLock()
 
 _FILENAME_BY_TIER: dict[str, str] = {
     TIER_FREE: "typecast-openrouter-free.json",
