@@ -96,7 +96,10 @@
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_18.py)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_19.py)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_20_real_models.py)",
-      "Bash(tee AgentTesting/round20_output.log)"
+      "Bash(tee AgentTesting/round20_output.log)",
+      "Bash(taskkill /F /PID 293 /T)",
+      "Bash(taskkill /F /PID 291 /T)",
+      "Bash(taskkill /F /PID 294 /T)"
     ]
   }
 }
