@@ -308,7 +308,6 @@ def populate_from_openrouter(tier: str,
     return len(models)
 
 
-@_catalog_lock_decorator if False else (lambda f: f)
 def record_vote(tier: str, model_id: str, role: str, *,
                 scope: str = "preferred",
                 increment: int = VOTE_INCREMENT) -> int:
