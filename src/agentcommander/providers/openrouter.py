@@ -319,13 +319,12 @@ class OpenRouterProvider(ProviderBase):
             # runs the backoff/retry loop instead of treating it as a
             # final failure that pollutes the scratchpad.
             if exc.code == 429:
+                # Reuse the Ollama provider's hardened parser — handles
+                # both delay-seconds and HTTP-date formats per RFC 7231,
+                # clamps negatives to 0, and returns None on parse failure.
+                from agentcommander.providers.ollama import _parse_retry_after
                 retry_hdr = exc.headers.get("Retry-After") if exc.headers else None
-                retry_after: float | None = None
-                if retry_hdr:
-                    try:
-                        retry_after = float(retry_hdr)
-                    except (TypeError, ValueError):
-                        retry_after = None
+                retry_after = _parse_retry_after(retry_hdr)
                 raise ProviderRateLimited(
                     f"OpenRouter rate-limited: {err_body[:200]}",
                     retry_after=retry_after,
