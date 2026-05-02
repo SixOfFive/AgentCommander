@@ -70,9 +70,23 @@ def _check(host: str, patterns: list[tuple[re.Pattern[str], str]]) -> HostCheck:
     for ch in trimmed:
         if ord(ch) < 32 or ord(ch) == 127:
             return HostCheck(ok=False, reason="host contains control character")
+    # Percent-encoded bypass: a URL like ``http://%6c%6f%63%61%6c%68%6f%73%74``
+    # decodes to ``http://localhost`` once urllib actually issues the
+    # request, but the regex above wouldn't match the encoded form. Run
+    # the patterns against BOTH the literal string and a single-pass
+    # decoded form so the loopback / link-local guards can't be slipped
+    # past with %XX. (One decode pass matches what urllib does on the
+    # request side; we don't loop since double-decoding isn't standard
+    # and would over-match legitimate paths.)
+    try:
+        decoded = urllib.parse.unquote(trimmed)
+    except Exception:  # noqa: BLE001 — defensive
+        decoded = trimmed
+    candidates = (trimmed, decoded) if decoded != trimmed else (trimmed,)
     for pattern, reason in patterns:
-        if pattern.search(trimmed):
-            return HostCheck(ok=False, reason=reason)
+        for cand in candidates:
+            if pattern.search(cand):
+                return HostCheck(ok=False, reason=reason)
     return HostCheck(ok=True)
 
 
