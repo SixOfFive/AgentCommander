@@ -702,17 +702,34 @@ def _humanize(n: int | None) -> str:
     return f"{n / 1_000_000:.1f}m"
 
 
-def _fmt_tps(tps: float) -> str:
+def _fmt_tps(tps: float | int | None) -> str:
     """Compact ``N t/s`` formatting for status row + tables.
 
     Picks decimals based on magnitude so the column doesn't visually drift:
+      - None / non-numeric → "" (caller drops the segment)
       - < 10   → one decimal ("8.5 t/s")
-      - 10-99  → no decimals ("42 t/s")
-      - 100+   → no decimals ("145 t/s")
+      - 10-999 → no decimals ("42 t/s")
+      - 1k+    → "1.2k t/s"
+      - 1M+    → "1.5M t/s"
+      - <= 0 / inf / nan → "" (cosmetically meaningless, hide them)
     """
-    if tps < 10:
-        return f"{tps:.1f} t/s"
-    return f"{tps:.0f} t/s"
+    if tps is None:
+        return ""
+    try:
+        v = float(tps)
+    except (TypeError, ValueError):
+        return ""
+    # Guard against inf, nan, and non-positive — none are useful to display.
+    import math
+    if not math.isfinite(v) or v <= 0:
+        return ""
+    if v < 10:
+        return f"{v:.1f} t/s"
+    if v < 1000:
+        return f"{v:.0f} t/s"
+    if v < 1_000_000:
+        return f"{v / 1000:.1f}k t/s"
+    return f"{v / 1_000_000:.1f}M t/s"
 
 
 def _render_ctx_bar(now: int, cap: int, cells: int = 8) -> tuple[str, str]:
