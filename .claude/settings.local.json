@@ -72,7 +72,9 @@
       "Bash(timeout 540 cmd.exe //c \"..\\\\ac.bat\")",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test.py)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_2.py)",
-      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/model_stress.py)"
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/model_stress.py)",
+      "Bash(echo \"started in background, PID=$!\")",
+      "Bash(tee /tmp/stress_out.log)"
     ]
   }
 }
