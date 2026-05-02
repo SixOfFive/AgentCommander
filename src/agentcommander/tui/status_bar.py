@@ -825,6 +825,29 @@ def _record_history(line: str) -> None:
         del _history[: len(_history) - _HISTORY_MAX]
 
 
+def _bottom_prompt_handle_click(x: int, y: int) -> None:  # noqa: ARG001
+    """Mouse-click dispatch for the between-runs prompt.
+
+    Toggles the focused popout block if any, otherwise the most-recent
+    interactive (non-running) block. We don't currently use ``y`` to
+    target a specific block by its on-screen row — the registry doesn't
+    track row positions across scrolls. The single-block heuristic
+    matches user expectation: "I clicked SOMEWHERE on the chat, expand
+    the most-recent finished sub-agent."
+    """
+    from agentcommander.tui.popouts import get_registry, toggle_block
+    reg = get_registry()
+    target_id = reg.focus_id
+    if target_id is None:
+        with reg.lock:
+            for b in reversed(reg.blocks):
+                if b.status != "running":
+                    target_id = b.id
+                    break
+    if target_id is not None:
+        toggle_block(target_id)
+
+
 def _paint_input_row(prompt_text: str, buffer: str, cols: int, input_row: int) -> None:
     """Repaint the input row with prompt + current buffer, leaving the cursor
     parked just after the buffer's last character.
