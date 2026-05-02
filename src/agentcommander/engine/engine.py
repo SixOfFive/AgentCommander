@@ -543,8 +543,32 @@ class PipelineRun:
                 if decision.action == "done":
                     final = self._handle_done(decision, opts.user_message)
                     if final is None:
+                        # Track repeated premature-done rejections. Trivia /
+                        # short Q&A often produces 2-3 rejections in a row
+                        # because the orchestrator re-emits the same shape
+                        # (empty input or router echo). Without this short-
+                        # circuit, the run burns iterations on a guaranteed-
+                        # to-loop sequence; after 2 rejections we know the
+                        # orchestrator can't converge and we hand off to the
+                        # chat fallback (which writes a real answer).
+                        self.state.premature_done_count = (
+                            getattr(self.state, "premature_done_count", 0) + 1
+                        )
                         yield PipelineEvent(type="guard", family="done",
                                             reason="rejecting premature done")
+                        if self.state.premature_done_count >= 2:
+                            yield PipelineEvent(
+                                type="guard", family="done",
+                                reason="2 premature dones — handing off to chat fallback",
+                            )
+                            yield from self._chat_fallback_stream(
+                                opts.user_message, opts,
+                            )
+                            update_pipeline_run(
+                                self.run_id, status="done",
+                                iterations=iteration, category=category,
+                            )
+                            return
                         continue
 
                     # Two failure modes for trivial chat / single-line
