@@ -354,8 +354,8 @@ def record_vote(tier: str, model_id: str, role: str, *,
         stats["lastBumpAt"] = int(time.time() * 1000)
         catalog["_meta"]["voteCount"] = int(catalog["_meta"].get("voteCount", 0)) + 1
         catalog["_meta"]["lastVoteAt"] = int(time.time() * 1000)
-    save(tier, catalog)
-    return int(stats["score"])
+        save(tier, catalog)
+        return int(stats["score"])
 
 
 def pick_for_role(tier: str, role: str, *,
