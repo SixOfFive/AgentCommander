@@ -158,6 +158,11 @@ class LoopState:
     tool_call_counts: dict[str, int] = field(default_factory=dict)
     file_write_registry: dict[str, str] = field(default_factory=dict)
     output_hashes: dict[str, int] = field(default_factory=dict)
+    # Counts how many times the orchestrator emitted ``done`` only to be
+    # rejected by the done-guard family this run. After 2, the engine
+    # short-circuits to chat fallback to avoid the trivial-Q&A loop where
+    # the model keeps re-emitting the same bad done shape.
+    premature_done_count: int = 0
 
 
 # ─── Conversations / messages ──────────────────────────────────────────────
