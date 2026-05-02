@@ -73,9 +73,25 @@ def _project_db_path() -> Path:
 
 
 def _wait_for_db(path: Path, *, on_tick) -> None:
-    """Block until ``path`` exists. Yields control via ``on_tick`` between
-    checks so the status bar timer / spinner stays alive while we wait."""
-    while not path.exists():
+    """Block until ``path`` exists AND looks like a real SQLite DB.
+
+    Without the magic-header check we'd return as soon as primary's DB
+    open created the file (potentially zero bytes from atomic-create),
+    then init_db_readonly would error on the empty file. Polling for
+    the SQLite magic header means we wait for primary to actually write
+    the file format, not just touch it into existence.
+    """
+    def _ready() -> bool:
+        if not path.exists():
+            return False
+        try:
+            if path.stat().st_size < 100:
+                return False
+            with open(path, "rb") as fh:
+                return fh.read(16) == b"SQLite format 3\x00"
+        except OSError:
+            return False
+    while not _ready():
         on_tick()
         time.sleep(POLL_INTERVAL_S * 2)
 
