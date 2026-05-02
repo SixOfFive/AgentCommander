@@ -300,6 +300,65 @@ class TestInputChunkActions(unittest.TestCase):
         self.assertEqual(action, ("popout_blur", ""))
 
 
+class TestRenderStateReset(unittest.TestCase):
+    """Round 15 regression: pipeline aborts mid-role (Ctrl-C, /stop,
+    crash) leave ``_streaming_state`` pointing at an orphaned block.
+    The next turn's registry ``reset()`` only wipes the popout registry —
+    render-side state needs its own reset so the same role on the next
+    turn opens a fresh block instead of streaming into the dead one.
+    """
+
+    def setUp(self) -> None:
+        get_registry().reset()
+        # Silence ANSI output during the test.
+        self._stdout = sys.stdout
+        sys.stdout = StringIO()
+
+    def tearDown(self) -> None:
+        sys.stdout = self._stdout
+        from agentcommander.tui.render import reset_render_state
+        reset_render_state()
+        get_registry().reset()
+
+    def test_reset_render_state_clears_dangling_block(self) -> None:
+        from agentcommander.tui.render import (
+            _streaming_state, render_role_delta, reset_render_state,
+        )
+        # Run #1: researcher streams, then crash (no role/end fires).
+        render_role_delta("researcher", "starting...")
+        self.assertEqual(_streaming_state["role"], "researcher")
+        self.assertIsNotNone(_streaming_state["block"])
+
+        # Run #2 begins — app.py calls registry.reset() AND
+        # reset_render_state() at the start of every pipeline run.
+        get_registry().reset()
+        reset_render_state()
+
+        # First delta of run #2 with the SAME role name. Without the fix,
+        # render_role_delta would skip the "new role" branch (state still
+        # says "researcher") and the new turn would accumulate into the
+        # dead block. With the fix, a fresh block opens.
+        render_role_delta("researcher", "fresh start")
+        new_blocks = list(get_registry().blocks)
+        self.assertEqual(len(new_blocks), 1,
+                          "new turn must create a fresh block")
+        self.assertEqual(new_blocks[0].id, "researcher-1")
+
+    def test_reset_render_state_clears_pending_role_usage(self) -> None:
+        from agentcommander.tui.render import (
+            _pending_role_usage, note_role_end_for_popout,
+            reset_render_state,
+        )
+        note_role_end_for_popout("researcher", prompt_tokens=10,
+                                  completion_tokens=20)
+        note_role_end_for_popout("coder", prompt_tokens=5,
+                                  completion_tokens=15)
+        self.assertEqual(set(_pending_role_usage.keys()),
+                          {"researcher", "coder"})
+        reset_render_state()
+        self.assertEqual(_pending_role_usage, {})
+
+
 class TestSlashCommand(unittest.TestCase):
     """The /popout command dispatches against the registry."""
 
