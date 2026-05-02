@@ -151,6 +151,31 @@ def note_role_end_for_popout(role: str, *, prompt_tokens: int,
     }
 
 
+def reset_render_state() -> None:
+    """Wipe per-run render state — called by ``app.py`` at the start of
+    every new pipeline run, alongside the popout registry reset.
+
+    Without this, a pipeline that aborts mid-role (Ctrl-C, ``/stop``,
+    an uncaught exception, or a worker thread that dies before yielding
+    the role-end event) leaves ``_streaming_state["role"]`` and
+    ``_streaming_state["block"]`` pointing at the OLD (now-orphaned)
+    block. On the NEXT turn, when the engine calls the same role,
+    ``render_role_delta`` sees ``_streaming_state["role"] == role`` and
+    skips the "new role" branch — meaning the new turn's deltas
+    accumulate into the orphaned block instead of creating a fresh
+    popout. Slash commands and the registry can't reach the orphan,
+    so the new turn's work is invisible to the popout system.
+
+    Also drains ``_pending_role_usage`` so token counts from a previous
+    run can never leak into the new run's popout summary.
+    """
+    _streaming_state["role"] = None
+    _streaming_state["had_chars"] = False
+    _streaming_state["block"] = None
+    _streaming_state["started_at"] = 0.0
+    _pending_role_usage.clear()
+
+
 # Strip every ANSI escape from streamed model output. The renderer wraps
 # the cleaned delta in its own style codes via ``style()``; if the model
 # emits its own escapes they'd otherwise pass through to the terminal.

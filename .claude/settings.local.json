@@ -89,7 +89,8 @@
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_12.py)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_13.py)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_14.py)",
-      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_popouts -v)"
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_popouts -v)",
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_15.py)"
     ]
   }
 }
