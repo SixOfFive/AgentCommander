@@ -74,9 +74,22 @@ def is_path_within(candidate_path: str, working_directory: str) -> bool:
 
 
 def safe_path(candidate_path: str, working_directory: str) -> str | None:
-    """Return the resolved absolute path if it stays inside the sandbox; else None."""
-    if "\0" in candidate_path:
+    """Return the resolved absolute path if it stays inside the sandbox; else None.
+
+    Rejects:
+      - empty paths (no file to operate on)
+      - any control character (0x00-0x1F + 0x7F) — NUL, newline, CR,
+        TAB, etc. They're technically legal filenames on POSIX but almost
+        always indicate an injection or a broken paste in model output;
+        on Windows the OS rejects most of them anyway, but we want a
+        consistent boundary across platforms.
+      - paths that resolve outside the working directory
+    """
+    if not candidate_path:
         return None
+    for ch in candidate_path:
+        if ord(ch) < 32 or ord(ch) == 127:
+            return None
     try:
         resolved = os.path.normpath(os.path.abspath(os.path.join(working_directory, candidate_path)))
     except (ValueError, OSError):
