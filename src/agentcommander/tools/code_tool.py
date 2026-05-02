@@ -34,13 +34,27 @@ _RUNNERS: dict[str, str] = {
     "bash": ".sh",
     "sh": ".sh",
     "shell": ".sh",
+    # Package managers — no tempfile, dispatched by _execute_package_manager.
+    # The orchestrator system prompt advertises {"language":"pip", "input":
+    # "requests pandas"} so leaving them unsupported was leaving a real
+    # papercut: the orchestrator would emit `pip` decisions and the tool
+    # would reject them with "unsupported language: pip", looping until
+    # max iterations. The ext value is unused for these.
+    "pip": "",
+    "npm": "",
 }
 
 _LANG_FAMILY: dict[str, str] = {
     "python": "python", "py": "python",
     "javascript": "node", "js": "node", "node": "node",
     "bash": "bash", "sh": "bash", "shell": "bash",
+    "pip": "pkg-pip",
+    "npm": "pkg-npm",
 }
+
+# Languages that don't go through the tempfile-then-run path — they're
+# direct command invocations where ``code`` is the argument list.
+_PACKAGE_MANAGERS = {"pip", "npm"}
 
 
 def _resolve_python_cmd() -> list[str] | None:
