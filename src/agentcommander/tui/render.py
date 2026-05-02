@@ -162,6 +162,14 @@ def render_role_delta(role: str, delta: str) -> None:
     """
     if not delta:
         return
+    # Strip embedded ANSI escapes from the model's stream BEFORE we wrap
+    # it in our own style codes. Without this, a model emitting raw
+    # control sequences (intentional or not) could clear the screen,
+    # reposition the cursor onto the status bar, set the window title,
+    # or — on some terminals — manipulate the system clipboard via OSC.
+    delta = _sanitize_model_text(delta)
+    if not delta:
+        return  # was nothing but escapes
     from agentcommander.tui.ansi import stdout_atomic
     with stdout_atomic():
         if _streaming_state["role"] != role:
