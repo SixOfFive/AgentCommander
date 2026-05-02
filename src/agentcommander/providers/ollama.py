@@ -73,6 +73,64 @@ def _get_json(url: str, timeout: float = 10.0) -> Any:
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _safe_token_count(raw: Any) -> int | None:
+    """Coerce a model-reported token count to a non-negative int, or
+    None if the value is missing / non-numeric / nonsense.
+
+    Ollama (and other OpenAI-compatible daemons) will occasionally emit
+    ``eval_count: -100`` or even ``"thirty"`` if their internal counter
+    overflows or a wrapper stringifies the field. Without this clamp the
+    bad number lands in throughput EMA, the popout token display, and
+    the status bar — so a single bad response permanently skews the
+    running average. We coerce silently rather than raise: a missing
+    token count is recoverable; crashing the run isn't.
+    """
+    if raw is None:
+        return None
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return max(0, n)
+
+
+def _parse_retry_after(raw: Any) -> float | None:
+    """Parse an HTTP ``Retry-After`` header value per RFC 7231 §7.1.3.
+
+    Two formats are valid:
+      - delay-seconds: a non-negative integer ("60")
+      - HTTP-date: an absolute date in IMF-fixdate / RFC 850 / asctime
+        format (e.g. "Wed, 21 Oct 2026 07:28:00 GMT")
+
+    Returns the wait in seconds (>= 0), or ``None`` if the value is
+    missing / unparseable. Negative integer-seconds are clamped to 0
+    rather than passed through — a server emitting a negative wait is
+    buggy and we don't want the engine's backoff math to flip sign.
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    # Try integer-seconds first (the common case).
+    try:
+        v = float(s)
+        return max(0.0, v)
+    except ValueError:
+        pass
+    # Fall back to HTTP-date. urllib has a parser tucked away.
+    try:
+        from email.utils import parsedate_to_datetime
+        dt = parsedate_to_datetime(s)
+    except (TypeError, ValueError):
+        return None
+    if dt is None:
+        return None
+    import time as _time
+    delta = dt.timestamp() - _time.time()
+    return max(0.0, delta)
+
+
 class OllamaProvider(ProviderBase):
     def __init__(self, *, id: str, endpoint: str) -> None:
         check = validate_provider_host(endpoint)
