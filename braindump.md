@@ -359,3 +359,138 @@ When debugging or extending, open in this order:
 9. `src/agentcommander/typecast/autoconfig.py` → role-picking logic
 
 Last updated end of session covering: chat resume + /chat family + minctx rename + ctx-clear-on-end + corruption defense + permissions subtree + many guard fixes + project-local DB.
+
+---
+
+# RESUME-AFTER-COMPACTION (rounds 11–20 + popout feature)
+
+This block is the latest. Read it first if you're a future Claude resuming after compaction.
+
+## Where I'm leaving off
+
+Mid-rewrite of `AgentTesting/stress_test_20_real_models.py` to use `AgentTesting/` as the workdir directly instead of a tempdir under it. **The user's concern: their OR api_key lives in the AgentTesting DB and must NEVER reach github.** Audit confirmed nothing sensitive is tracked (`git ls-files AgentTesting/` returns nothing; `*.sqlite` and `AgentTesting/` are both gitignored). The previous version of round-20 *replicated* providers (with api_keys) into a tempdir DB — also gitignored, but the user didn't want any copy at all. The new version opens the user's real DB directly so the api_key never moves.
+
+**State of round-20 file (`AgentTesting/stress_test_20_real_models.py`):**
+- ✅ DB-strategy comment block + atexit-cleanup hook + `GLOBAL_BUDGET_S=600`/`PER_TEST_BUDGET_S=30`/`PIPELINE_BUDGET_S=60` constants added at top
+- ✅ Bootstrap section rewritten: `os.chdir(AgentTesting/)`, single `init_db()`, `bootstrap_providers()`, no replication
+- ✅ Autoconfig section unchanged (still calls `apply_autoconfigure` then falls back to audit-log-derived bindings)
+- ⏳ **NOT DONE**: every `create_conversation(...)` call site in the test still needs to add `_CREATED_CONVERSATION_IDS.add(conv.id)` so the atexit cleanup actually deletes them
+- ⏳ **NOT DONE**: section H (10 pipeline tests, each up to 120s) needs to be cut down to 1 representative test with `PIPELINE_BUDGET_S` budget — without this, the test runs 10+ minutes hammering the 4070
+- ⏳ **NOT DONE**: per-test budget is declared but not actually enforced anywhere — need a thread-based watchdog or per-call `should_cancel` that fires after `PER_TEST_BUDGET_S`
+- ⏳ **NOT DONE**: rerun and verify models actually drive the 4070
+
+To continue: pick up at the `# C. Per-role behavior` section, audit each `create_conversation` use, hook the cleanup tracker, then trim section H. Run with `PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_20_real_models.py 2>&1 | tee AgentTesting/round20_output.log`. **Verify global timeout actually exits if anything hangs.** A previous run was killed manually (PID 24712/21680) for hammering the GPU 5+ min.
+
+## Tests added this session (rounds 11–19, all stress-tested, all passing)
+
+| Round | Focus | Findings |
+|---|---|---|
+| 11 | Provider net failures + scratchpad corruption + WAL pressure | 1 bug: `validate_provider_host` accepted `ftp://` → fix added ftp to provider reject list + null-byte rejection |
+| 12 | Bootstrap idempotency, prompt injection edges, audit load | 1 bug: `validate_user_host("http://localhost")` slipped past — localhost regex was `^\s*localhost`, fixed to `(^\|//)\s*localhost` |
+| 13 | Write atomicity, dispatcher edges, term_size weirdness | 3 bugs: `write_file` was non-atomic (data loss); `user_wants_action(None)` crashed; `OllamaProvider.list_models()` raised raw `JSONDecodeError`. All fixed. |
+| 14 | 50-test wide sweep | 1 bug: percent-encoded localhost (`%6c%6f%63...`) bypass — added URL-decode pass in host validator |
+| 15 | Long-running / sustained pipeline + popout stress | 1 bug: stale `_streaming_state` survived across pipeline runs after Ctrl-C / crash → `reset_render_state()` added in app.py's `_run_pipeline` |
+| 16 | Dispatcher cancel/panic, scratchpad compact, role assignment integrity | 1 bug: `init_db_readonly` returned existing `_db` without checking it was actually readonly + same path → guard added |
+| 17 | Model-interaction edges + guard gap audit | 4 bugs: `chat()` `AttributeError` on non-dict stream chunks (added `isinstance(chunk, dict)` check); `num_ctx` accepted garbage (added validator: positive int ≤ 16M); negative token counts poisoned EMA (`_safe_token_count` clamps); Retry-After parser brittle (added HTTP-date support + clamps negatives via new `_parse_retry_after`). 6 architectural WARNs catalogued. |
+| 18 | 50 tests across 10 new categories | **TOOL SCHEMA ENFORCEMENT IMPLEMENTED** — `_validate_payload` in `tools/dispatcher.py` checks every payload against the descriptor's `input_schema` (object/string/integer/number/boolean/array/null + required/properties/enum/min/max). Bug: `delete_conversation` left dangling `active_conversation_id` → fixed |
+| 19 | Fresh exploratory sweep | 3 fixes: scratchpad now sanitizes ANSI + control bytes at write time (`sanitize_scratchpad_text` runs in `_push_entry`); role-label mimicry pattern added to `prompt_injection.py` (catches `▸ orchestrator`, `▶ researcher-N`, `● AgentCommander`); `_apply_dict_to_state(None)` no longer crashes |
+
+**Cumulative**: ~700 stress tests + 109 unit tests, all passing. ~36 real bugs fixed across rounds.
+
+## NEW FEATURE: collapsible role popouts (`tui/popouts.py`)
+
+Major TUI feature, implemented in worktree `feature/role-popouts` and merged. User's spec verbatim:
+
+- Each sub-agent role-call (researcher, coder, reviewer, …) gets its own collapsible block
+- Streaming text visible WHILE running; on `done` the block snaps to a single summary line: `▶ researcher-2 [12.3s · 2,847 tok · ok]`
+- Failed roles stay EXPANDED (so the user sees the error inline)
+- Tool calls inside a role stay visible regardless of collapse state
+- Three interaction surfaces, all working: **mouse click** (xterm SGR mouse mode), **keyboard** (Tab/Shift-Tab cycle, Space/Enter toggle, Esc blur), **slash command** (`/popout <id>` / `/popout list` / `/popout expand|collapse all`, alias `/po`)
+- Block IDs are `<role>-<n>` (1-indexed per pipeline run, reset every turn)
+- Mirror viewers reconstruct independently from `pipeline_events`; each viewer has its own collapse state
+- Replay/resume synthesizes collapsed blocks from historical role events
+
+**Files added**:
+- `src/agentcommander/tui/popouts.py` — `PopoutBlock`, `PopoutRegistry`, lifecycle, line-counting, summary formatting, cursor-up + erase-to-end collapse render
+- `src/agentcommander/tui/mouse_input.py` — xterm SGR mouse mode enable/disable + parser
+- `tests/test_popouts.py` — 38 unit tests
+
+**Files modified**:
+- `tui/render.py` — `render_role_delta` opens popout for sub-agents; `_render_event` finalize+collapse on role/error
+- `tui/app.py` — keyboard nav in `_consume_input_chunk`, mouse parser dispatch, mode setup/teardown around `bar.install()`, click handler in bottom-prompt input loop too
+- `tui/mirror.py` — same role/end + error hooks; mouse clicks toggle local registry
+- `tui/commands.py` — `/popout` slash command registered with `/po` alias
+
+**Known limitations** (not bugs):
+- Mouse click toggles the *most-recent* (or focused) block, not the specific block under the cursor — registry doesn't track row positions across scrolls. Slash + keyboard remain precise.
+- Cursor-up + erase only works for blocks still in the viewport. Blocks scrolled past the top get marked `in_viewport=False` and the summary appends below; slash command can re-print content fresh.
+
+## API key safety — confirmed clean
+
+`git ls-files | grep -iE "(\.sqlite|\.agentcommander|api_key|credential)"` → empty. `git check-ignore -v AgentTesting/...` → all matches against `.gitignore:46:AgentTesting/`. The `sk-or-` strings in tracked source code are all regex literals in `safety/dangerous_patterns.py`, `engine/guards/output_guards.py`, and the OR setup wizard — never a real key. **The user's OR api_key is at `AgentTesting/.agentcommander/db.sqlite` and that path is gitignored three different ways (`AgentTesting/`, `*.sqlite`, `.agentcommander/`).**
+
+## Cleanup done this session
+
+- Deleted stray empty `.agentcommander/` at the repo root (created by stress tests pre-tempfile-confinement; had 0 conversations / 0 providers / 2 stale config rows).
+- All stress tests rounds 10–19 now create their tempdirs INSIDE `AgentTesting/` via `tempfile.mkdtemp(prefix="ac-stressNN-", dir=str(_test_root))`. Source tree stays untouched.
+- Round 20 is being further changed (in progress) to NOT use a tempdir at all — the user wants it to run against the real DB directly so api_keys never leave their gitignored home.
+
+## Real-model testing (round 20) — current status
+
+**Goal**: hit the user's actual Ollama daemon at `http://192.168.15.103:11434` (where the 4070 lives) and exercise their autoconfig'd role/model pairings.
+
+**Iteration count: 5 attempts so far**, each fixed the next layer:
+1. Test ran from project root → empty DB → 0 providers
+2. Added readonly snapshot reader → still 0 (path was project root which is empty; real DB is in `AgentTesting/.agentcommander/`)
+3. Wrong path order → DB not init when bootstrap_providers ran
+4. Fixed order — providers all 4 healthy ✓ — but `apply_autoconfigure` returned 0 picks because the test env's TypeCast catalog doesn't recognize the user's installed models (`cogito:8b`, `devstral-small-2:24b`, `gemma4:e2b`)
+5. Added audit-log-derived bindings fallback (reads `event_type='role.call'` rows to discover what roles → models the user used in production). **The test process from this attempt was killed (PID 24712/21680) after running 5+ min — output never flushed because of `tee` buffering.**
+
+The user's real role/model pairings discovered from the audit log:
+- router → devstral-small-2:24b
+- orchestrator → devstral-small-2:24b
+- researcher → cogito:8b
+- translator → gemma4:e2b
+
+**To finish**: complete the rewrite (see "Where I'm leaving off"), enforce the budgets, then run.
+
+## Open architectural-WARN items (round 17, deliberately deferred)
+
+1. Spend cap for paid OR (not a bug — feature work, needs UI)
+2. Provider hot-reload (low impact)
+
+(Tool schema enforcement / scratchpad sanitize / role-label mimicry / prompt size cap — all FROM the round-17 catalogue have been resolved in rounds 18–19. See per-round table above.)
+
+## Important: when you continue with tests
+
+- The user said: **"use agenttesting as the base workdir"** — chdir to `AgentTesting/` directly, do NOT make a tempdir under it for round-20. (Earlier rounds 10–19 use tempdirs under AgentTesting/, that's fine — they need fresh empty DBs. Round 20 specifically uses the user's real DB.)
+- The user said: **"the changes you just made (copying the db) NEVER gets to github, that contains an api key for openrouter"** — confirmed safe by audit; the new round-20 code does NOT copy the DB anywhere. **Do not introduce `upsert_provider` from snapshot data** when refactoring again — go directly through the user's gitignored real DB.
+- The user is running `ac --mirror` in a separate window (PID 17148/10680 last we saw). It's read-only, never blocks anything. Don't kill it.
+- Auto-commit hook fires on every Edit/Write — your changes commit themselves. Push only when explicitly asked.
+- The runaway round-20 process showed why hard timeouts matter — set them BEFORE running again.
+
+## File map for new code (rounds 11–19 + popout)
+
+```
+src/agentcommander/tui/popouts.py        ← NEW: popout system
+src/agentcommander/tui/mouse_input.py    ← NEW: xterm SGR mouse parser
+src/agentcommander/tools/dispatcher.py   ← schema enforcement (_validate_payload)
+src/agentcommander/providers/ollama.py   ← _safe_token_count, _parse_retry_after, num_ctx validation, non-dict chunk skip
+src/agentcommander/providers/openrouter.py ← uses _parse_retry_after + _safe_token_count
+src/agentcommander/engine/scratchpad.py  ← sanitize_scratchpad_text
+src/agentcommander/engine/engine.py      ← _push_entry calls sanitize_scratchpad_text
+src/agentcommander/safety/host_validator.py ← URL-decode pass for percent-encoded loopback bypass
+src/agentcommander/safety/prompt_injection.py ← role-label mimicry pattern
+src/agentcommander/db/repos.py           ← delete_conversation clears active id, prune_audit_log
+src/agentcommander/db/connection.py      ← init_db_readonly state-confusion guard
+src/agentcommander/tui/render.py         ← reset_render_state, popout integration
+src/agentcommander/tui/app.py            ← popout keyboard nav, mouse dispatch, registry/render reset on each run
+src/agentcommander/tui/mirror.py         ← popout reconstruction from events
+src/agentcommander/tui/commands.py       ← /popout slash command
+src/agentcommander/tui/status_bar.py     ← bottom-prompt mouse click handler, _apply_dict_to_state(None) tolerant
+tests/test_safety.py                     ← +many regression tests
+tests/test_popouts.py                    ← NEW: 38 unit tests
+AgentTesting/stress_test_{10..20}.py     ← rounds 10–20, all confined to AgentTesting/
+AgentTesting/round20_output.log          ← currently 0 bytes (last run was killed mid-flight)
+```
+
