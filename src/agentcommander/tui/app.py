@@ -147,7 +147,12 @@ def _consume_input_chunk(buffer: str, chunk: str) -> tuple[str, tuple[str, str] 
 
     Returns ``(new_buffer, action)``. ``action`` is ``("submit", line)`` when
     the user pressed Enter (line is the buffer contents at submit time, with
-    surrounding whitespace stripped), otherwise ``None``.
+    surrounding whitespace stripped), or one of the popout navigation
+    actions when the buffer is empty:
+      ``("popout_focus_next", "")``  — Tab
+      ``("popout_focus_prev", "")``  — Shift-Tab (CSI Z)
+      ``("popout_toggle", "")``      — Space or Enter when a popout is focused
+      ``("popout_blur", "")``        — Esc
 
     Backspace (DEL or BS) edits in place. Bare control bytes are dropped, and
     common terminal escape sequences are consumed as a unit so arrow keys and
@@ -155,6 +160,10 @@ def _consume_input_chunk(buffer: str, chunk: str) -> tuple[str, tuple[str, str] 
       - CSI: ``ESC [ <params> <final>`` where final is a letter or ``~``
       - SS3: ``ESC O <final>`` (F1-F4 on many terminals)
     Windows special-key prefixes (``\\x00`` / ``\\xe0``) consume the next byte too.
+
+    Tab key handling: when the typing buffer is non-empty, Tab is dropped
+    (keeps the existing behavior — autocomplete is handled at the line
+    level). When the buffer is empty, Tab cycles popout focus instead.
     """
     new_buf = buffer
     i = 0
@@ -168,31 +177,131 @@ def _consume_input_chunk(buffer: str, chunk: str) -> tuple[str, tuple[str, str] 
         # POSIX ANSI escape — consume the whole sequence so it doesn't leak.
         if ch == "\x1b":
             i += 1
-            if i < n and chunk[i] == "[":
+            # Lone ESC (no following bytes, OR followed by a non-CSI/SS3
+            # char): treat as "blur popout focus" when buffer is empty.
+            if i >= n:
+                if not new_buf:
+                    return new_buf, ("popout_blur", "")
+                continue
+            if chunk[i] == "[":
                 i += 1
+                # Capture the params + final byte so we can detect Shift-Tab
+                # (CSI Z) for popout reverse-focus.
+                params = []
+                final = ""
                 while i < n:
                     c2 = chunk[i]
                     i += 1
                     if c2 == "~" or ("A" <= c2 <= "Z") or ("a" <= c2 <= "z"):
+                        final = c2
                         break
-            elif i < n and chunk[i] == "O":
+                    params.append(c2)
+                # CSI Z = reverse tab (Shift-Tab on most terminals).
+                if final == "Z" and not new_buf:
+                    return new_buf, ("popout_focus_prev", "")
+                continue
+            if chunk[i] == "O":
                 # SS3: ESC O <one final byte>
                 i += 2
-            # else: lone ESC — already swallowed.
+                continue
+            # else: lone ESC followed by a non-special char — swallow it
+            # but don't blur (the chunk has more typing to consume).
             continue
         i += 1
         if ch in ("\r", "\n"):
+            # Empty buffer: Enter on a focused popout toggles it. Otherwise
+            # this is a normal line submit.
+            if not new_buf:
+                return "", ("popout_toggle", "")
             line = new_buf.strip()
             return "", ("submit", line)
+        if ch == "\t":
+            # Tab on empty buffer cycles popout focus forward; on a typed
+            # buffer we leave Tab to higher-level autocomplete (which is
+            # handled by the bottom-prompt reader, not this in-run path),
+            # so just drop it here.
+            if not new_buf:
+                return new_buf, ("popout_focus_next", "")
+            continue
+        if ch == " " and not new_buf:
+            # Space on empty buffer is the "toggle focused popout" key.
+            # If the user types a leading space deliberately we lose it —
+            # acceptable trade-off; no command starts with a space anyway.
+            return new_buf, ("popout_toggle", "")
         if ch in ("\x7f", "\x08"):
             new_buf = new_buf[:-1]
             continue
         if ord(ch) < 32:
-            # Drop other control bytes (tab, etc.). Ctrl-C still raises
+            # Drop other control bytes. Ctrl-C still raises
             # KeyboardInterrupt because cbreak preserves ISIG.
             continue
         new_buf += ch
     return new_buf, None
+
+
+def _handle_popout_focus(direction: int) -> None:
+    """Cycle keyboard focus across popout blocks. The new focus indicator
+    is reflected by reprinting the focused summary line (highlighted) at
+    the bottom of the scroll region, so the user can see Tab moved.
+    """
+    from agentcommander.tui.popouts import get_registry, render_summary_line
+    reg = get_registry()
+    new_id = reg.cycle_focus(direction)
+    if new_id is None:
+        from agentcommander.tui.render import render_system_line
+        render_system_line(style("muted", "  (no popouts to focus — Tab is a no-op)"))
+        return
+    block = reg.get(new_id)
+    if block is None:
+        return
+    # Append the focused summary at the cursor — gives a visible "you
+    # focused this" without trying to overdraw the original summary line
+    # (which may have scrolled).
+    from agentcommander.tui.ansi import writeln
+    writeln(render_summary_line(block, focused=True) +
+             style("muted", "  (Space/Enter to toggle, Esc to blur)"))
+
+
+def _handle_popout_toggle() -> None:
+    """Toggle the currently-focused popout block. No-op when nothing's
+    focused — Space on an empty input line does nothing visible."""
+    from agentcommander.tui.popouts import get_registry, toggle_block
+    reg = get_registry()
+    if reg.focus_id is None:
+        return
+    toggle_block(reg.focus_id)
+
+
+def _handle_popout_blur() -> None:
+    """Esc: drop popout keyboard focus."""
+    from agentcommander.tui.popouts import get_registry
+    get_registry().clear_focus()
+
+
+def _handle_popout_click(x: int, y: int) -> None:
+    """Translate a mouse-click coordinate into a popout toggle.
+
+    The 1-indexed (x, y) is in terminal cells. We don't track pixel
+    positions of every block (scrolling moves them constantly); instead
+    we treat any click on a row that recently emitted a summary line as
+    a toggle of THAT block. That's heuristic but matches user
+    expectation: "I clicked on a popout summary, it should toggle."
+
+    For now we toggle the focused block if any, otherwise the most-recent
+    interactive block. Refining to per-row tracking is a future iteration.
+    """
+    from agentcommander.tui.popouts import get_registry, toggle_block
+    reg = get_registry()
+    target_id = reg.focus_id
+    if target_id is None:
+        # Click without focus: pick the most-recent non-running block.
+        with reg.lock:
+            for b in reversed(reg.blocks):
+                if b.status != "running":
+                    target_id = b.id
+                    break
+    if target_id is not None:
+        toggle_block(target_id)
 
 
 def _refresh_or_paid_balance(bar) -> None:  # noqa: ANN001 - StatusBar local
@@ -337,6 +446,11 @@ def _run_pipeline(state: dict, user_message: str) -> None:
     bar.reset_run()
     bar.set_running(True)
 
+    # Wipe any popouts left over from the previous pipeline run so block
+    # IDs (researcher-1, researcher-2, ...) restart at 1 for this turn.
+    from agentcommander.tui.popouts import get_registry as _get_popout_registry
+    _get_popout_registry().reset()
+
     # Live tee: every engine event the user sees on this primary screen
     # also lands in `pipeline_events` for `ac --mirror` to replay.
     from agentcommander.engine import live_tee
@@ -394,6 +508,16 @@ def _run_pipeline(state: dict, user_message: str) -> None:
         live_tee.tee_role_end(role, model, prompt_tokens, completion_tokens,
                               conversation_id=conv_id,
                               run_id=run_id_holder["run_id"])
+        # Bridge the authoritative token counts into the popout system —
+        # the role/error PipelineEvent doesn't carry usage and we want
+        # the collapsed summary to show real numbers, not estimates.
+        try:
+            from agentcommander.tui.render import note_role_end_for_popout
+            note_role_end_for_popout(role,
+                                       prompt_tokens=prompt_tokens,
+                                       completion_tokens=completion_tokens)
+        except Exception:  # noqa: BLE001
+            pass
         # Refresh the OpenRouter Paid balance on the bar after each call
         # so the user can watch their account draw down in near-real time.
         # Best-effort; no-op if no openrouter-paid provider is configured
@@ -505,10 +629,27 @@ def _run_pipeline(state: dict, user_message: str) -> None:
                     chunk = poll_chars()
                     if chunk:
                         if raw_ready:
+                            # Strip mouse-click reports first so they don't
+                            # leak into the typed buffer; route hits to any
+                            # popout summary line at the click coordinate.
+                            from agentcommander.tui.mouse_input import parse_mouse_events
+                            chunk, mouse_events = parse_mouse_events(chunk)
+                            for ev in mouse_events:
+                                if ev.pressed and ev.button == 0:
+                                    _handle_popout_click(ev.x, ev.y)
                             typed_buffer, action = _consume_input_chunk(typed_buffer, chunk)
                             bar.set_pending_input(typed_buffer)
-                            if action is not None and action[0] == "submit":
-                                _handle_in_run_command(action[1], state, cancel_event)
+                            if action is not None:
+                                if action[0] == "submit":
+                                    _handle_in_run_command(action[1], state, cancel_event)
+                                elif action[0] == "popout_focus_next":
+                                    _handle_popout_focus(+1)
+                                elif action[0] == "popout_focus_prev":
+                                    _handle_popout_focus(-1)
+                                elif action[0] == "popout_toggle":
+                                    _handle_popout_toggle()
+                                elif action[0] == "popout_blur":
+                                    _handle_popout_blur()
                         else:
                             legacy_buffer += chunk
                             if any(c in legacy_buffer for c in ("\n", "\r")):
@@ -946,6 +1087,11 @@ def run_tui() -> int:
     bar = get_status_bar()
     bar.set_workdir(state["working_dir"])
     bar.install()
+    # Enable xterm SGR mouse so click events on popout summary lines
+    # arrive on stdin and we can dispatch them. No-op on terminals that
+    # don't speak the protocol — they fall back to keyboard + slash.
+    from agentcommander.tui.mouse_input import enable_mouse_mode
+    enable_mouse_mode()
 
     catalog = get_catalog()
     render_banner(
@@ -1190,6 +1336,10 @@ def run_tui() -> int:
                 traceback.print_exc()
 
     bar.uninstall()
+    # Tear down mouse mode BEFORE the cursor is reset so the user's
+    # shell isn't left receiving click reports for every pointer motion.
+    from agentcommander.tui.mouse_input import disable_mouse_mode
+    disable_mouse_mode()
     write(SHOW_CURSOR)
 
     # Free VRAM before goodbye: ask each provider to unload any models it's
