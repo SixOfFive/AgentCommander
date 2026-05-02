@@ -5,6 +5,13 @@ Built-in tools self-register on import of `tools.bootstrap`. External plugins
 
 `invoke(name, payload, ctx_partial)` is the only call site the engine uses.
 Every dispatch lands an audit row.
+
+Each ``ToolDescriptor`` declares an ``input_schema`` (JSON Schema subset).
+``invoke`` validates the payload against it BEFORE calling the handler so a
+malformed payload from a buggy model produces a clear "x is required" /
+"x must be one of [...]" error instead of a deep AttributeError 5 levels
+into the handler. The validator only supports the subset our schemas
+actually use — it's not a full JSON Schema implementation.
 """
 from __future__ import annotations
 
