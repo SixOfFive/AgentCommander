@@ -214,6 +214,78 @@ class TestFileTypoGuard(unittest.TestCase):
         self.assertEqual(result["verdict"]["action"], "pass")
 
 
+class TestAtomicWrite(unittest.TestCase):
+    """write_file must be atomic: an interrupted write (disk full, crash,
+    OS kill) must NEVER truncate the original file. The implementation
+    writes to ``<target>.tmp`` then ``os.replace``s into place — verify
+    the original survives a simulated mid-write OSError.
+    """
+
+    def test_interrupted_write_preserves_original(self) -> None:
+        from agentcommander.tools.file_tool import _write_file
+        from agentcommander.tools.types import ToolContext
+        import builtins as _builtins
+
+        td = tempfile.mkdtemp(prefix="ac-atom-")
+        # Pre-grant write/read perms so the tool doesn't prompt.
+        from agentcommander.tui.permissions import grant_subtree
+        grant_subtree(td, "write", decision="allow")
+
+        target = os.path.join(td, "f.txt")
+        with open(target, "w", encoding="utf-8") as f:
+            f.write("ORIGINAL")
+
+        real_open = _builtins.open
+
+        class _FailingFile:
+            def __init__(self, real):
+                self._real = real
+                self._written = 0
+
+            def __enter__(self):
+                self._real.__enter__()
+                return self
+
+            def __exit__(self, *a):
+                return self._real.__exit__(*a)
+
+            def write(self, s: str) -> None:
+                # Write a few bytes, then explode — mimics ENOSPC mid-write.
+                if self._written < 3:
+                    self._real.write(s[: 3 - self._written])
+                    self._written += min(len(s), 3)
+                raise OSError(28, "No space left on device (simulated)")
+
+            def flush(self) -> None:
+                pass
+
+            def fileno(self) -> int:
+                return self._real.fileno()
+
+        def fake_open(path, mode="r", *a, **kw):
+            # Intercept only the .tmp file the atomic write creates.
+            if str(path) == target + ".tmp" and "w" in mode:
+                return _FailingFile(real_open(path, mode, *a, **kw))
+            return real_open(path, mode, *a, **kw)
+
+        captured = []
+        ctx = ToolContext(working_directory=td, conversation_id=None,
+                          audit=lambda *a, **kw: None)
+
+        from unittest.mock import patch
+        with patch.object(_builtins, "open", side_effect=fake_open):
+            r = _write_file({"path": "f.txt", "content": "REPLACEMENT"}, ctx)
+            captured.append(r)
+
+        self.assertFalse(r.ok, "interrupted write should report failure")
+        self.assertIn("space", (r.error or "").lower())
+        with open(target, "r", encoding="utf-8") as f:
+            self.assertEqual(f.read(), "ORIGINAL",
+                              "original file content was destroyed by partial write")
+        self.assertFalse(os.path.exists(target + ".tmp"),
+                          ".tmp leaked after failure")
+
+
 class TestAnsiSanitization(unittest.TestCase):
     """The streaming renderer must strip ANSI from model output before
     passing it to the terminal. A model that emits raw escapes could
