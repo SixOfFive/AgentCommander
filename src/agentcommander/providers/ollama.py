@@ -161,6 +161,17 @@ class OllamaProvider(ProviderBase):
                 # generating tokens for this request.
                 if should_cancel is not None and should_cancel():
                     return
+                # ``_post_stream`` decodes whatever JSON value the line
+                # contains — that's normally a dict, but a misbehaving
+                # daemon (or a man-in-the-middle injecting noise into the
+                # stream) can emit a bare int / string / list. ``.get``
+                # only exists on dicts; without this guard the engine
+                # crashes with ``AttributeError: 'int' object has no
+                # attribute 'get'``. Skip non-dict lines silently —
+                # consistent with how ``_post_stream`` handles undecodable
+                # bytes.
+                if not isinstance(chunk, dict):
+                    continue
                 content = ""
                 msg = chunk.get("message")
                 if isinstance(msg, dict):
