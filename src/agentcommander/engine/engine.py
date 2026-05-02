@@ -419,7 +419,21 @@ class PipelineRun:
     def events(self) -> Iterator[PipelineEvent]:
         """Yield events from the pipeline run. Synchronous generator."""
         opts = self.opts
-        insert_pipeline_run(self.run_id, opts.conversation_id)
+        # If conversation_id doesn't reference a real row, the FK in
+        # pipeline_runs would raise IntegrityError and the entire run
+        # would crash before yielding any events. Catch that, surface a
+        # clean error event, and stop — instead of letting the exception
+        # propagate to whoever's iterating events().
+        try:
+            insert_pipeline_run(self.run_id, opts.conversation_id)
+        except Exception as exc:  # noqa: BLE001
+            yield PipelineEvent(
+                type="error",
+                error=(f"failed to record pipeline run "
+                       f"(conversation_id={opts.conversation_id!r}): "
+                       f"{type(exc).__name__}: {exc}"),
+            )
+            return
 
         # Cross-turn memory: rehydrate scratchpad from prior turns of this
         # conversation before any role/router call goes out, so they see
