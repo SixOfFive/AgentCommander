@@ -97,6 +97,13 @@ class OllamaProvider(ProviderBase):
             data = _get_json(f"{self.endpoint}/api/tags", timeout=10.0)
         except urllib.error.URLError as exc:
             raise ProviderError(f"Ollama /api/tags failed: {exc}") from exc
+        except (ValueError, OSError) as exc:
+            # ValueError covers JSONDecodeError (it's a subclass) for when
+            # the daemon returns non-JSON (HTML error page, truncated body,
+            # corrupt response). Wrap so callers can catch ProviderError as
+            # a single contract instead of leaking ``json.decoder``
+            # internals.
+            raise ProviderError(f"Ollama /api/tags returned invalid response: {exc}") from exc
 
         models = data.get("models", []) if isinstance(data, dict) else []
         out: list[dict[str, Any]] = []
