@@ -135,7 +135,29 @@ class OllamaProvider(ProviderBase):
             options["temperature"] = temperature
         if max_tokens is not None:
             options["num_predict"] = max_tokens
+        # Validate num_ctx — Ollama silently re-loads the model with weird
+        # contexts (or fails opaquely deep in the C runtime) when given
+        # garbage. A few caller bugs we've seen produce strings ("32k"),
+        # negatives, zero, or absurdly huge values. Reject non-int or
+        # out-of-range values up front so the error message points at us
+        # rather than at a daemon stack trace 30s into the call.
         if num_ctx is not None:
+            if isinstance(num_ctx, bool) or not isinstance(num_ctx, int):
+                raise ProviderError(
+                    f"num_ctx must be a positive int (got {type(num_ctx).__name__}: {num_ctx!r})"
+                )
+            if num_ctx <= 0:
+                raise ProviderError(
+                    f"num_ctx must be > 0 (got {num_ctx})"
+                )
+            # 16M tokens is far above any current model's training cap.
+            # Beyond this is almost certainly a unit mistake (KB vs tokens)
+            # or a runaway computation. Cap at 16M so we never accidentally
+            # ask Ollama to allocate gigabytes of KV-cache.
+            if num_ctx > 16_000_000:
+                raise ProviderError(
+                    f"num_ctx too large ({num_ctx}); max 16,000,000"
+                )
             options["num_ctx"] = num_ctx
 
         body: dict[str, Any] = {
