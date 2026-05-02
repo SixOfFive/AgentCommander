@@ -641,8 +641,10 @@ class StatusBar:
 
         if not supports_color():
             if left_w:
-                return left_plain + "  " + (" " * right_width) + plain
-            return (" " * right_width) + plain
+                out = left_plain + "  " + (" " * right_width) + plain
+            else:
+                out = (" " * right_width) + plain
+            return _cap_visible_width(out, cols)
 
         # Re-render with ANSI so the role marker pops.
         styled_role = style("accent", role_part) if role_part else ""
@@ -657,8 +659,37 @@ class StatusBar:
         styled = sep.join(styled_parts)
 
         if left_w:
-            return left_styled + "  " + (" " * right_width) + styled
-        return (" " * right_width) + styled
+            out = left_styled + "  " + (" " * right_width) + styled
+        else:
+            out = (" " * right_width) + styled
+        # For the styled path we can't trim by raw length without
+        # mid-escape cuts; instead trim from the PLAIN-text width by
+        # mapping plain length back to cols. We pass len(plain)+left_w+2
+        # as the "logical width" and only truncate when that exceeds cols.
+        plain_total = len(plain) + (left_w + 2 if left_w else 0)
+        if cols > 0 and plain_total > cols:
+            # Fallback: truncate the styled output by plain text width.
+            # We re-compose without the role/model label since that's
+            # where the long content lives. Drop left segments too.
+            return _cap_visible_width(plain, cols)
+        return out
+
+
+def _cap_visible_width(s: str, cols: int) -> str:
+    """Truncate ``s`` so its character count doesn't exceed ``cols``.
+
+    Used to enforce the bottom row never overflows the terminal width
+    (a 500-char model name in a status row, a 5-col headless tty, etc).
+    Ellipsis on the LEFT so the run timer and ctx — the most recently-
+    updated info — stay visible on the right.
+    """
+    if cols <= 0:
+        return ""
+    if len(s) <= cols:
+        return s
+    if cols == 1:
+        return "…"
+    return "…" + s[-(cols - 1):]
 
 
 def _humanize(n: int | None) -> str:
