@@ -6,6 +6,7 @@ etc.) and emits formatted lines that match Claude Code's linux look.
 from __future__ import annotations
 
 import textwrap
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -20,6 +21,15 @@ from agentcommander.tui.ansi import (
     writeln,
 )
 from agentcommander.tui.markdown import render_markdown
+from agentcommander.tui.popouts import (
+    PopoutBlock,
+    add_delta as _popout_add_delta,
+    begin_block as _popout_begin,
+    finalize_block as _popout_finalize,
+    is_popout_role,
+    render_collapse as _popout_render_collapse,
+    get_registry as _popout_registry,
+)
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────
@@ -117,7 +127,28 @@ def render_error(text: str) -> None:
 # ─── Pipeline events ───────────────────────────────────────────────────────
 
 
-_streaming_state: dict = {"role": None, "had_chars": False}
+_streaming_state: dict = {"role": None, "had_chars": False,
+                          "block": None, "started_at": 0.0}
+
+# Bridge from on_role_end (which has the authoritative token counts) to
+# the role/error PipelineEvent (which doesn't carry usage). The
+# callback writes here keyed by role name; the event handler reads and
+# clears. Multiple concurrent role-calls of the same role can't overlap
+# because the engine is single-threaded per pipeline run.
+_pending_role_usage: dict[str, dict[str, int]] = {}
+
+
+def note_role_end_for_popout(role: str, *, prompt_tokens: int,
+                              completion_tokens: int) -> None:
+    """Called from app.py's ``_on_role_end`` so the role-event handler
+    can finalize the popout with real token counts. The numbers come
+    from the provider's response (Ollama ``eval_count`` / OpenRouter
+    ``usage.completion_tokens``) so they're authoritative.
+    """
+    _pending_role_usage[role] = {
+        "prompt": int(prompt_tokens or 0),
+        "completion": int(completion_tokens or 0),
+    }
 
 
 # Strip every ANSI escape from streamed model output. The renderer wraps
@@ -180,6 +211,14 @@ def render_role_delta(role: str, delta: str) -> None:
             write("    ")
             _streaming_state["role"] = role
             _streaming_state["had_chars"] = False
+            _streaming_state["started_at"] = time.time()
+            # Open a popout block for sub-agent roles. Orchestrator and
+            # router stream as before — they're either the user-facing
+            # reply (orchestrator) or too short to bother (router).
+            if is_popout_role(role):
+                _streaming_state["block"] = _popout_begin(role)
+            else:
+                _streaming_state["block"] = None
         # Replace newlines with newline + indent so streamed prose stays
         # aligned with the role's indent.
         if "\n" in delta:
@@ -194,6 +233,11 @@ def render_role_delta(role: str, delta: str) -> None:
         else:
             write(style("assistant_text", delta))
             _streaming_state["had_chars"] = True
+        # Track everything streamed so collapse() can erase the right
+        # number of rows AND so /popout <id> can re-print on expand.
+        block = _streaming_state["block"]
+        if block is not None:
+            _popout_add_delta(block, delta)
 
 
 def _close_streaming() -> None:
@@ -201,6 +245,31 @@ def _close_streaming() -> None:
         writeln()
     _streaming_state["role"] = None
     _streaming_state["had_chars"] = False
+    _streaming_state["block"] = None
+    _streaming_state["started_at"] = 0.0
+
+
+def _finalize_active_popout(*, ok: bool, error: str = "") -> PopoutBlock | None:
+    """Pull the in-flight popout block off ``_streaming_state``, finalize
+    it with token counts (from the on_role_end bridge) + duration, and
+    return it. The caller decides whether to render the collapsed
+    summary. Returns None when no popout was active (e.g. orchestrator,
+    or no streaming happened).
+    """
+    block = _streaming_state.get("block")
+    if block is None:
+        return None
+    started = _streaming_state.get("started_at") or 0.0
+    duration_ms = int(max(0.0, (time.time() - started)) * 1000) if started else 0
+    usage = _pending_role_usage.pop(block.role, {})
+    _popout_finalize(
+        block, ok=ok,
+        prompt_tokens=usage.get("prompt", 0),
+        completion_tokens=usage.get("completion", 0),
+        duration_ms=duration_ms,
+        error=error,
+    )
+    return block
 
 
 def render_event(evt: PipelineEvent) -> None:
@@ -231,16 +300,43 @@ def _render_event_inner(evt: PipelineEvent) -> None:
         # The role just completed. If we streamed it live, re-render the full
         # output with markdown. Otherwise (no streaming) print plain.
         had_streaming = _streaming_state["had_chars"] and _streaming_state["role"] == evt.role
+        # Capture the popout block (if any) BEFORE _close_streaming clears it.
+        active_block = _finalize_active_popout(ok=True) if is_popout_role(evt.role) else None
         _close_streaming()
-        if not had_streaming:
+        if active_block is not None:
+            # Sub-agent role: snap to a single collapsed summary line.
+            # Per spec, ok-on-completion always defaults to collapsed.
+            _popout_render_collapse(active_block)
+        elif is_popout_role(evt.role) and not had_streaming:
+            # Replay path: this is a historical sub-agent role call — no
+            # streaming happened (deltas were skipped during replay). Build
+            # a synthetic collapsed block from the event so the user sees
+            # ▶ <role>-<n> [stats · ok] in the transcript and can /popout
+            # <id> to view the full output.
+            synthetic = _popout_begin(evt.role or "?")
+            if evt.output:
+                _popout_add_delta(synthetic, evt.output)
+            _popout_finalize(
+                synthetic, ok=True,
+                prompt_tokens=0,
+                completion_tokens=len((evt.output or "").split()),  # rough
+                duration_ms=0,
+            )
+            # Replay blocks are scrolled context, no streamed lines to erase
+            synthetic.in_viewport = False
+            from agentcommander.tui.popouts import render_summary_line
+            writeln(render_summary_line(synthetic))
+        elif not had_streaming:
+            # Orchestrator / router replay: header + output as before.
             writeln()
             writeln(style("role_label", f"  ▸ {evt.role}"))
             if evt.output:
                 from agentcommander.tui.markdown import render_markdown
                 writeln(render_markdown(_short(evt.output, 4000), indent="    "))
-        # If streaming did happen, the live render is already on screen —
-        # don't duplicate. (For long polished output, the assistant message
-        # at the end of the run will markdown-render the same content.)
+        # If streaming did happen for orchestrator/router, the live render is
+        # already on screen — don't duplicate. (For long polished output, the
+        # assistant message at the end of the run will markdown-render the
+        # same content.)
     elif evt.type == "role_delta":
         render_role_delta(evt.role or "?", evt.delta or "")
     elif evt.type == "tool":
@@ -299,6 +395,21 @@ def _render_event_inner(evt: PipelineEvent) -> None:
         if evt.final:
             render_assistant_message(evt.final)
     elif evt.type == "error":
+        # Errored role: finalize the popout (if any) but DON'T collapse —
+        # spec says failed agents stay expanded by default so the user
+        # sees the error inline. The error line is still rendered below.
+        if evt.role and is_popout_role(evt.role):
+            block = _finalize_active_popout(ok=False, error=evt.error or "")
+            if block is not None:
+                # Append the summary line under the streamed content so
+                # the user can collapse it later (Tab + Space, click, or
+                # /popout <id>) when they're done reading.
+                _close_streaming()
+                from agentcommander.tui.popouts import render_summary_line
+                writeln(render_summary_line(block))
+                writeln(style("error", f"  ⚠ {evt.error}"))
+                writeln()
+                return
         _close_streaming()
         writeln()
         writeln(style("error", f"  ⚠ {evt.error}"))

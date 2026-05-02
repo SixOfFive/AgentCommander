@@ -115,6 +115,65 @@ def cmd_clear(ctx: CommandContext, _args: list[str]) -> None:
     write(CLEAR_SCREEN)
 
 
+def cmd_popout(ctx: CommandContext, args: list[str]) -> None:
+    """Toggle, list, or bulk-modify role popouts.
+
+    Subcommands:
+      /popout                 — list all popouts in the current run
+      /popout list            — same as no-arg
+      /popout <id>            — toggle one block (e.g. /popout researcher-2)
+      /popout expand all      — expand every collapsed block
+      /popout collapse all    — collapse every expanded block
+    """
+    from agentcommander.tui.popouts import (
+        get_registry, list_block_summaries, toggle_block,
+        render_collapse, render_expand_inline,
+    )
+
+    # No args, or "list": show every popout's id, role, status, summary.
+    if not args or args[0].lower() == "list":
+        rows = list_block_summaries()
+        if not rows:
+            render_system_line(style("muted",
+                "(no popouts yet — run a turn that uses sub-agent roles)"))
+            return
+        headers = ["id", "role", "status", "detail"]
+        body = [[r[0], r[1], r[2], r[3]] for r in rows]
+        render_table(headers, body)
+        return
+
+    sub = args[0].lower()
+    target = args[1].lower() if len(args) > 1 else ""
+
+    # Bulk operations
+    if sub in ("expand", "collapse") and target == "all":
+        reg = get_registry()
+        with reg.lock:
+            blocks = list(reg.blocks)
+        n = 0
+        for b in blocks:
+            if b.status == "running":
+                continue
+            if sub == "expand" and b.collapsed:
+                render_expand_inline(b)
+                n += 1
+            elif sub == "collapse" and not b.collapsed:
+                # If the block was streamed earlier in the session it may
+                # have already scrolled off — render_collapse handles
+                # that gracefully (just appends the summary).
+                render_collapse(b)
+                n += 1
+        verb = "expanded" if sub == "expand" else "collapsed"
+        render_system_line(style("muted", f"  {verb} {n} block(s)"))
+        return
+
+    # Single-id toggle
+    block_id = args[0]
+    if not toggle_block(block_id):
+        render_system_line(style("warn",
+            f"  unknown popout id: {block_id}  (try /popout list)"))
+
+
 def cmd_workdir(ctx: CommandContext, args: list[str]) -> None:
     from agentcommander.db.repos import set_config
     if not args:
@@ -2036,6 +2095,35 @@ def _build_registry() -> dict[str, SlashCommand]:
                     "to it. The first message you send afterward is logged under the "
                     "new conversation. Title is optional; defaults to \"New conversation\".",
             examples=("/new", "/new Bug repro for fetch timeout"),
+        ),
+        SlashCommand(
+            name="/popout", aliases=("/po",),
+            summary="toggle, list, or bulk-manage sub-agent role popouts",
+            handler=cmd_popout,
+            usage=(
+                "/popout                 # list all popouts in this run\n"
+                "/popout list            # same as no-arg\n"
+                "/popout <id>            # toggle one block (e.g. /popout researcher-2)\n"
+                "/popout expand all      # expand every collapsed block\n"
+                "/popout collapse all    # collapse every expanded block"
+            ),
+            details=(
+                "Each sub-agent role-call (researcher, coder, reviewer, planner, "
+                "summarizer, etc.) gets its own collapsible block in the live "
+                "view. Block ids are <role>-<n> where n is the 1-indexed call "
+                "order in the current run. Successful blocks default to "
+                "collapsed; failed blocks stay expanded so you can see the "
+                "error inline. Mouse-click on the summary line and Tab/Space "
+                "keyboard navigation also toggle blocks. Tool calls inside a "
+                "popout (write_file, fetch, execute, etc.) stay visible "
+                "regardless of collapse state — they have observable side "
+                "effects you already saw fire."
+            ),
+            examples=(
+                "/popout",
+                "/popout researcher-2",
+                "/popout expand all",
+            ),
         ),
     ]
     out: dict[str, SlashCommand] = {}

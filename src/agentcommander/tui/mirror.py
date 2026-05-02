@@ -220,8 +220,33 @@ def _render_event(evt: dict[str, Any], active_conv_id: str | None) -> None:
 
     if et == "role/end":
         # Streaming closes naturally on the next role-start or the final.
-        # If we want a visible boundary marker, primary's engine/done event
-        # will render the assistant message via assistant/final.
+        # For sub-agent roles we ALSO need to finalize the popout block
+        # the mirror created on first delta and collapse it — mirror has
+        # its own popout registry (separate process from primary), so
+        # collapse state is tracked locally per-viewer.
+        role = payload.get("role") or ""
+        from agentcommander.tui.popouts import (
+            is_popout_role, get_registry, finalize_block, render_collapse,
+        )
+        from agentcommander.tui.render import _close_streaming
+        if is_popout_role(role):
+            reg = get_registry()
+            # The most-recent block of this role IS the one that just ended
+            # (mirror processes events serially; only one role streams at a
+            # time per pipeline run).
+            with reg.lock:
+                block = next((b for b in reversed(reg.blocks)
+                               if b.role == role and b.status == "running"),
+                              None)
+            if block is not None:
+                _close_streaming()
+                finalize_block(
+                    block, ok=True,
+                    prompt_tokens=int(payload.get("prompt_tokens") or 0),
+                    completion_tokens=int(payload.get("completion_tokens") or 0),
+                    duration_ms=int(payload.get("duration_ms") or 0),
+                )
+                render_collapse(block)
         return
 
     if et.startswith("engine/"):
@@ -263,7 +288,29 @@ def _render_event(evt: dict[str, Any], active_conv_id: str | None) -> None:
                 writeln("    " + snippet.replace("\n", "\n    "))
             return
         if kind == "error":
-            writeln(style("error", f"  ⚠ {payload.get('error') or 'error'}"))
+            # Sub-agent errors stay EXPANDED in the popout. Finalize the
+            # in-flight block (if any) so its summary line shows the
+            # truncated error, but don't collapse the streamed content.
+            err_role = payload.get("role") or ""
+            err_text = payload.get("error") or "error"
+            from agentcommander.tui.popouts import (
+                is_popout_role, get_registry, finalize_block,
+                render_summary_line,
+            )
+            from agentcommander.tui.render import _close_streaming
+            if err_role and is_popout_role(err_role):
+                reg = get_registry()
+                with reg.lock:
+                    block = next((b for b in reversed(reg.blocks)
+                                   if b.role == err_role and b.status == "running"),
+                                  None)
+                if block is not None:
+                    _close_streaming()
+                    finalize_block(block, ok=False, error=err_text)
+                    writeln(render_summary_line(block))
+                    writeln(style("error", f"  ⚠ {err_text}"))
+                    return
+            writeln(style("error", f"  ⚠ {err_text}"))
             return
         # done is handled via assistant/final tee; ignore here.
         return
@@ -316,6 +363,11 @@ def run_mirror() -> int:
     bar.set_workdir(str(Path.cwd()))
     bar.set_mirror_mode(True)
     bar.install()
+    # Mirror gets click-to-toggle popouts too. Each viewer has its own
+    # collapsed-state map (separate process), so two watchers can have
+    # different things expanded.
+    from agentcommander.tui.mouse_input import enable_mouse_mode
+    enable_mouse_mode()
 
     render_banner(
         version=__version__,
@@ -438,6 +490,27 @@ def run_mirror() -> int:
                 # ── 4. Handle input ───────────────────────────────────
                 chunk = poll_chars()
                 if chunk:
+                    # Strip mouse reports first; route any clicks to the
+                    # local popout registry. Mirror only reacts to clicks,
+                    # not keyboard nav (no Tab/Space — keeps the read-only
+                    # promise visually obvious).
+                    from agentcommander.tui.mouse_input import parse_mouse_events
+                    chunk, mouse_events = parse_mouse_events(chunk)
+                    for ev in mouse_events:
+                        if ev.pressed and ev.button == 0:
+                            from agentcommander.tui.popouts import (
+                                get_registry, toggle_block,
+                            )
+                            reg = get_registry()
+                            target = reg.focus_id
+                            if target is None:
+                                with reg.lock:
+                                    for b in reversed(reg.blocks):
+                                        if b.status != "running":
+                                            target = b.id
+                                            break
+                            if target is not None:
+                                toggle_block(target)
                     typed, line = _drain_input(typed, chunk)
                     # Echo the in-flight buffer to the input row so the
                     # user can see what they're typing — without this they
@@ -468,6 +541,8 @@ def run_mirror() -> int:
                 continue
 
     bar.uninstall()
+    from agentcommander.tui.mouse_input import disable_mouse_mode
+    disable_mouse_mode()
     write(SHOW_CURSOR)
     writeln(style("muted",
         "  mirror exited (primary unaffected — its loaded models stay)"))
