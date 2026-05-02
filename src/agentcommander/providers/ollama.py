@@ -282,13 +282,11 @@ class OllamaProvider(ProviderBase):
             # Ollama rarely rate-limits (it's local), but a remote daemon
             # behind a proxy could; surface it cleanly when it happens.
             if exc.code == 429:
+                # Robust Retry-After parsing — handles seconds AND HTTP-date
+                # formats per RFC 7231, clamps negatives to 0, returns None
+                # on any parse failure (engine then uses its own backoff).
                 retry_hdr = exc.headers.get("Retry-After") if exc.headers else None
-                retry_after: float | None = None
-                if retry_hdr:
-                    try:
-                        retry_after = float(retry_hdr)
-                    except (TypeError, ValueError):
-                        retry_after = None
+                retry_after = _parse_retry_after(retry_hdr)
                 raise ProviderRateLimited(
                     f"Ollama rate-limited: HTTP {exc.code}",
                     retry_after=retry_after,
