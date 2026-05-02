@@ -63,6 +63,14 @@ _PATTERNS: list[tuple[re.Pattern[str], Severity, str]] = [
      "suspicious", "jailbreak keyword"),
     (re.compile(r"this\s+is\s+(?:a\s+)?(?:test|drill|safe\s+space|hypothetical),\s*(?:you|please|ignore)", re.IGNORECASE),
      "suspicious", "hypothetical framing"),
+    # Role-label mimicry: tool output that looks like AgentCommander's own
+    # role boundary markers (``▸ orchestrator`` / ``▶ researcher-2 [...]``
+    # / ``● AgentCommander``). A fetched page containing these can trick a
+    # watching user into believing the agent itself emitted them. The
+    # detector flags the pattern; downstream the orchestrator can decide
+    # to wrap suspect tool output in a literal-quote block before re-feeding.
+    (re.compile(r"(?:^|\n)\s*[▸▶▼●]\s+(?:orchestrator|router|researcher|coder|reviewer|planner|summarizer|critic|tester|debugger|architect|refactorer|translator|data_analyst|preflight|postmortem|AgentCommander)", re.IGNORECASE),
+     "suspicious", "role-label mimicry in observed text"),
 ]
 
 _ZERO_WIDTH = re.compile(r"[​-‍﻿]")
