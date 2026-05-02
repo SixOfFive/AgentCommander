@@ -531,21 +531,22 @@ def vote_after_failure(tier: str, failed_model: str, role: str) -> int:
     _check_tier(tier)
     if not failed_model or not role:
         return 0
-    catalog = load(tier)
-    models = catalog["_models"]
-    if failed_model not in models:
-        models[failed_model] = _empty_model_entry()
-    stats = _ensure_role_stats(models[failed_model], role)
-    stats["score"] = max(VOTE_MIN,
-                         int(stats.get("score", 0)) - VOTE_INCREMENT)
-    stats["rate_limits"] = int(stats.get("rate_limits", 0)) + 1
-    stats["runs"] = int(stats.get("runs", 0)) + 1
-    now_ms = int(time.time() * 1000)
-    stats["lastBumpAt"] = now_ms
-    catalog["_meta"]["voteCount"] = int(catalog["_meta"].get("voteCount", 0)) + 1
-    catalog["_meta"]["lastVoteAt"] = now_ms
-    save(tier, catalog)
-    return int(stats["score"])
+    with _catalog_lock:
+        catalog = load(tier)
+        models = catalog["_models"]
+        if failed_model not in models:
+            models[failed_model] = _empty_model_entry()
+        stats = _ensure_role_stats(models[failed_model], role)
+        stats["score"] = max(VOTE_MIN,
+                             int(stats.get("score", 0)) - VOTE_INCREMENT)
+        stats["rate_limits"] = int(stats.get("rate_limits", 0)) + 1
+        stats["runs"] = int(stats.get("runs", 0)) + 1
+        now_ms = int(time.time() * 1000)
+        stats["lastBumpAt"] = now_ms
+        catalog["_meta"]["voteCount"] = int(catalog["_meta"].get("voteCount", 0)) + 1
+        catalog["_meta"]["lastVoteAt"] = now_ms
+        save(tier, catalog)
+        return int(stats["score"])
 
 
 def vote_after_failure_for_provider(provider_type: str | None,
