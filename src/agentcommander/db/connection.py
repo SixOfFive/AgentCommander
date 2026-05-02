@@ -347,9 +347,12 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             "fixed": False,
         }
 
-    _db = conn
+    # Wrap in the locked proxy so subsequent multi-thread access (engine
+    # worker thread tee'ing events while main thread writes bar state)
+    # serializes correctly.
+    _db = _LockedConnection(conn)
     _db_path = target
-    return conn
+    return _db
 
 
 def init_db_readonly(db_path: Path | str) -> sqlite3.Connection:
