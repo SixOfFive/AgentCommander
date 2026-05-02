@@ -256,56 +256,61 @@ def populate_from_openrouter(tier: str,
     upstream are kept (votes still apply if upstream un-deprecates).
 
     Returns the number of models in the catalog after populate.
+
+    Wrapped in ``_catalog_lock`` so concurrent populate calls (or a
+    populate racing against a vote) don't lose each other's writes.
+    The load → mutate → save cycle is otherwise non-atomic and last-writer
+    wins on the file would silently drop entries.
     """
     _check_tier(tier)
-    catalog = load(tier)
-    models = catalog["_models"]
-
     free_filter = (tier == TIER_FREE)
+    with _catalog_lock:
+        catalog = load(tier)
+        models = catalog["_models"]
 
-    for m in openrouter_models:
-        if not isinstance(m, dict):
-            continue
-        mid = m.get("id") or ""
-        if not mid:
-            continue
-        is_free = mid.endswith(":free")
-        if free_filter and not is_free:
-            continue
-        if not free_filter and is_free:
-            continue
+        for m in openrouter_models:
+            if not isinstance(m, dict):
+                continue
+            mid = m.get("id") or ""
+            if not mid:
+                continue
+            is_free = mid.endswith(":free")
+            if free_filter and not is_free:
+                continue
+            if not free_filter and is_free:
+                continue
 
-        entry = models.get(mid) or _empty_model_entry()
+            entry = models.get(mid) or _empty_model_entry()
 
-        # Metadata (overwrite — these change on upstream model updates)
-        entry["name"] = m.get("name") or m.get("canonical_slug") or mid
-        # OR exposes context_length at root AND nested under top_provider.
-        # Prefer top_provider's value when present (it's the cap that the
-        # actual upstream provider honors; the root one can be a hint).
-        ctx = m.get("context_length")
-        tp = m.get("top_provider") if isinstance(m.get("top_provider"), dict) else None
-        if tp and isinstance(tp.get("context_length"), int):
-            ctx = tp["context_length"]
-        entry["contextLength"] = ctx if isinstance(ctx, int) else None
-        if tp and isinstance(tp.get("max_completion_tokens"), int):
-            entry["max_completion_tokens"] = tp["max_completion_tokens"]
-        else:
-            entry["max_completion_tokens"] = None
-        pricing = m.get("pricing") if isinstance(m.get("pricing"), dict) else {}
-        # Prices are returned as strings for precision (e.g. "0.00000060");
-        # we store them as-is and let the UI format.
-        entry["pricing_prompt"] = pricing.get("prompt")
-        entry["pricing_completion"] = pricing.get("completion")
-        arch = m.get("architecture") if isinstance(m.get("architecture"), dict) else {}
-        entry["modality"] = arch.get("modality") or arch.get("input_modalities")
-        supported = m.get("supported_parameters")
-        entry["supported_params"] = supported if isinstance(supported, list) else []
+            # Metadata (overwrite — these change on upstream model updates)
+            entry["name"] = m.get("name") or m.get("canonical_slug") or mid
+            # OR exposes context_length at root AND nested under top_provider.
+            # Prefer top_provider's value when present (it's the cap that the
+            # actual upstream provider honors; the root one can be a hint).
+            ctx = m.get("context_length")
+            tp = m.get("top_provider") if isinstance(m.get("top_provider"), dict) else None
+            if tp and isinstance(tp.get("context_length"), int):
+                ctx = tp["context_length"]
+            entry["contextLength"] = ctx if isinstance(ctx, int) else None
+            if tp and isinstance(tp.get("max_completion_tokens"), int):
+                entry["max_completion_tokens"] = tp["max_completion_tokens"]
+            else:
+                entry["max_completion_tokens"] = None
+            pricing = m.get("pricing") if isinstance(m.get("pricing"), dict) else {}
+            # Prices are returned as strings for precision (e.g. "0.00000060");
+            # we store them as-is and let the UI format.
+            entry["pricing_prompt"] = pricing.get("prompt")
+            entry["pricing_completion"] = pricing.get("completion")
+            arch = m.get("architecture") if isinstance(m.get("architecture"), dict) else {}
+            entry["modality"] = arch.get("modality") or arch.get("input_modalities")
+            supported = m.get("supported_parameters")
+            entry["supported_params"] = supported if isinstance(supported, list) else []
 
-        models[mid] = entry
+            models[mid] = entry
 
-    catalog["_meta"]["lastFetchedAt"] = int(time.time() * 1000)
-    save(tier, catalog)
-    return len(models)
+        catalog["_meta"]["lastFetchedAt"] = int(time.time() * 1000)
+        save(tier, catalog)
+        return len(models)
 
 
 def record_vote(tier: str, model_id: str, role: str, *,
