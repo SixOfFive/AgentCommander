@@ -991,6 +991,23 @@ def read_line_at_bottom(prompt_text: str = "❯ ") -> str | None:
                     interrupted = True
                     break
 
+                # Strip xterm SGR mouse reports out of the chunk before
+                # autocomplete sees it — without this, click escapes (which
+                # look like CSI sequences with a ``<`` parameter byte) get
+                # silently dropped by parse_events and the user thinks
+                # mouse mode is broken. We dispatch the click locally to
+                # the popout registry, then repaint the input row so the
+                # cursor lands back on the bottom prompt.
+                from agentcommander.tui.mouse_input import parse_mouse_events
+                chunk, mouse_events = parse_mouse_events(chunk)
+                if mouse_events:
+                    for ev in mouse_events:
+                        if ev.pressed and ev.button == 0:
+                            _bottom_prompt_handle_click(ev.x, ev.y)
+                    # Mouse-triggered expand prints content into the scroll
+                    # region; redraw the prompt so the user can keep typing.
+                    _paint_input_row(prompt_text, buffer, cols, input_row)
+
                 events = parse_events(chunk)
                 if not events:
                     continue
