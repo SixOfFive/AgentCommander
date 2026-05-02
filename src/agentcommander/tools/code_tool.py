@@ -127,6 +127,100 @@ def _truncate(text: str, max_bytes: int = MAX_OUTPUT_BYTES) -> tuple[str, bool]:
     return f"{head}\n... [output truncated] ...\n{tail}", True
 
 
+def _execute_package_manager(language: str, packages: str, ctx: ToolContext,
+                              timeout_s: int) -> ToolResult:
+    """Dispatch ``pip`` / ``npm`` install commands.
+
+    Shape per ORCHESTRATOR.md: ``{"action":"execute","language":"pip",
+    "input":"requests pandas numpy"}``. ``packages`` is the space-separated
+    package list. We run it as ``python -m pip install <pkgs>`` (pip) or
+    ``npm install <pkgs>`` (npm) with the same permission gate, timeout,
+    and danger-scan as regular execute.
+    """
+    pkgs = packages.strip().split()
+    if not pkgs:
+        return ToolResult(ok=False, error=f"{language}: no packages specified")
+    # Conservative validation — package names should not contain shell
+    # metacharacters. Block obvious injection attempts before we shell
+    # out. ``--flag`` style options are allowed.
+    for p in pkgs:
+        if any(ch in p for ch in (";", "|", "&", "`", "$", "\n", "\r")):
+            return ToolResult(
+                ok=False,
+                error=f"{language}: rejected package spec containing shell metachar: {p!r}",
+            )
+
+    try:
+        cwd = require_working_directory(ctx.working_directory)
+    except Exception as exc:  # noqa: BLE001
+        return ToolResult(ok=False, error=str(exc))
+
+    try:
+        from agentcommander.tui.permissions import request_permission
+        request_permission(cwd, "execute")  # type: ignore[arg-type]
+    except Exception as exc:
+        if type(exc).__name__ == "PermissionDenied":
+            raise
+        # other exceptions: fall through, don't block
+
+    if language == "pip":
+        py = _resolve_python_cmd()
+        if py is None:
+            return ToolResult(
+                ok=False,
+                error="pip: no Python interpreter on PATH",
+            )
+        cmd = [*py, "-m", "pip", "install", *pkgs]
+    elif language == "npm":
+        npm = shutil.which("npm")
+        if npm is None:
+            return ToolResult(
+                ok=False,
+                error="npm: not found on PATH (install Node.js)",
+            )
+        cmd = [npm, "install", *pkgs]
+    else:
+        return ToolResult(ok=False, error=f"unknown package manager: {language}")
+
+    cmd = _wrap_with_prlimit(cmd)
+    timeout_s = max(1, min(int(timeout_s), MAX_TIMEOUT_S))
+
+    try:
+        proc = subprocess.run(
+            cmd, cwd=cwd, capture_output=True, text=True,
+            timeout=timeout_s, check=False,
+        )
+    except FileNotFoundError as exc:
+        return ToolResult(ok=False,
+                          error=f"package manager not found: {cmd[0]} ({exc})")
+    except subprocess.TimeoutExpired as exc:
+        out = (exc.stdout or "")[:2000]
+        err = (exc.stderr or "")[:2000]
+        return ToolResult(
+            ok=False, error=f"timed out after {timeout_s}s",
+            output=f"--- stdout ---\n{out}\n--- stderr ---\n{err}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        return ToolResult(ok=False, error=f"spawn failed: {exc}")
+
+    stdout_part, t_out = _truncate(proc.stdout or "")
+    stderr_part, t_err = _truncate(proc.stderr or "")
+    truncated = t_out or t_err
+    combined = "\n".join(filter(None, [
+        f"--- stdout ---\n{stdout_part}" if stdout_part else "",
+        f"--- stderr ---\n{stderr_part}" if stderr_part else "",
+        "--- output truncated ---" if truncated else "",
+    ]))
+
+    if proc.returncode == 0:
+        return ToolResult(ok=True, output=combined or f"{language}: installed {len(pkgs)} package(s)",
+                          data={"exit_code": 0, "packages": pkgs})
+    return ToolResult(
+        ok=False, error=f"{language} install failed: exit code {proc.returncode}",
+        output=combined, data={"exit_code": proc.returncode},
+    )
+
+
 def _execute(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
     language = payload.get("language", "")
     code = payload.get("code", payload.get("input", ""))
