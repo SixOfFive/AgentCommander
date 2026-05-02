@@ -42,7 +42,10 @@ _REJECT_PATTERNS_USER: list[tuple[re.Pattern[str], str]] = [
 ]
 
 _REJECT_PATTERNS_PROVIDER: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"^\s*(file|javascript|data|gopher|jar|ldap|dict):", re.IGNORECASE),
+    # ftp is included here too — providers always speak HTTP(S); allowing
+    # ftp:// would let a misconfigured endpoint exfiltrate the api_key over
+    # cleartext. Same blocklist as user URLs minus the loopback bans.
+    (re.compile(r"^\s*(file|javascript|data|gopher|ftp|jar|ldap|dict):", re.IGNORECASE),
      "scheme not allowed"),
     (re.compile(r"(^|//)169\.254\.\d+\.\d+(:|/|$)"),
      "link-local 169.254.0.0/16 rejected (cloud metadata SSRF)"),
