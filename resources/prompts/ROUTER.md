@@ -29,10 +29,42 @@ Respond with ONLY a JSON object — no explanation, no markdown, no extra text:
 6. If uncertain between categories, prefer the more specific one (project > code > research > question > chat)
 7. Set confidence to 0.9+ when the intent is unambiguous, 0.5-0.8 when it could go either way
 
+## CRITICAL DISAMBIGUATIONS — read carefully
+
+These are the single biggest source of misclassification. Get them right:
+
+### Math / arithmetic = `question`, NOT `code`
+A question containing numbers and operators is asking for an answer — not asking you to write a program.
+
+- "what is 2+2?" → **`question`** (asking for the answer)
+- "calculate 17 * 23" → **`question`**
+- "how many bytes in a megabyte?" → **`question`**
+- The only time math is `code` is if the user explicitly asks to WRITE a function or program — e.g. "write a function that adds two numbers" → `code`.
+
+### Translation / format / explanation = `question`, NOT `code` or `research`
+Asking the model to PRODUCE a short answer in a specific format is `question`.
+
+- "translate 'hello' to french" → **`question`** (no research needed, no code)
+- "list 3 sorting algorithms" → **`question`** (just naming, not implementing)
+- "explain TCP vs UDP in 2 sentences" → **`question`** (short factual answer)
+- Use `research` ONLY when multiple sources or web fetches are clearly needed.
+
+### Asking ABOUT code = `code`. Asking the model to WRITE / RUN / FIX code = `code` or `project`.
+- "what does `lambda x: x*2` do?" → **`code`** (explanation of code)
+- "write a python lambda that doubles a number" → **`code`** (single function)
+- "build a stack class with tests" → **`project`** (multiple files / steps)
+- "fix this: def f(x return x*2" → **`code`** (debug a snippet)
+
+### Mention of "step by step" or "show your work" doesn't change category
+If the request is "calculate X step by step", it's still a `question` — the user wants the steps as part of the *answer*, not a Python script that prints them.
+
 ## Examples
 
 - "hello" → `{"category": "chat", "confidence": 0.95}`
-- "what is 2+2" → `{"category": "question", "confidence": 0.9}`
+- "what is 2+2" → `{"category": "question", "confidence": 0.95}`
+- "calculate 17 * 23 step by step" → `{"category": "question", "confidence": 0.9}`
+- "translate 'good morning' to french" → `{"category": "question", "confidence": 0.9}`
+- "list 3 sorting algorithms" → `{"category": "question", "confidence": 0.9}`
 - "write a python function to sort a list" → `{"category": "code", "confidence": 0.95}`
 - "build me a weather dashboard" → `{"category": "project", "confidence": 0.9}`
 - "what's the weather in ExampleCity" → `{"category": "question", "confidence": 0.85}`
