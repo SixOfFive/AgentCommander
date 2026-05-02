@@ -450,6 +450,13 @@ def _run_pipeline(state: dict, user_message: str) -> None:
     # IDs (researcher-1, researcher-2, ...) restart at 1 for this turn.
     from agentcommander.tui.popouts import get_registry as _get_popout_registry
     _get_popout_registry().reset()
+    # Also wipe render-side state. If the previous run aborted mid-role
+    # (Ctrl-C, /stop, exception), `_close_streaming` may not have fired,
+    # leaving `_streaming_state` pointing at an orphaned block. Without
+    # this clear, render_role_delta on the same role next turn would
+    # skip the "new role" branch and append into the dead block.
+    from agentcommander.tui.render import reset_render_state
+    reset_render_state()
 
     # Live tee: every engine event the user sees on this primary screen
     # also lands in `pipeline_events` for `ac --mirror` to replay.
