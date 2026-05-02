@@ -423,7 +423,21 @@ def init_db_readonly(db_path: Path | str) -> sqlite3.Connection:
     global _db, _db_path, _is_readonly
 
     if _db is not None:
-        return _db
+        # An existing connection only counts as "the readonly mirror DB"
+        # if it was actually opened in readonly mode AND points at the
+        # same file. Otherwise (a previous ``init_db`` left a WRITABLE
+        # connection in the global slot, or a different DB path is
+        # requested) we MUST refuse — silently returning a writable
+        # connection here would defeat the whole point of this function.
+        target = Path(db_path)
+        if (_is_readonly and _db_path is not None
+                and Path(_db_path).resolve() == target.resolve()):
+            return _db
+        raise RuntimeError(
+            "init_db_readonly: a different connection is already open "
+            f"(_is_readonly={_is_readonly}, _db_path={_db_path!r}). "
+            "Call close_db() before opening a different / readonly DB."
+        )
 
     target = Path(db_path)
     if not target.exists():
