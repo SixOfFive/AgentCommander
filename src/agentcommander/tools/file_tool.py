@@ -64,8 +64,37 @@ def _write_file(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
         safe = validate_file_access(path, ctx.working_directory, "write")
         _ask_permission(safe, "write")
         os.makedirs(os.path.dirname(safe) or ".", exist_ok=True)
-        with open(safe, "w", encoding="utf-8", newline="\n") as f:
-            f.write(content)
+        # Atomic write: stream into a sibling temp file, fsync, then
+        # ``os.replace`` to swap into place. If the process is killed,
+        # the disk fills, or any write step throws, the original target
+        # is untouched and only the .tmp is left behind. Without this,
+        # a mid-write OSError truncates the original — verified
+        # repeatable in stress test 13.
+        tmp = safe + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+                f.write(content)
+                # Force the bytes to disk before the rename — otherwise a
+                # crash between write() and replace() can leave the .tmp
+                # contents lost in OS page cache and the rename swaps in
+                # a zero-length file.
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except (OSError, AttributeError):
+                    # Some filesystems / platforms don't support fsync on
+                    # this fd type (e.g. tmpfs without backing); the rename
+                    # still gives directory-level atomicity, just without
+                    # the durability guarantee.
+                    pass
+            os.replace(tmp, safe)
+        except Exception:
+            # Clean up the tmp on failure so we don't leak partial files.
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
         rel = relative_to_workdir(safe, ctx.working_directory or "")
         ctx.audit("file.write", {"path": rel, "bytes": len(content)})
         return ToolResult(ok=True, output=f"Successfully wrote {len(content)} bytes to {rel}")

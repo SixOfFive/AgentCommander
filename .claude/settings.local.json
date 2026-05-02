@@ -86,7 +86,8 @@
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m pytest tests/ -q)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest discover -s tests -p 'test_*.py')",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_11.py)",
-      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_12.py)"
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_12.py)",
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_13.py)"
     ]
   }
 }
