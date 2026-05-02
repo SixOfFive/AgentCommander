@@ -326,28 +326,29 @@ def record_vote(tier: str, model_id: str, role: str, *,
     until the next ``populate_from_openrouter``.
     """
     _check_tier(tier)
-    catalog = load(tier)
-    models = catalog["_models"]
-    if model_id not in models:
-        models[model_id] = _empty_model_entry()
-    entry = models[model_id]
-    stats = _ensure_role_stats(entry, role)
+    with _catalog_lock:
+        catalog = load(tier)
+        models = catalog["_models"]
+        if model_id not in models:
+            models[model_id] = _empty_model_entry()
+        entry = models[model_id]
+        stats = _ensure_role_stats(entry, role)
 
-    if scope == "preferred":
-        delta = abs(increment)
-        stats["successes"] = int(stats.get("successes", 0)) + 1
-    elif scope == "avoid":
-        delta = -abs(increment)
-        stats["rate_limits"] = int(stats.get("rate_limits", 0)) + 1
-    else:
-        raise ValueError(f'scope must be "preferred" or "avoid"; got {scope!r}')
+        if scope == "preferred":
+            delta = abs(increment)
+            stats["successes"] = int(stats.get("successes", 0)) + 1
+        elif scope == "avoid":
+            delta = -abs(increment)
+            stats["rate_limits"] = int(stats.get("rate_limits", 0)) + 1
+        else:
+            raise ValueError(f'scope must be "preferred" or "avoid"; got {scope!r}')
 
-    stats["score"] = max(VOTE_MIN,
-                         min(VOTE_MAX, int(stats.get("score", 0)) + delta))
-    stats["runs"] = int(stats.get("runs", 0)) + 1
-    stats["lastBumpAt"] = int(time.time() * 1000)
-    catalog["_meta"]["voteCount"] = int(catalog["_meta"].get("voteCount", 0)) + 1
-    catalog["_meta"]["lastVoteAt"] = int(time.time() * 1000)
+        stats["score"] = max(VOTE_MIN,
+                             min(VOTE_MAX, int(stats.get("score", 0)) + delta))
+        stats["runs"] = int(stats.get("runs", 0)) + 1
+        stats["lastBumpAt"] = int(time.time() * 1000)
+        catalog["_meta"]["voteCount"] = int(catalog["_meta"].get("voteCount", 0)) + 1
+        catalog["_meta"]["lastVoteAt"] = int(time.time() * 1000)
     save(tier, catalog)
     return int(stats["score"])
 
