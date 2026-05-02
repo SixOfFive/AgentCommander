@@ -77,7 +77,8 @@
       "Bash(tee /tmp/stress_out.log)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_3.py)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_4.py)",
-      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_5.py)"
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_5.py)",
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_6.py)"
     ]
   }
 }
