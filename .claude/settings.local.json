@@ -94,7 +94,9 @@
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_16.py)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_17.py)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_18.py)",
-      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_19.py)"
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_19.py)",
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_20_real_models.py)",
+      "Bash(tee AgentTesting/round20_output.log)"
     ]
   }
 }
