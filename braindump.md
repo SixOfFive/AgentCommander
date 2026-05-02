@@ -366,20 +366,29 @@ Last updated end of session covering: chat resume + /chat family + minctx rename
 
 This block is the latest. Read it first if you're a future Claude resuming after compaction.
 
-## Where I'm leaving off
+## Where I'm leaving off — round-20 done; not yet successfully run end-to-end
 
-Mid-rewrite of `AgentTesting/stress_test_20_real_models.py` to use `AgentTesting/` as the workdir directly instead of a tempdir under it. **The user's concern: their OR api_key lives in the AgentTesting DB and must NEVER reach github.** Audit confirmed nothing sensitive is tracked (`git ls-files AgentTesting/` returns nothing; `*.sqlite` and `AgentTesting/` are both gitignored). The previous version of round-20 *replicated* providers (with api_keys) into a tempdir DB — also gitignored, but the user didn't want any copy at all. The new version opens the user's real DB directly so the api_key never moves.
+Round-20 file `AgentTesting/stress_test_20_real_models.py` is now CORRECT in design and should run end-to-end against the user's real models. **Do NOT introduce DB copying or `upsert_provider` from snapshot data when refactoring.** The user's OR api_key must stay in `AgentTesting/.agentcommander/db.sqlite` (gitignored three different ways). Audit confirms nothing sensitive is tracked.
 
-**State of round-20 file (`AgentTesting/stress_test_20_real_models.py`):**
-- ✅ DB-strategy comment block + atexit-cleanup hook + `GLOBAL_BUDGET_S=600`/`PER_TEST_BUDGET_S=30`/`PIPELINE_BUDGET_S=60` constants added at top
-- ✅ Bootstrap section rewritten: `os.chdir(AgentTesting/)`, single `init_db()`, `bootstrap_providers()`, no replication
-- ✅ Autoconfig section unchanged (still calls `apply_autoconfigure` then falls back to audit-log-derived bindings)
-- ⏳ **NOT DONE**: every `create_conversation(...)` call site in the test still needs to add `_CREATED_CONVERSATION_IDS.add(conv.id)` so the atexit cleanup actually deletes them
-- ⏳ **NOT DONE**: section H (10 pipeline tests, each up to 120s) needs to be cut down to 1 representative test with `PIPELINE_BUDGET_S` budget — without this, the test runs 10+ minutes hammering the 4070
-- ⏳ **NOT DONE**: per-test budget is declared but not actually enforced anywhere — need a thread-based watchdog or per-call `should_cancel` that fires after `PER_TEST_BUDGET_S`
-- ⏳ **NOT DONE**: rerun and verify models actually drive the 4070
+**HOW TO RUN**: from inside `AgentTesting/` (this is how the user invokes — `cd AgentTesting && py -3 stress_test_20_real_models.py`). The script uses `Path.cwd()` for the DB path; it does NOT chdir. So if you `cd` to AgentTesting/ first, it opens `AgentTesting/.agentcommander/db.sqlite` (the real DB with their providers + api_key). If you run from project root, it opens the empty project-root DB and almost everything SKIPs.
 
-To continue: pick up at the `# C. Per-role behavior` section, audit each `create_conversation` use, hook the cleanup tracker, then trim section H. Run with `PYTHONUTF8=1 PYTHONPATH=src py -3 AgentTesting/stress_test_20_real_models.py 2>&1 | tee AgentTesting/round20_output.log`. **Verify global timeout actually exits if anything hangs.** A previous run was killed manually (PID 24712/21680) for hammering the GPU 5+ min.
+```
+cd AgentTesting
+PYTHONUTF8=1 PYTHONPATH=../src py -3 stress_test_20_real_models.py 2>&1 | tee round20_output.log
+```
+
+**State of round-20 file:**
+- ✅ Uses `Path.cwd()` for the DB path — respects whatever directory user invokes from
+- ✅ Opens user's real DB via `init_db()`, no copy, no replication, api_key never moves
+- ✅ `bootstrap_providers()` called after `init_db()` (right ordering)
+- ✅ `apply_autoconfigure()` runs to populate in-memory role bindings; falls back to audit-log-derived bindings if catalog doesn't recognize installed models
+- ✅ `GLOBAL_BUDGET_S=600` / `_budget_cancel()` callable available; `section()` prints remaining time at every section header
+- ✅ Every `create_conversation(...)` wrapped with `_track(...)` — atexit hook deletes test data on exit (cascades to messages + scratchpad + pipeline_runs + pipeline_events via FK + the explicit pipeline_events sweep we added in `delete_conversation`)
+- ✅ Section H trimmed to ONE representative pipeline (H.76, max 60s); H.77–H.85 SKIP cleanly with a note explaining why
+- ✅ Clean failure path: if user's primary `ac` is running and holds the DB lock, the script exits with code 2 + a clear "stop primary first" message
+- ⏳ **NOT YET TESTED end-to-end against the real 4070** — every previous attempt died for unrelated reasons (DB at wrong path, factories not bootstrapped, runaway killed by user). The infrastructure should now be right; first run should succeed.
+
+To continue: just run it. If it hits a real bug, fix it. If it works cleanly, report results to the user.
 
 ## Tests added this session (rounds 11–19, all stress-tested, all passing)
 
