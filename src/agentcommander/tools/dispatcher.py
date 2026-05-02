@@ -178,6 +178,26 @@ def invoke(name: str, payload: dict[str, Any], *,
     if descriptor is None:
         return ToolResult(ok=False, error=f"unknown tool: {name}")
 
+    # Validate against the descriptor's input_schema BEFORE invoking the
+    # handler. Catches buggy model payloads (wrong field types, missing
+    # required keys, out-of-range integers, enum violations) with a clear
+    # ``path: reason`` message instead of letting the handler raise an
+    # opaque AttributeError 5 frames in. Tools without a schema (or with
+    # an empty {}) bypass this — opt-in safety, not enforcement.
+    if descriptor.input_schema:
+        # Tolerate non-dict payloads at the top level so we get the
+        # consistent "must be object" error rather than an AttributeError
+        # when the validator descends into ``properties``.
+        if not isinstance(payload, dict):
+            return ToolResult(
+                ok=False,
+                error=f"{name}: payload must be an object (got "
+                       f"{type(payload).__name__})",
+            )
+        err = _validate_payload(payload, descriptor.input_schema)
+        if err:
+            return ToolResult(ok=False, error=f"{name}: {err}")
+
     ctx = ToolContext(
         working_directory=working_directory,
         conversation_id=conversation_id,
