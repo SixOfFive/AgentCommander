@@ -17,22 +17,62 @@ from pathlib import Path
 import threading
 
 
+class _LockedCursor:
+    """Cursor proxy that holds the connection lock while fetching rows.
+
+    Without this, a cursor returned from ``execute()`` (under the lock)
+    could be iterated AFTER the lock was released — and if another
+    thread issued a new ``execute()`` in between, the cursor's internal
+    statement state would get clobbered, surfacing as ``fetchone()``
+    returning rows with ``None`` columns even though the schema says
+    NOT NULL. We saw this on concurrent ``record_throughput`` calls.
+    """
+
+    def __init__(self, cursor, lock) -> None:
+        object.__setattr__(self, "_cursor", cursor)
+        object.__setattr__(self, "_lock", lock)
+
+    def fetchone(self):
+        with self._lock:
+            return self._cursor.fetchone()
+
+    def fetchall(self):
+        with self._lock:
+            return self._cursor.fetchall()
+
+    def fetchmany(self, size=None):
+        with self._lock:
+            if size is None:
+                return self._cursor.fetchmany()
+            return self._cursor.fetchmany(size)
+
+    def __iter__(self):
+        # Materialize under the lock so iteration outside the lock is
+        # safe. Cheap for typical engine queries (handful to a few
+        # thousand rows). For multi-million-row pulls we'd want a
+        # different strategy — but that's not how repos.py is written.
+        with self._lock:
+            rows = list(self._cursor)
+        return iter(rows)
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+
 class _LockedConnection:
     """Thin proxy around sqlite3.Connection that serializes ``execute``,
-    ``executemany``, ``executescript``, ``commit``, and ``close``.
+    ``executemany``, ``executescript``, ``commit``, ``close``ALSO
+    fetches done on the returned cursor.
 
     Python's sqlite3 module is at threadsafety level 1: threads may share
-    the module, but NOT connections. With ``check_same_thread=False`` you
-    can SHARE a connection across threads, but you must serialize access
-    yourself — otherwise interleaved ``execute`` calls collide on
-    connection-level statement state and surface as cryptic
-    "bad parameter or other API misuse" errors (only some calls survive,
-    the rest fail).
+    the module, but NOT connections. Even with ``check_same_thread=False``
+    you must serialize ALL access — including fetches — because the
+    connection's prepared-statement state is shared. Wrapping cursors
+    through ``_LockedCursor`` keeps the lock held for fetch operations.
 
-    Wrapping every callable through an RLock fixes this without changing
-    any caller. RLock so a context that already holds the lock (e.g.
-    init_db's schema execute that runs while the lock is held) doesn't
-    self-deadlock when it nests.
+    RLock so a context that already holds the lock (e.g. init_db's schema
+    execute that runs while the lock is held) doesn't self-deadlock when
+    it nests.
     """
 
     def __init__(self, conn: sqlite3.Connection) -> None:
@@ -41,15 +81,18 @@ class _LockedConnection:
 
     def execute(self, *args, **kwargs):
         with self._lock:
-            return self._conn.execute(*args, **kwargs)
+            cur = self._conn.execute(*args, **kwargs)
+        return _LockedCursor(cur, self._lock)
 
     def executemany(self, *args, **kwargs):
         with self._lock:
-            return self._conn.executemany(*args, **kwargs)
+            cur = self._conn.executemany(*args, **kwargs)
+        return _LockedCursor(cur, self._lock)
 
     def executescript(self, *args, **kwargs):
         with self._lock:
-            return self._conn.executescript(*args, **kwargs)
+            cur = self._conn.executescript(*args, **kwargs)
+        return _LockedCursor(cur, self._lock)
 
     def commit(self):
         with self._lock:
