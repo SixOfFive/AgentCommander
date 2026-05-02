@@ -840,10 +840,12 @@ class PipelineRun:
             if not is_eligible(role_key, mid, e):
                 continue
             per_role = int(_stats(e).get("score", 0))
+            # Filter only on real vote evidence (matches pick_for_role).
+            # Capability bonus shapes ranking but doesn't exclude.
+            if per_role < 0:
+                continue
             bonus = score_match(role_key, mid, e)
             composite = per_role + bonus
-            if composite < 0:
-                continue
             candidates.append((mid, e, composite))
 
         if not candidates:
