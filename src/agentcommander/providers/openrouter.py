@@ -297,11 +297,16 @@ class OpenRouterProvider(ProviderBase):
                         # message before [DONE]. Fold it into a final chunk
                         # so the engine has token counts even when [DONE]
                         # follows a beat later.
+                        # Clamp negative / non-int counts to 0 — same
+                        # rationale as the Ollama provider: a misbehaving
+                        # endpoint reporting -100 tokens would otherwise
+                        # poison throughput EMA + popout summary.
+                        from agentcommander.providers.ollama import _safe_token_count
                         yield ChatChunk(
                             content="",
                             done=True,
-                            prompt_tokens=usage.get("prompt_tokens"),
-                            completion_tokens=usage.get("completion_tokens"),
+                            prompt_tokens=_safe_token_count(usage.get("prompt_tokens")),
+                            completion_tokens=_safe_token_count(usage.get("completion_tokens")),
                             raw=obj,
                         )
                         return
