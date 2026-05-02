@@ -224,8 +224,13 @@ class TestAtomicWrite(unittest.TestCase):
     def test_interrupted_write_preserves_original(self) -> None:
         from agentcommander.tools.file_tool import _write_file
         from agentcommander.tools.types import ToolContext
+        from agentcommander.db.connection import init_db
         import builtins as _builtins
 
+        # The permissions layer reads the DB, so make sure it's open. Tests
+        # run in a single process so init_db is a no-op after the first
+        # call — but we still need it the first time.
+        init_db()
         td = tempfile.mkdtemp(prefix="ac-atom-")
         # Pre-grant write/read perms so the tool doesn't prompt.
         from agentcommander.tui.permissions import grant_subtree
