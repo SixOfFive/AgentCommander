@@ -60,6 +60,15 @@ def _check(host: str, patterns: list[tuple[re.Pattern[str], str]]) -> HostCheck:
         return HostCheck(ok=False, reason="host is required")
     if len(trimmed) > 253:
         return HostCheck(ok=False, reason="host too long (>253 chars)")
+    # Control characters in URLs are an injection vector — some URL
+    # parsers truncate the host at the first NUL, sending the request
+    # to a different host than the visible string suggests
+    # ("http://example.com\x00.attacker.com" routed to example.com on
+    # a strict parser, but to attacker.com on a lax one). Reject any
+    # 0x00–0x1F or 0x7F byte unconditionally.
+    for ch in trimmed:
+        if ord(ch) < 32 or ord(ch) == 127:
+            return HostCheck(ok=False, reason="host contains control character")
     for pattern, reason in patterns:
         if pattern.search(trimmed):
             return HostCheck(ok=False, reason=reason)
