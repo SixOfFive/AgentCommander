@@ -203,8 +203,16 @@ class OllamaProvider(ProviderBase):
                     yield ChatChunk(
                         content=content,
                         done=True,
-                        prompt_tokens=chunk.get("prompt_eval_count"),
-                        completion_tokens=chunk.get("eval_count"),
+                        # Clamp negative / non-int token counts to 0 — a
+                        # misbehaving daemon emitting eval_count=-100 (or
+                        # the string "thirty") would otherwise propagate
+                        # nonsense into throughput EMA, the popout token
+                        # display, the bar's running totals, etc. None
+                        # passes through unchanged so callers can still
+                        # distinguish "not reported" from "reported as
+                        # zero".
+                        prompt_tokens=_safe_token_count(chunk.get("prompt_eval_count")),
+                        completion_tokens=_safe_token_count(chunk.get("eval_count")),
                         raw=chunk,
                     )
                     return
