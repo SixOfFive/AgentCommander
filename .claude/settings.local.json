@@ -99,7 +99,9 @@
       "Bash(tee AgentTesting/round20_output.log)",
       "Bash(taskkill /F /PID 293 /T)",
       "Bash(taskkill /F /PID 291 /T)",
-      "Bash(taskkill /F /PID 294 /T)"
+      "Bash(taskkill /F /PID 294 /T)",
+      "Bash(PYTHONUTF8=1 PYTHONPATH=../src py -3 stress_test_20_real_models.py)",
+      "Bash(tee round20_output.log)"
     ]
   }
 }
