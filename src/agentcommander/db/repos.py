@@ -63,10 +63,26 @@ def delete_conversation(conv_id: str) -> None:
     orphaned events piling up after explicit deletion. The startup
     pruner (``prune_pipeline_events``) is the long-term cap; this is
     just immediate cleanup so a deletion is fully visible.
+
+    Also clears the ``active_conversation_id`` config row if it points at
+    the conversation being deleted — without this, a later
+    ``get_active_conversation_id()`` returns the dead id and any
+    ``list_messages`` call silently returns ``[]`` instead of an error,
+    making the "where did my chat go?" failure mode hard to debug.
     """
     db = get_db()
     db.execute("DELETE FROM pipeline_events WHERE conversation_id = ?", (conv_id,))
     db.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+    # If active points here, drop the dangle.
+    try:
+        active = get_active_conversation_id()
+    except Exception:  # noqa: BLE001 — config layer should never break delete
+        active = None
+    if active == conv_id:
+        try:
+            set_active_conversation_id(None)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def touch_conversation(conv_id: str) -> None:
