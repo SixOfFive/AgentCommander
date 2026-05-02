@@ -25,7 +25,7 @@ class HostCheck:
 _REJECT_PATTERNS_USER: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"^\s*(file|javascript|data|gopher|ftp|jar|ldap|dict):", re.IGNORECASE),
      "scheme not allowed (only http[s]:// or bare host:port)"),
-    (re.compile(r"^\s*localhost(:|/|$)", re.IGNORECASE),
+    (re.compile(r"(^|//)\s*localhost(:|/|$)", re.IGNORECASE),
      "loopback hostname rejected (SSRF guard)"),
     (re.compile(r"(^|//)127\.\d+\.\d+\.\d+(:|/|$)"),
      "loopback IP 127.0.0.0/8 rejected (SSRF guard)"),
