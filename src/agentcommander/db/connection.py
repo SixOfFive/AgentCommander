@@ -320,6 +320,31 @@ def init_db_readonly(db_path: Path | str) -> sqlite3.Connection:
     target = Path(db_path)
     if not target.exists():
         raise FileNotFoundError(f"DB file not found: {target}")
+    # Guard against partially-written or zero-byte files. Mirror that
+    # races primary's first write of the DB could otherwise open an
+    # empty file — every subsequent read would error out cryptically.
+    # SQLite's header is 16 bytes ("SQLite format 3\x00"); any real DB
+    # is at least the 100-byte header + page size. Reject anything
+    # shorter so the caller's polling loop can wait for primary to
+    # finish creating the file.
+    try:
+        size = target.stat().st_size
+    except OSError as exc:
+        raise FileNotFoundError(f"DB stat failed: {exc}") from exc
+    if size < 100:
+        raise FileNotFoundError(
+            f"DB file too small to be a valid SQLite DB ({size} bytes): {target}"
+        )
+    # Read the magic header to confirm it's actually a SQLite file.
+    try:
+        with open(target, "rb") as fh:
+            header = fh.read(16)
+    except OSError as exc:
+        raise FileNotFoundError(f"DB read failed: {exc}") from exc
+    if header != b"SQLite format 3\x00":
+        raise FileNotFoundError(
+            f"file is not a SQLite database (bad magic header): {target}"
+        )
 
     uri = f"file:{target.as_posix()}?mode=ro"
     conn = sqlite3.connect(
