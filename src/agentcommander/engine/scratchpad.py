@@ -24,6 +24,51 @@ CONTENT_ROLES: frozenset[str] = frozenset({
 _NEXT_DIRECTIVE_RX = re.compile(r"\n?\[NEXT:\s[^\]]*]")
 
 
+# ─── Sanitization (write-time, see engine._push_entry) ─────────────────────
+
+# ANSI escape sequences emitted by some models. Same shape as the TUI's
+# render-side sanitizer, but applied at scratchpad insertion time so the
+# escapes never make it into a re-fed prompt. The TUI also strips for
+# display safety; this is the model-context safety twin.
+_SCRATCH_ANSI_RX = re.compile(
+    r"\x1b\[[0-?]*[ -/]*[@-~]"             # CSI
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC + BEL/ST terminator
+    r"|\x1bO[@-~]"                         # SS3
+    r"|\x1b[@-~]"                          # other ESC + final byte
+)
+
+# Bare control bytes that survive ANSI stripping. Keep tab (0x09),
+# newline (0x0A), and carriage return (0x0D) — they're legitimate
+# formatting that prompt builders rely on. Everything else 0x00..0x1F +
+# 0x7F (DEL) burns tokens in the next prompt for zero semantic value.
+_SCRATCH_CTRL_RX = re.compile(
+    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"
+)
+
+
+def sanitize_scratchpad_text(text: str) -> str:
+    """Strip ANSI escapes and stray control bytes from ``text``.
+
+    Used by ``engine._push_entry`` on every ``input`` / ``output`` field
+    before the entry hits the in-memory scratchpad and the persisted
+    ``scratchpad_entries`` table. Models occasionally leak terminal
+    escape sequences (cursor moves, color codes, OSC sequences) into
+    their replies; if those land in the scratchpad they get re-fed into
+    the next iteration's prompt as garbage tokens. Strip them at the
+    write boundary so every reader (compaction, prompt build, replay,
+    /chat history dump) sees clean text.
+
+    Tab, newline, and carriage return are preserved.
+    """
+    if not text:
+        return text
+    if "\x1b" in text:
+        text = _SCRATCH_ANSI_RX.sub("", text)
+    if _SCRATCH_CTRL_RX.search(text):
+        text = _SCRATCH_CTRL_RX.sub("", text)
+    return text
+
+
 def push_nudge(scratchpad: list[ScratchpadEntry], iteration: int,
                reason: str, output: str) -> None:
     """Append a `system_nudge` entry — guards use this to redirect the orchestrator."""
