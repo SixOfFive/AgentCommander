@@ -120,6 +120,34 @@ def render_error(text: str) -> None:
 _streaming_state: dict = {"role": None, "had_chars": False}
 
 
+# Strip every ANSI escape from streamed model output. The renderer wraps
+# the cleaned delta in its own style codes via ``style()``; if the model
+# emits its own escapes they'd otherwise pass through to the terminal.
+# That would let any model — accidentally or maliciously — clear the
+# screen (\x1b[2J), set the window title (\x1b]0;...\x07), reposition
+# the cursor over the status bar, manipulate clipboard via OSC 52, etc.
+#
+# Pattern catches:
+#   - CSI: ESC [ <params> <final>      (most common: colors, cursor moves)
+#   - OSC: ESC ] <body> (BEL or ST)    (window title, hyperlinks, clipboard)
+#   - SS3: ESC O <final>               (function-key sequences)
+#   - Single-char ESC commands (RIS, DECSC, etc.)
+import re as _re
+_ANSI_STRIP_RX = _re.compile(
+    r"\x1b\[[0-?]*[ -/]*[@-~]"     # CSI
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC terminated by BEL or ST
+    r"|\x1bO[@-~]"                  # SS3
+    r"|\x1b[@-Z\\-_]"               # other ESC + final byte
+)
+
+
+def _sanitize_model_text(s: str) -> str:
+    """Strip ANSI escape sequences from streamed model text."""
+    if "\x1b" not in s:
+        return s
+    return _ANSI_STRIP_RX.sub("", s)
+
+
 def render_role_delta(role: str, delta: str) -> None:
     """Print a streaming token delta for `role` immediately.
 
