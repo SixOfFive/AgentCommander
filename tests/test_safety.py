@@ -120,6 +120,18 @@ class TestHostValidator(unittest.TestCase):
         self.assertFalse(validate_user_host("example.com\r\nHost: evil").ok)
         self.assertFalse(validate_user_host("example.com\nX-Foo: bar").ok)
 
+    def test_user_rejects_percent_encoded_loopback(self) -> None:
+        # Regression: a URL like ``http://%6c%6f%63%61%6c%68%6f%73%74``
+        # decodes to ``http://localhost`` once urllib actually fires the
+        # request — the validator must run patterns against both the
+        # literal AND the percent-decoded form to close the bypass.
+        encoded_localhost = "http://%6c%6f%63%61%6c%68%6f%73%74"
+        encoded_loopback_ip = "http://%31%32%37%2e%30%2e%30%2e%31"
+        self.assertFalse(validate_user_host(encoded_localhost).ok)
+        self.assertFalse(validate_user_host(encoded_loopback_ip).ok)
+        # Padded-zero loopback also blocked
+        self.assertFalse(validate_user_host("http://127.000.000.001").ok)
+
     def test_user_rejects_localhost_with_scheme(self) -> None:
         # Regression: the localhost pattern used to require start-of-string
         # ``^\s*localhost`` so URLs prefixed with ``http://`` slipped through
