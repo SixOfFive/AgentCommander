@@ -138,6 +138,11 @@ def _execute(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
         return ToolResult(ok=False, error="code is required")
     if language.lower() not in _RUNNERS:
         return ToolResult(ok=False, error=f"unsupported language: {language}")
+    # Package manager dispatch — different shape (run a single command
+    # with code-as-args instead of writing a tempfile and invoking an
+    # interpreter on it).
+    if language.lower() in _PACKAGE_MANAGERS:
+        return _execute_package_manager(language.lower(), code, ctx, timeout_s)
     runner = _resolve_runner(language)
     if runner is None:
         return ToolResult(
