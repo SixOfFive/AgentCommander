@@ -93,6 +93,33 @@ class TestHostValidator(unittest.TestCase):
     def test_provider_rejects_metadata(self) -> None:
         self.assertFalse(validate_provider_host("169.254.169.254").ok)
 
+    def test_provider_rejects_ftp(self) -> None:
+        # ftp:// is unencrypted — would leak the api_key over the wire if
+        # urllib actually negotiated FTP. Always reject for providers.
+        check = validate_provider_host("ftp://example.com")
+        self.assertFalse(check.ok)
+        assert check.reason is not None
+        self.assertIn("scheme", check.reason)
+
+    def test_provider_rejects_null_byte_injection(self) -> None:
+        # Some URL parsers truncate the host at a NUL — "http://a\x00.b.com"
+        # could be routed to "a" by one parser and "a.b.com" by another.
+        # Reject any control character outright.
+        check = validate_provider_host("http://example.com\x00.attacker.com")
+        self.assertFalse(check.ok)
+        assert check.reason is not None
+        self.assertIn("control", check.reason)
+
+    def test_user_rejects_null_byte_injection(self) -> None:
+        check = validate_user_host("http://example.com\x00.attacker.com")
+        self.assertFalse(check.ok)
+
+    def test_user_rejects_newline_in_host(self) -> None:
+        # Header injection: a newline in the host could let an attacker
+        # inject HTTP headers below the request line.
+        self.assertFalse(validate_user_host("example.com\r\nHost: evil").ok)
+        self.assertFalse(validate_user_host("example.com\nX-Foo: bar").ok)
+
 
 class TestPromptInjection(unittest.TestCase):
     def test_definite_match(self) -> None:
