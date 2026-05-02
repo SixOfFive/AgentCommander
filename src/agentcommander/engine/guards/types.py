@@ -75,6 +75,12 @@ def has_deliverable(scratchpad: list[ScratchpadEntry]) -> bool:
 
 
 def user_wants_action(user_message: str) -> bool:
+    # Be tolerant of None / non-string inputs — guards run early in the
+    # pipeline and the caller might pass a missing message before normal
+    # validation kicks in. Returning False on garbage matches the
+    # semantic of "no action signal detected" without crashing.
+    if not isinstance(user_message, str) or not user_message:
+        return False
     return bool(_USER_WANTS_ACTION_RX.search(user_message))
 
 
