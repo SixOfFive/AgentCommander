@@ -303,6 +303,148 @@ class TestAtomicWrite(unittest.TestCase):
                           ".tmp leaked after failure")
 
 
+class TestProviderInputValidation(unittest.TestCase):
+    """Round 17 regression: providers MUST reject garbage num_ctx values
+    BEFORE making the request, and MUST clamp/parse model-emitted token
+    counts and Retry-After headers defensively. A misbehaving daemon
+    must never poison the engine's bookkeeping."""
+
+    def setUp(self) -> None:
+        from agentcommander.providers.ollama import OllamaProvider
+        self.p = OllamaProvider(id="x",
+                                  endpoint="http://127.0.0.1:11434")
+
+    def test_rejects_zero_num_ctx(self) -> None:
+        from agentcommander.providers.base import (
+            ChatMessage, ProviderError,
+        )
+        with self.assertRaises(ProviderError) as cm:
+            list(self.p.chat(model="x",
+                              messages=[ChatMessage(role="user", content="hi")],
+                              num_ctx=0))
+        self.assertIn("num_ctx", str(cm.exception))
+
+    def test_rejects_negative_num_ctx(self) -> None:
+        from agentcommander.providers.base import (
+            ChatMessage, ProviderError,
+        )
+        with self.assertRaises(ProviderError):
+            list(self.p.chat(model="x",
+                              messages=[ChatMessage(role="user", content="hi")],
+                              num_ctx=-1))
+
+    def test_rejects_string_num_ctx(self) -> None:
+        from agentcommander.providers.base import (
+            ChatMessage, ProviderError,
+        )
+        with self.assertRaises(ProviderError):
+            list(self.p.chat(model="x",
+                              messages=[ChatMessage(role="user", content="hi")],
+                              num_ctx="32k"))  # type: ignore[arg-type]
+
+    def test_rejects_huge_num_ctx(self) -> None:
+        from agentcommander.providers.base import (
+            ChatMessage, ProviderError,
+        )
+        with self.assertRaises(ProviderError):
+            list(self.p.chat(model="x",
+                              messages=[ChatMessage(role="user", content="hi")],
+                              num_ctx=10**9))
+
+    def test_safe_token_count_clamps_negatives(self) -> None:
+        from agentcommander.providers.ollama import _safe_token_count
+        self.assertEqual(_safe_token_count(-100), 0)
+        self.assertEqual(_safe_token_count(-1), 0)
+        self.assertEqual(_safe_token_count(0), 0)
+        self.assertEqual(_safe_token_count(42), 42)
+
+    def test_safe_token_count_handles_garbage(self) -> None:
+        from agentcommander.providers.ollama import _safe_token_count
+        self.assertIsNone(_safe_token_count(None))
+        self.assertIsNone(_safe_token_count("thirty"))
+        self.assertIsNone(_safe_token_count([1, 2, 3]))
+        # numeric strings work — int() accepts them
+        self.assertEqual(_safe_token_count("42"), 42)
+
+    def test_parse_retry_after_seconds(self) -> None:
+        from agentcommander.providers.ollama import _parse_retry_after
+        self.assertEqual(_parse_retry_after("60"), 60.0)
+        self.assertEqual(_parse_retry_after("0"), 0.0)
+        self.assertEqual(_parse_retry_after("3.5"), 3.5)
+
+    def test_parse_retry_after_clamps_negative(self) -> None:
+        from agentcommander.providers.ollama import _parse_retry_after
+        # A server emitting -30 is buggy — clamp to 0 rather than letting
+        # the negative flip the engine's backoff math.
+        self.assertEqual(_parse_retry_after("-30"), 0.0)
+        self.assertEqual(_parse_retry_after("-0.5"), 0.0)
+
+    def test_parse_retry_after_http_date(self) -> None:
+        from agentcommander.providers.ollama import _parse_retry_after
+        # RFC 7231 explicitly allows HTTP-date format. We must parse it.
+        # Use a date well in the past so we get a stable ≥0 result
+        # (clamped) regardless of when the test runs.
+        result = _parse_retry_after("Wed, 21 Oct 2020 07:28:00 GMT")
+        self.assertEqual(result, 0.0,
+                          "past dates should clamp to 0")
+        # And a date in the future should return a positive duration
+        result = _parse_retry_after("Wed, 21 Oct 2099 07:28:00 GMT")
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertGreater(result, 0)
+
+    def test_parse_retry_after_junk_returns_none(self) -> None:
+        from agentcommander.providers.ollama import _parse_retry_after
+        self.assertIsNone(_parse_retry_after(None))
+        self.assertIsNone(_parse_retry_after(""))
+        self.assertIsNone(_parse_retry_after("not a value"))
+        self.assertIsNone(_parse_retry_after("definitely-not-a-date"))
+
+
+class TestProviderStreamRobustness(unittest.TestCase):
+    """Round 17 regression: stream parsing must skip non-dict JSON values
+    rather than crash with AttributeError. Some daemons or proxies
+    occasionally inject bare ints / strings / arrays into the stream.
+    """
+
+    def test_chat_skips_non_dict_chunks(self) -> None:
+        from unittest.mock import patch
+        from agentcommander.providers.ollama import OllamaProvider
+        from agentcommander.providers import ollama as ollama_mod
+        from agentcommander.providers.base import ChatMessage
+
+        class FakeStream:
+            def __init__(self, lines):
+                self._lines = lines
+
+            def __iter__(self):
+                yield from self._lines
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        p = OllamaProvider(id="x", endpoint="http://127.0.0.1:11434")
+        lines = [
+            b"42\n",                                            # bare int
+            b'"a string"\n',                                    # bare string
+            b"[1, 2, 3]\n",                                     # bare array
+            b'{"message": {"content": "real"}, "done": false}\n',
+            b'{"done": true}\n',
+        ]
+        with patch.object(ollama_mod.urllib.request, "urlopen",
+                           side_effect=lambda *a, **kw: FakeStream(lines)):
+            chunks = list(p.chat(
+                model="x",
+                messages=[ChatMessage(role="user", content="hi")],
+            ))
+        # Real content must reach us, non-dict garbage must NOT crash.
+        content = "".join(c.content for c in chunks)
+        self.assertIn("real", content)
+
+
 class TestAnsiSanitization(unittest.TestCase):
     """The streaming renderer must strip ANSI from model output before
     passing it to the terminal. A model that emits raw escapes could
