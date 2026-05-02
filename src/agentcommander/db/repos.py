@@ -54,7 +54,19 @@ def get_conversation(conv_id: str) -> Conversation | None:
 
 
 def delete_conversation(conv_id: str) -> None:
-    get_db().execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+    """Delete a conversation and all its descendant rows.
+
+    ``messages``, ``scratchpad_entries``, and ``pipeline_runs`` cascade
+    via FK constraints (ON DELETE CASCADE — see schema.sql). The
+    ``pipeline_events`` table is FK-less by design (it serves as a live
+    mirror feed + audit log) so we sweep it explicitly here to avoid
+    orphaned events piling up after explicit deletion. The startup
+    pruner (``prune_pipeline_events``) is the long-term cap; this is
+    just immediate cleanup so a deletion is fully visible.
+    """
+    db = get_db()
+    db.execute("DELETE FROM pipeline_events WHERE conversation_id = ?", (conv_id,))
+    db.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
 
 
 def touch_conversation(conv_id: str) -> None:
