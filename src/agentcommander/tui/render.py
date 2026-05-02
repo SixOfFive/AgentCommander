@@ -137,7 +137,7 @@ _ANSI_STRIP_RX = _re.compile(
     r"\x1b\[[0-?]*[ -/]*[@-~]"     # CSI
     r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC terminated by BEL or ST
     r"|\x1bO[@-~]"                  # SS3
-    r"|\x1b[@-Z\\-_]"               # other ESC + final byte
+    r"|\x1b[@-~]"                   # other ESC + final byte (covers Fe 0x40-0x5F and Fs 0x60-0x7E like RIS \x1bc)
 )
 
 
