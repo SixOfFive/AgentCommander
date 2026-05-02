@@ -120,6 +120,17 @@ class TestHostValidator(unittest.TestCase):
         self.assertFalse(validate_user_host("example.com\r\nHost: evil").ok)
         self.assertFalse(validate_user_host("example.com\nX-Foo: bar").ok)
 
+    def test_user_rejects_localhost_with_scheme(self) -> None:
+        # Regression: the localhost pattern used to require start-of-string
+        # ``^\s*localhost`` so URLs prefixed with ``http://`` slipped through
+        # the strict (LLM-supplied URL) validator. Make sure both shapes are
+        # blocked now.
+        self.assertFalse(validate_user_host("localhost").ok)
+        self.assertFalse(validate_user_host("localhost:11434").ok)
+        self.assertFalse(validate_user_host("http://localhost").ok)
+        self.assertFalse(validate_user_host("http://localhost:11434").ok)
+        self.assertFalse(validate_user_host("https://localhost/api").ok)
+
 
 class TestPromptInjection(unittest.TestCase):
     def test_definite_match(self) -> None:
