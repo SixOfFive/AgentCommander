@@ -207,7 +207,21 @@ class PipelineRun:
         table) is touched separately by the TUI; compaction operates only
         on this side. DB persistence is best-effort — a transient SQLite
         error must never crash the engine mid-run, so we audit + swallow.
+
+        Sanitizes ``input`` / ``output`` of ASCII control bytes (0x00–0x08,
+        0x0B–0x1F, 0x7F) and ANSI escape sequences before storing. The
+        scratchpad is fed back into role prompts on subsequent iterations
+        — so any control char emitted by a model would otherwise burn
+        tokens, possibly confuse downstream model parsing, and clutter
+        debug output. Tabs / newlines / CR are kept (legitimate
+        formatting). Sanitization happens once at write-time so reads
+        and re-renders all see clean text.
         """
+        from agentcommander.engine.scratchpad import sanitize_scratchpad_text
+        if isinstance(entry.input, str):
+            entry.input = sanitize_scratchpad_text(entry.input)
+        if isinstance(entry.output, str):
+            entry.output = sanitize_scratchpad_text(entry.output)
         self.state.scratchpad.append(entry)
         try:
             from agentcommander.db.repos import insert_scratchpad_entry
