@@ -23,6 +23,109 @@ from agentcommander.tools.types import ToolContext, ToolDescriptor, ToolResult
 _REGISTRY: dict[str, ToolDescriptor] = {}
 
 
+# ─── Minimal JSON Schema validator (subset our tools use) ──────────────────
+
+
+_TYPE_PY: dict[str, type | tuple[type, ...]] = {
+    "object": dict,
+    "string": str,
+    "integer": int,        # bool is also int — handled below
+    "number": (int, float),
+    "boolean": bool,
+    "array": list,
+    "null": type(None),
+}
+
+
+def _validate_payload(payload: Any, schema: dict[str, Any] | None,
+                       path: str = "") -> str | None:
+    """Validate ``payload`` against ``schema``. Returns None if valid,
+    or a short error string ("path: reason") if not.
+
+    Supports:
+      - ``type``: object / string / integer / number / boolean / array / null
+      - ``required``: list of required keys (for type=object)
+      - ``properties``: dict of name → subschema
+      - ``additionalProperties``: subschema for unlisted keys
+      - ``enum``: list of allowed values
+      - ``minimum`` / ``maximum``: numeric bounds (inclusive)
+
+    Anything outside this subset is silently treated as "no constraint."
+    """
+    if not schema:
+        return None
+
+    expected_type = schema.get("type")
+    if expected_type:
+        py_type = _TYPE_PY.get(expected_type)
+        if py_type is None:
+            # Unknown type — skip validation (forward-compatible).
+            pass
+        else:
+            # JSON Schema treats integers as a refinement of numbers, so
+            # ``type: integer`` rejects floats AND bools (booleans are a
+            # Python int subclass but semantically distinct).
+            if expected_type == "integer":
+                if not isinstance(payload, int) or isinstance(payload, bool):
+                    return f"{path or '<root>'}: must be integer (got {type(payload).__name__})"
+            elif expected_type == "boolean":
+                if not isinstance(payload, bool):
+                    return f"{path or '<root>'}: must be boolean (got {type(payload).__name__})"
+            elif expected_type == "number":
+                if isinstance(payload, bool) or not isinstance(payload, (int, float)):
+                    return f"{path or '<root>'}: must be number (got {type(payload).__name__})"
+            elif not isinstance(payload, py_type):
+                return f"{path or '<root>'}: must be {expected_type} (got {type(payload).__name__})"
+
+    enum = schema.get("enum")
+    if enum is not None and payload not in enum:
+        # Truncate the enum list in the error message — long enums are noisy.
+        shown = ", ".join(repr(e) for e in enum[:8])
+        if len(enum) > 8:
+            shown += ", ..."
+        return f"{path or '<root>'}: must be one of [{shown}]"
+
+    minimum = schema.get("minimum")
+    if minimum is not None and isinstance(payload, (int, float)) and not isinstance(payload, bool):
+        if payload < minimum:
+            return f"{path or '<root>'}: must be >= {minimum} (got {payload})"
+    maximum = schema.get("maximum")
+    if maximum is not None and isinstance(payload, (int, float)) and not isinstance(payload, bool):
+        if payload > maximum:
+            return f"{path or '<root>'}: must be <= {maximum} (got {payload})"
+
+    if expected_type == "object" and isinstance(payload, dict):
+        required = schema.get("required") or []
+        for key in required:
+            if key not in payload:
+                return f"{path + '.' + key if path else key}: required field missing"
+        properties = schema.get("properties") or {}
+        for key, val in payload.items():
+            sub = properties.get(key)
+            child_path = f"{path}.{key}" if path else key
+            if sub is not None:
+                err = _validate_payload(val, sub, child_path)
+                if err:
+                    return err
+            else:
+                ap = schema.get("additionalProperties")
+                if isinstance(ap, dict):
+                    err = _validate_payload(val, ap, child_path)
+                    if err:
+                        return err
+                # else: extra fields are allowed (forward-compat)
+
+    if expected_type == "array" and isinstance(payload, list):
+        items = schema.get("items")
+        if isinstance(items, dict):
+            for i, item in enumerate(payload):
+                err = _validate_payload(item, items, f"{path}[{i}]")
+                if err:
+                    return err
+
+    return None
+
+
 def register(descriptor: ToolDescriptor) -> ToolDescriptor:
     """Add or replace a tool. Returns the descriptor for `descriptor = register(...)` chaining."""
     if descriptor.name in _REGISTRY:
