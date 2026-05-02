@@ -390,12 +390,18 @@ def pick_for_role(tier: str, role: str, *,
         if not is_eligible(role, mid, entry):
             continue
         per_role = int(_stats(entry).get("score", 0))
+        # Filter out only on REAL vote evidence — a negative per_role
+        # score means the live runs voted against this model for THIS
+        # role. Capability mismatch (e.g. ctx below recommended) is a
+        # ranking signal, NOT a filter: it pushes the model down the
+        # list but doesn't exclude it. Without this, a brand-new
+        # catalog where every model is slightly below recommended for
+        # some role would have ZERO eligible candidates and always fall
+        # back, even if those models would actually work fine.
+        if per_role < 0:
+            continue
         bonus = score_match(role, mid, entry)
         composite = per_role + bonus
-        if composite < 0:
-            # Negative composite means voting plus capability evidence
-            # together deemed this model unfit for THIS role. Skip.
-            continue
         eligible.append((mid, entry, composite))
 
     if not eligible:
