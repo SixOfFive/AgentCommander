@@ -263,10 +263,12 @@ User explicitly stated:
 - 19-role manifest + system prompts
 - Project-local SQLite DB with corruption defense (lock + auto-repair + signals)
 - Ollama + llama.cpp providers (Ollama: keep_alive=5m, /api/ps, unload-on-exit, should_cancel mid-stream)
-- Tool dispatcher + file/code/web/process tools
+- Tool dispatcher + file/code/web/process/**http/git/env/browser** tools
 - `code_tool` resolves Python via `py -3` first on Windows (no more 9009)
 - Engine main loop with all 9 guard families wired
-- ~110+ guards including new `unwritten_file_guard` and Bug A/B/H/J fixes inside existing ones
+- **~120+ guards** (round 22–28 added unknown_action, unassigned_role, prompt_template_leak,
+  reviewer_verdict, tester_verdict; widened fetch_retry, repeated_tool_call,
+  consecutive_nudge; reordered consecutive_nudge to fire first)
 - TypeCast catalog (conditional-GET) + threshold-cascade autoconfig + ban list + min-context filter
 - Cross-turn scratchpad persistence (`scratchpad_entries` table) + hydration + compaction
 - RoleResolver with `/context > per-role > session_ceiling > None` precedence
@@ -282,14 +284,14 @@ User explicitly stated:
 - Startup chat resume + `/chat list / new / clear / resume / title / export`
 - `/db` and `/vram` and `/context` commands
 - `/autoconfig` with minctx + ban/unban/bans + clear-with-endpoint-reprompt
-- 20/20 unit tests pass
+- **138/138 unit tests pass** (round 22–28 added/reshaped tests; mouse tests removed)
 
 ## What's deferred (NOT done)
 
 - **Preflight + postmortem meta-agents** — `operational_rules` table exists but `apply_preflight` / `apply_postmortem` not wired
 - **TypeCast hint accumulator** — `model_hints` table exists, no engine code bumps `(model, role) ± 0.1`
-- **Browser tool / image gen / git tool / http tool / env tool** — only file/code/web/process exist
-- **OpenRouter / Anthropic / Google providers** — only Ollama + llama.cpp
+- **Image generation, audio (TTS / ASR) tools** — file/code/web/process/http/git/env/browser exist; image+audio do not
+- **OpenRouter / Anthropic / Google providers** — only Ollama + llama.cpp; partial OR work in `tests/test_round4_features.py`
 - **Model registers as a streaming role for orchestrator** — orchestrator + chat fallback don't display token-by-token, just the final result. Roles dispatched via `_dispatch_role` DO stream live (existing behavior)
 
 ## Common gotchas (learned the hard way)
@@ -502,5 +504,148 @@ tests/test_safety.py                     ← +many regression tests
 tests/test_popouts.py                    ← NEW: 38 unit tests
 AgentTesting/stress_test_{10..20}.py     ← rounds 10–20, all confined to AgentTesting/
 AgentTesting/round20_output.log          ← currently 0 bytes (last run was killed mid-flight)
+```
+
+---
+
+# RESUME-AFTER-COMPACTION (rounds 22–28)
+
+This block is the latest. Read it first.
+
+## Where things stand
+
+- **Last commit**: `4751970` on `main`, pushed to `origin/main` (2026-05-04). Working tree clean of source changes; only `.claude/*` config drift unstaged.
+- **Tests**: **138/138** unit tests pass (was 109; net +29 over the rounds). 11 tests dropped when mouse code was removed.
+- **Live verification**: rounds 22–28 each ran 5–20 prompts through real `ac.bat` against the user's Ollama at `192.168.15.103:11434` (devstral-small-2:24b orchestrator + role-specialist models). Cross-turn leak class is closed end-to-end. Average iters/prompt for multi-step code tasks dropped from ~9.2 (round 26) to ~4.3 (round 27 after turn-scoping fix).
+
+## Mouse implementation REMOVED
+
+- `src/agentcommander/tui/mouse_input.py` — **deleted**.
+- `src/agentcommander/tui/terminal_input.py` — reverted to plain `msvcrt.getwch` / `kbhit` on Windows. No more ctypes / ReadConsoleInputW / SetConsoleMode tampering.
+- All `enable_mouse_mode` / `disable_mouse_mode` / `parse_mouse_events` call sites stripped from `app.py`, `mirror.py`, `status_bar.py`.
+- `_handle_popout_click` (app.py) and `_bottom_prompt_handle_click` (status_bar.py) deleted.
+- **Why**: enabling xterm SGR mouse required `ENABLE_VIRTUAL_TERMINAL_INPUT` + disabling `ENABLE_QUICK_EDIT_MODE` on Windows console — which broke Windows Terminal's mouse-wheel scrollback and right-click paste. User explicitly chose scrollback over click-to-toggle. Popouts still toggle via Tab / Shift-Tab / Space / Enter / `/popout`.
+- `tests/test_terminal_input.py` deleted (was for ctypes mouse synthesizer); `TestMouseParser` class removed from `test_popouts.py`.
+
+## Cross-turn scratchpad leak — fully closed
+
+The single biggest class of bug across rounds 22–27. Manifested as: prompt N's tool result / write_file output / chat reply leaking as the answer to prompt N+1. Multiple layers contributed; all now fixed:
+
+1. **Orchestrator never saw the user's question after turn 1** — `engine.py:1438` was `user_input=scratchpad_text or self.opts.user_message`, dropping the user message any time scratchpad was non-empty. Now always passes `self.opts.user_message`; scratchpad goes via the dedicated `scratchpad_text` channel.
+2. **Scratchpad context wrapper** — `role_call.py` now wraps `scratchpad_text` with `"## Prior conversation context (read-only — do not copy verbatim) … ## End of prior context"` delimiter so models can distinguish context from current task.
+3. **`compact_scratchpad` strips engine wrappers** — `"successfully completed:\n"` (added by `_dispatch_tool` to tool outputs) is stripped before serialization. Was teaching the model to copy the engine's own scaffolding back as a fake `done.input`.
+4. **`_is_scratchpad_leak` detector + chat-fallback route** — backstops in the done branch. Patterns: `"successfully completed:"` prefix, `"Summarize what was done"` (role-prompt scaffolding), `"Work completed:"`, `"Pipeline observations:"`, 3+ `TEST NNN:` references (multi-test-summary hallucination loop).
+5. **`LoopState.turn_start_idx`** — index marking where THIS turn's entries begin in the hydrated scratchpad. Set in `_hydrate_scratchpad_from_db` after prior entries load. Threaded through:
+   - `build_final_output(scratchpad, current_turn_start=0)` — slices ALL priority paths (summarizer, content-roles, files, executions, tool outputs, step echo) to current-turn entries only.
+   - `_scratchpad_context_block` — chat fallback's context now turn-scoped too.
+   - `consecutive_nudge_guard`, `dead_end_guard`, `raw_content_guard` — terminal break paths use scoped output.
+   - Guard runners (`run_done_guards`, `run_flow_guards`, `run_post_step_guards`) read `turn_start_idx` from ctx.
+6. **Hydration filters** — `_hydrate_scratchpad_from_db` skips `chat/reply` entries (they're conversational output, not work product) and `router` entries (they tagged a different question) from cross-turn loading.
+7. **Files-list dedup** — `build_final_output`'s `Files created:` line dedupes paths so retry loops on the same file don't show `X.py, X.py, X.py × 7`.
+
+## Tool dispatch fixes
+
+- **`_decision_to_payload` extended** — was returning `{}` for `http_request`, `git`, `env`, `browser`, causing schema-required-field failures (silent breakage that round-23 hid behind retry loops). All four now route their decision fields through. Optional fields with `None` are dropped (round-24 fetch fix generalized).
+- **`git` tool sandbox seal** — required `.git/` to exist directly inside `cwd`. Without it, git's default walk-up behavior climbed out of `AgentTesting/` into the parent AgentCommander repo, leaking the sandbox. Now sets `GIT_DIR` + `GIT_WORK_TREE` explicitly as belt-and-suspenders. Returns clean error if no `.git/` in cwd.
+- **`fetch_retry_guard` widened** — now counts failures across both `fetch` and `http_request` for the same URL (was per-action, missed orchestrators alternating verbs on a broken URL).
+- **`consecutive_nudge_guard` widened** — counts ANY non-`successfully` tool output as "no progress" (was system_nudge-only). Stuck loops with interleaved failures + nudges now break out at 5 instead of running indefinitely.
+
+## JSON verdict contracts on Reviewer + Tester
+
+- `Role.REVIEWER` and `Role.TESTER` now have `output_contract = OutputContract.JSON_STRICT` in the manifest. Engine's `call_role` automatically passes `json_mode=True`.
+- New `REVIEWER.md` schema: `{"verdict": "PASS"|"FAIL", "blockers": [...], "warnings": [...], "suggestions": [...], "summary": "..."}` — each blocker has `category / file / line / problem / fix`.
+- New `TESTER.md` schema: `{"verdict": "PASS"|"FAIL", "test_files": [...], "command": "...", "tests_total": N, "tests_passed": N, "tests_failed": N, "failures": [...], "summary": "..."}`.
+- `_parse_json_verdict` in `done_guards.py` is robust — handles raw JSON, ```json fenced markdown, embedded `{...}` blocks if model added preamble.
+- `reviewer_verdict_guard` and `tester_verdict_guard` parse and act on the JSON. On FAIL with non-empty blockers/failures, push a nudge naming the first 3 with file:line. Loop-cap at 2 nudges per verdict — after that, accept the done with the FAIL surfacing as the user-visible answer (better than spinning forever).
+
+## New guards added (preemptive + reactive)
+
+- **`unknown_action_guard`** (decision) — rejects hallucinated verbs like `send_email`, `query_database`. Has a synonym-rewrite fast path: `ls`→`list_dir`, `cat`→`read_file`, `curl`→`fetch`, etc.
+- **`unassigned_role_guard`** (decision) — catches `action=<role>` when that role has no provider/model bound (avoids mid-dispatch `RoleNotAssigned` raise).
+- **`prompt_template_leak_guard`** (done) — rejects done outputs starting with `"Summarize what was done"`, `"Work completed:"`, `"Pipeline observations:"`, etc.
+- **`reviewer_verdict_guard` / `tester_verdict_guard`** (done) — see JSON contract section above.
+- **`echo_request_guard`** extended — now has a verbatim-echo backstop that fires regardless of `tool_count`. Catches the case where the orchestrator's `done.input` is the literal user prompt restated.
+
+## Guard runner ordering fix
+
+`consecutive_nudge_guard` was LAST in `run_flow_guards`, but the runner short-circuits on the first non-pass verdict. So `repeated_tool_call_guard` always fired first → consecutive_nudge_guard never incremented its counter → 5-cap never triggered → 26-iter fetch loops were possible. Moved to FIRST so it sees the prior turn's nudge before any new guard adds another.
+
+## Done-guard mutators changed to nudge+continue
+
+Several guards used to silently mutate `decision.action` and `decision.input`, then return `pass`. The action mutation never reached the dispatch switch (we're past it inside `_handle_done`); the placeholder text written to `decision.input` got picked up by `raw_content_guard` and shipped as the final answer. Round-23 caught the symptom: `"Write and run tests for: helper.py, helper.py, helper.py × 4"` appearing as the user-visible answer.
+
+Fixed in: `code_review_guard`, `code_test_guard`, `code_dump_guard`, `verbose_fluff_guard`. All now push a system_nudge naming the redirect and return `continue` so the orchestrator gets a fresh decision.
+
+## Role-prompt refactor (14 prompts)
+
+All freeform prompts rewritten to consistent shape:
+
+```
+## Identity        — who you are in 1-2 sentences
+## Mission         — what you're called for
+## Critical Rules  — numbered must/must-not list
+## Output Contract — exact format expected
+## Few-Shot Examples / Workflow / Checklist
+## Common Failures — anti-patterns
+## Success Metrics — what good output looks like
+```
+
+Refactored: ARCHITECT, CODER, CRITIC, DATA_ANALYST, DEBUGGER, PLANNER, REFACTORER, RESEARCHER, REVIEWER (also JSON_STRICT), ROUTER, SUMMARIZER, TESTER (also JSON_STRICT), TRANSLATOR, VISION.
+
+Left as-is: **ORCHESTRATOR** (was the template), **PREFLIGHT** (already JSON-strict, battle-tested), **POSTMORTEM** (same).
+
+## Other fixes
+
+- **`Conversation` dataclass + `get_conversation` / `list_conversations`** silently dropped the `working_directory` column — added the field, fixed all three sites.
+- **`_safe_token_count(None)`** correctly returns `None` (not 0) — distinguishes "missing" from "actually zero" so usage tallies don't get poisoned.
+- **`fetch` payload drops None-valued optional fields** — was emitting `method: null` which schema rejected with `"method: must be string (got NoneType)"` and triggered fetch retry loops.
+
+## What's deferred (still NOT done)
+
+- **Preflight + postmortem meta-agents wiring** — `operational_rules` table exists; `apply_preflight` / `apply_postmortem` not invoked from engine.
+- **TypeCast hint accumulator** — `model_hints` table exists; engine doesn't bump `(model, role) ± 0.1` after each call.
+- **OpenRouter / Anthropic / Google providers** — only Ollama + llama.cpp wired. (`tests/test_round4_features.py` exists from earlier work; check there for partial impl.)
+- **Image generation, audio (TTS/ASR)** tools — only file/code/web/process/http/git/env/browser exist.
+
+## Updated sanity-check checklist
+
+1. `PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest discover tests` → **138 OK**
+2. `git status --short` → only `.claude/*` config drift (auto-commit hook is currently NOT firing — `.claude/settings.json` is missing in the index)
+3. `git log --oneline origin/main..HEAD` → empty (everything pushed at `4751970`)
+4. `cd AgentTesting && cmd.exe //c "..\ac.bat --version"` → `AgentCommander 0.1.0`
+5. `cd AgentTesting && echo "what is 2+2" | cmd.exe //c "..\ac.bat"` → `4` somewhere in the output
+
+## File map for round 22–28 changes
+
+```
+src/agentcommander/types.py                       ← LoopState.turn_start_idx, Conversation.working_directory
+src/agentcommander/db/repos.py                    ← Conversation.working_directory plumbed through
+src/agentcommander/agents/manifest.py             ← REVIEWER + TESTER → JSON_STRICT
+src/agentcommander/engine/engine.py               ← turn_start_idx, _decision_to_payload routing,
+                                                    orchestrator user_input fix, _is_scratchpad_leak,
+                                                    _scratchpad_context_block scoping, hydration filters
+src/agentcommander/engine/role_call.py            ← scratchpad context wrapper (Prior context delimiter)
+src/agentcommander/engine/scratchpad.py           ← compact_scratchpad strip wrapper, build_final_output
+                                                    current_turn_start, files dedup
+src/agentcommander/engine/guards/decision_guards.py ← unknown_action_guard, unassigned_role_guard
+src/agentcommander/engine/guards/done_guards.py   ← prompt_template_leak_guard, reviewer/tester
+                                                    verdict guards, _parse_json_verdict, code_review/
+                                                    code_test/code_dump/verbose_fluff nudge+continue
+src/agentcommander/engine/guards/flow_guards.py   ← consecutive_nudge_guard moved first, widened to
+                                                    count failed tools, fetch_retry counts both verbs,
+                                                    repeated_tool_call covers write/execute (cap=8)
+src/agentcommander/engine/guards/post_step_guards.py ← turn_start_idx threading
+src/agentcommander/tools/git_tool.py              ← .git/ in cwd required, GIT_DIR/GIT_WORK_TREE set
+src/agentcommander/tools/http_tool.py             ← (added in pre-session work; payload now routed)
+src/agentcommander/tools/env_tool.py              ← (added in pre-session work; payload now routed)
+src/agentcommander/tools/browser_tool.py          ← (added in pre-session work; payload now routed)
+src/agentcommander/tui/terminal_input.py          ← reverted to msvcrt; mouse code removed
+src/agentcommander/tui/{app,mirror,status_bar}.py ← mouse hooks/handlers removed
+src/agentcommander/tui/popouts.py                 ← docs updated to reflect mouse removal
+src/agentcommander/tui/mouse_input.py             ← DELETED
+resources/prompts/{14 files}.md                   ← refactored to standard shape
+tests/test_terminal_input.py                      ← DELETED (mouse synthesizer tests)
+tests/test_popouts.py                             ← TestMouseParser class removed
+tests/test_round4_features.py                     ← (added in pre-session work)
 ```
 
