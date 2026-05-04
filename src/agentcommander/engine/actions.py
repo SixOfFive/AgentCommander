@@ -41,6 +41,14 @@ TOOL_ACTIONS: frozenset[str] = frozenset({
     "start_process",
     "kill_process",
     "check_process",
+    # Newer tools (browser/git/http/env). The orchestrator can dispatch
+    # these via a normal {"action": "<name>", ...} decision; the
+    # dispatcher resolves them through the same registry as the older
+    # set so there's no special case here.
+    "http_request",
+    "git",
+    "env",
+    "browser",
 })
 
 ALL_ACTIONS: frozenset[str] = ROLE_ACTIONS | TOOL_ACTIONS | {"done"}

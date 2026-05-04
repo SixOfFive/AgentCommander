@@ -253,6 +253,15 @@ class PipelineRun:
         see the full conversation context when they read
         ``compact_scratchpad`` for prompt-building. Replaced entries
         (compaction artifacts) are filtered at the SQL layer.
+
+        Cross-turn hydration also skips ``chat/reply`` entries — those
+        are the chat-fallback's user-facing reply from a prior turn,
+        and showing them to this turn's orchestrator caused round-24
+        leak symptoms (the prior turn's haiku reply got copied verbatim
+        into the next turn's answer). The user-view ``messages`` table
+        is the right place for cross-turn conversational memory.
+        Router classifications are also dropped — they describe routing
+        for a different question and only confuse model-side context.
         """
         try:
             from agentcommander.db.repos import list_scratchpad_entries
@@ -260,10 +269,21 @@ class PipelineRun:
         except Exception:  # noqa: BLE001
             return
         for r in rows:
+            role = r["role"]
+            action = r["action"]
+            # Skip prior chat-fallback replies — they're conversational
+            # output, not work product. The model would copy them.
+            if role == "chat" and action == "reply":
+                continue
+            # Skip prior router classifications — they tagged a
+            # different question and would mislead the orchestrator
+            # if treated as ongoing context.
+            if role == "router":
+                continue
             self.state.scratchpad.append(ScratchpadEntry(
                 step=r["step"],
-                role=r["role"],
-                action=r["action"],
+                role=role,
+                action=action,
                 input=r["input"] or "",
                 output=r["output"] or "",
                 timestamp=r["timestamp"],
@@ -272,6 +292,11 @@ class PipelineRun:
                 message_id=r["message_id"],
                 replaced_message_ids=r["replaced_message_ids"],
             ))
+        # Mark where this turn's entries begin. Anything appended after
+        # this point belongs to the current run; build_final_output uses
+        # the boundary to scope user-visible output candidates so prior
+        # turns' tool results can't leak forward.
+        self.state.turn_start_idx = len(self.state.scratchpad)
 
     # ── Scratchpad compaction ─────────────────────────────────────────────
     #
@@ -497,37 +522,66 @@ class PipelineRun:
                     update_pipeline_run(self.run_id, status="cancelled",
                                         iterations=iteration - 1, error="cancelled by /stop",
                                         category=category)
+                    # No postmortem on /stop — the role prompt explicitly
+                    # excludes "user explicitly cancelled" from the patterns
+                    # worth analyzing.
                     return
 
                 self.state.iteration = iteration
                 yield PipelineEvent(type="iteration", iteration=iteration)
 
-                try:
-                    decision = yield from self._orchestrate(opts)
-                except ProviderRateLimited as exc:
-                    # Retries exhausted on the orchestrator. Surface a
-                    # clean error and stop — DO NOT include the raw 429
-                    # body in the user-visible event (it gets logged via
-                    # update_pipeline_run for /history, but the user sees
-                    # only the actionable message). Mirror already saw
-                    # the live countdown via retry events.
+                # Preflight reorder injection. When the previous iteration's
+                # preflight returned "reorder", the prerequisite steps were
+                # pushed onto state.preflight_queue (with the original
+                # action appended last). Drain the queue head-first
+                # *before* asking the orchestrator for a fresh decision,
+                # so the prereq sequence runs in the order preflight asked
+                # for. Once the queue empties, control reverts to the
+                # orchestrator. This keeps the meta-agent reorder behavior
+                # local to the engine — guards and dispatch see normal
+                # OrchestratorDecisions and don't need to know preflight
+                # exists.
+                if self.state.preflight_queue:
+                    decision = self.state.preflight_queue.pop(0)
                     yield PipelineEvent(
-                        type="error",
-                        error="rate-limited (provider blocked our retries) — "
-                              "/autoconfig clear to switch providers, "
-                              "or wait and re-run",
+                        type="guard", family="preflight",
+                        reason=f"preflight-injected step: {decision.action}",
                     )
-                    update_pipeline_run(self.run_id, status="failed",
-                                        iterations=iteration,
-                                        error=f"rate-limited: {exc}",
-                                        category=category)
-                    return
-                except (ProviderError, RoleNotAssigned) as exc:
-                    yield PipelineEvent(type="error", error=str(exc))
-                    update_pipeline_run(self.run_id, status="failed",
-                                        iterations=iteration, error=str(exc),
-                                        category=category)
-                    return
+                else:
+                    try:
+                        decision = yield from self._orchestrate(opts)
+                    except ProviderRateLimited as exc:
+                        # Retries exhausted on the orchestrator. Surface a
+                        # clean error and stop — DO NOT include the raw 429
+                        # body in the user-visible event (it gets logged via
+                        # update_pipeline_run for /history, but the user sees
+                        # only the actionable message). Mirror already saw
+                        # the live countdown via retry events.
+                        yield PipelineEvent(
+                            type="error",
+                            error="rate-limited (provider blocked our retries) — "
+                                  "/autoconfig clear to switch providers, "
+                                  "or wait and re-run",
+                        )
+                        update_pipeline_run(self.run_id, status="failed",
+                                            iterations=iteration,
+                                            error=f"rate-limited: {exc}",
+                                            category=category)
+                        self._maybe_run_postmortem(
+                            final_status="failed",
+                            error_text=f"rate-limited: {exc}",
+                        )
+                        return
+                    except (ProviderError, RoleNotAssigned) as exc:
+                        yield PipelineEvent(type="error", error=str(exc))
+                        update_pipeline_run(self.run_id, status="failed",
+                                            iterations=iteration, error=str(exc),
+                                            category=category)
+                        self._maybe_run_postmortem(
+                            final_status="failed",
+                            error_text=str(exc),
+                        )
+                        return
 
                 # Decision guards (validate JSON shape, fix common LLM mistakes)
                 if self._guards["decision"]:
@@ -566,6 +620,67 @@ class PipelineRun:
 
                 yield PipelineEvent(type="iteration", iteration=iteration,
                                     action=decision.action)
+
+                # Preflight meta-agent (opt-in via config "preflight_enabled").
+                # Skipped on `done` (terminal — preflight has nothing to add)
+                # and on preflight-injected steps (we already vetted them
+                # the iteration we created them, re-checking would loop).
+                # When verdict is "abort", surface as a friendly final and
+                # stop. When "reorder", queue the prereqs + the original
+                # action and `continue` so the next iteration drains them.
+                if (decision.action != "done"
+                        and not self._was_preflight_injected(decision)
+                        and self._preflight_enabled()):
+                    verdict = self._run_preflight(decision)
+                    if verdict.verdict == "abort":
+                        yield PipelineEvent(
+                            type="guard", family="preflight",
+                            reason=f"preflight aborted: {verdict.reason}",
+                        )
+                        final_msg = (
+                            f"Preflight halted the pipeline:\n\n"
+                            f"  {verdict.reason}\n\n"
+                            f"Disable preflight with `/preflight off` to "
+                            f"force the action through, or rephrase your "
+                            f"request to avoid the flagged hazard."
+                        )
+                        yield PipelineEvent(type="done", final=final_msg)
+                        update_pipeline_run(
+                            self.run_id, status="failed",
+                            iterations=iteration,
+                            error=f"preflight abort: {verdict.reason}",
+                            category=category,
+                        )
+                        self._maybe_run_postmortem(
+                            final_status="failed",
+                            error_text=f"preflight abort: {verdict.reason}",
+                        )
+                        return
+                    if verdict.verdict == "reorder" and verdict.reorder_steps:
+                        # Mark each injected step so the next iteration
+                        # skips re-running preflight on it (avoids
+                        # infinite preflight-on-preflight-step loops).
+                        for step in verdict.reorder_steps:
+                            step.reasoning = (
+                                f"[preflight-injected] {step.reasoning or ''}"
+                            )
+                        # Tail of the queue is the original decision so the
+                        # user's intent still runs after the prereqs. Mark
+                        # it too — its prereqs already passed preflight,
+                        # re-checking the same action wastes a call.
+                        decision.reasoning = (
+                            f"[preflight-injected] {decision.reasoning or ''}"
+                        )
+                        self.state.preflight_queue.extend(
+                            verdict.reorder_steps + [decision]
+                        )
+                        yield PipelineEvent(
+                            type="guard", family="preflight",
+                            reason=(f"preflight reorder: queued "
+                                    f"{len(verdict.reorder_steps)} prereq(s) "
+                                    f"before {decision.action}"),
+                        )
+                        continue
 
                 # Done branch
                 if decision.action == "done":
@@ -626,6 +741,25 @@ class PipelineRun:
                             )
                             return
 
+                    # Scratchpad-leak hallucination — the orchestrator
+                    # parroted our own ``successfully completed:``
+                    # wrapper. Round-22 caught this. Fire chat fallback
+                    # so the user gets a fresh attempt at the actual
+                    # question.
+                    if self._is_scratchpad_leak(final):
+                        yield PipelineEvent(
+                            type="guard", family="done",
+                            reason="rejecting scratchpad-leak in done.input",
+                        )
+                        yield from self._chat_fallback_stream(
+                            opts.user_message, opts,
+                        )
+                        update_pipeline_run(
+                            self.run_id, status="done",
+                            iterations=iteration, category=category,
+                        )
+                        return
+
                     yield PipelineEvent(type="done", final=final)
                     update_pipeline_run(self.run_id, status="done",
                                         iterations=iteration, category=category)
@@ -635,6 +769,7 @@ class PipelineRun:
                 if self._guards["flow"]:
                     fr = self._guards["flow"]({
                         "scratchpad": self.state.scratchpad,
+                        "turn_start_idx": self.state.turn_start_idx,
                         "iteration": iteration,
                         "decision": decision,
                         "plan_call_count": self.state.plan_call_count,
@@ -713,11 +848,107 @@ class PipelineRun:
                                 iterations=self._max_iterations,
                                 error=f"max iterations ({self._max_iterations})",
                                 category=category)
+            self._maybe_run_postmortem(
+                final_status="max_iterations",
+                error_text=f"max iterations ({self._max_iterations})",
+            )
 
         except Exception as exc:  # noqa: BLE001 — outermost engine boundary
             yield PipelineEvent(type="error", error=f"{type(exc).__name__}: {exc}")
             update_pipeline_run(self.run_id, status="failed",
                                 iterations=self.state.iteration, error=str(exc))
+            self._maybe_run_postmortem(
+                final_status="failed",
+                error_text=f"{type(exc).__name__}: {exc}",
+            )
+
+    # ── Meta-agent helpers (preflight + postmortem) ──────────────────────
+
+    def _preflight_enabled(self) -> bool:
+        """Read the persisted ``preflight_enabled`` config flag.
+
+        Default: disabled. Preflight adds one extra LLM call per iteration
+        — opt-in only so casual chat usage doesn't pay the cost. Toggle
+        with ``/preflight on`` / ``/preflight off``.
+        """
+        try:
+            from agentcommander.db.repos import get_config
+            raw = get_config("preflight_enabled", None)
+        except Exception:  # noqa: BLE001
+            return False
+        if raw is None:
+            return False
+        s = str(raw).strip().lower()
+        return s in ("1", "true", "yes", "on", "enabled")
+
+    def _postmortem_enabled(self) -> bool:
+        """Read the persisted ``postmortem_enabled`` config flag.
+
+        Default: disabled. Postmortem runs only on FAILED runs but still
+        costs one LLM call per failure — opt-in. Toggle with
+        ``/postmortem on`` / ``/postmortem off``.
+        """
+        try:
+            from agentcommander.db.repos import get_config
+            raw = get_config("postmortem_enabled", None)
+        except Exception:  # noqa: BLE001
+            return False
+        if raw is None:
+            return False
+        s = str(raw).strip().lower()
+        return s in ("1", "true", "yes", "on", "enabled")
+
+    def _was_preflight_injected(self, decision: OrchestratorDecision) -> bool:
+        """Detect a decision that was injected by a prior preflight reorder.
+
+        We tag injected decisions by prepending ``[preflight-injected]`` to
+        their ``reasoning`` field. Re-checking such steps would loop
+        (preflight on a preflight-approved step would re-emit the same
+        prereqs forever).
+        """
+        r = decision.reasoning or ""
+        return r.startswith("[preflight-injected]")
+
+    def _run_preflight(self, decision: OrchestratorDecision):
+        """Invoke the preflight meta-agent for ``decision``. Lazy import so
+        this module's load-time graph doesn't pull in the meta-agent code
+        unless preflight is actually enabled."""
+        from agentcommander.engine.meta_agents import apply_preflight
+        return apply_preflight(
+            decision,
+            scratchpad=self.state.scratchpad,
+            conversation_id=self.opts.conversation_id,
+            should_cancel=self.is_cancelled,
+        )
+
+    def _maybe_run_postmortem(self, *, final_status: str,
+                              error_text: str | None) -> None:
+        """Run the postmortem meta-agent on a failed pipeline (opt-in).
+
+        Best-effort: any exception is swallowed (audited) so a flaky
+        postmortem can't break the failure path. The postmortem's
+        outputs (rules, retry proposals, user prompts) are persisted /
+        audited inside ``apply_postmortem``; this caller only needs to
+        gate on the config flag.
+        """
+        if not self._postmortem_enabled():
+            return
+        try:
+            from agentcommander.engine.meta_agents import apply_postmortem
+            apply_postmortem(
+                run_id=self.run_id,
+                conversation_id=self.opts.conversation_id,
+                scratchpad=self.state.scratchpad,
+                final_status=final_status,
+                error_text=error_text,
+                should_cancel=self.is_cancelled,
+            )
+        except Exception as exc:  # noqa: BLE001
+            try:
+                audit("postmortem.invocation_failed",
+                      {"error": f"{type(exc).__name__}: {exc}"})
+            except Exception:  # noqa: BLE001
+                pass
 
     # ─────────────────────────────────────────────────────────────────────
 
@@ -886,6 +1117,37 @@ class PipelineRun:
 
         candidates.sort(key=_key)
         return candidates[0][0]
+
+    # Hint accumulator — independent of the OpenRouter provider-side vote
+    # system. The OR catalog tracks per-tier model votes for swap-on-429
+    # behavior. This table is the LOCAL hint accumulator (model_hints DB
+    # table) that adjusts the autoconfig score on the next startup so a
+    # chronically-failing model gets dropped from the threshold cascade
+    # automatically. Bumps are small (±0.1) so steady-state behavior takes
+    # many runs to drift; clamped to ±100 in the repo helper.
+    HINT_BUMP_SUCCESS: float = 0.1
+    HINT_BUMP_FAILURE: float = -0.1
+
+    def _bump_hint_for_label(self, action_label: str, delta: float) -> None:
+        """Apply a ±delta hint bump for whatever (model, role) corresponds
+        to ``action_label``. Best-effort; any DB / mapping failure is
+        swallowed so a flaky hint store can't break a successful run.
+
+        ``action_label`` is the same shape ``_record_failure_vote`` uses:
+        a Role.value for direct delegations, or one of the generic labels
+        (``"classify"`` / ``"orchestrate"`` / ``"chat"``).
+        """
+        role_enum = self._label_to_role(action_label)
+        if role_enum is None:
+            return
+        rr = resolve_role(role_enum)
+        if rr is None:
+            return
+        try:
+            from agentcommander.db.repos import bump_hint
+            bump_hint(rr.model, role_enum.value, delta)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _record_failure_vote(self, action_label: str) -> None:
         """Best-effort -1 vote (no sibling boost) for the model that just
@@ -1163,11 +1425,13 @@ class PipelineRun:
             raw = yield from self._retry_on_rate_limit("classify", _do_call)
             parsed = json.loads(raw)
             result = str(parsed.get("category", "question"))
+            self._bump_hint_for_label("classify", self.HINT_BUMP_SUCCESS)
         except (ProviderError, RoleNotAssigned, ValueError, json.JSONDecodeError):
             # Router failed to produce a parseable category. Quality
             # downvote (no sibling boost) so persistent router-format
             # offenders sink in the rankings over time.
             self._record_failure_vote("classify")
+            self._bump_hint_for_label("classify", self.HINT_BUMP_FAILURE)
             result = "question"
         self._emit_role_end(Role.ROUTER, model_name, opts,
                             prompt_tokens, completion_tokens)
@@ -1196,8 +1460,18 @@ class PipelineRun:
         scratchpad_text = compact_scratchpad(self.state.scratchpad)
 
         def _do_call() -> str:
+            # Always pass the user's actual message as user_input. Prior
+            # to the round-22 fix this was ``scratchpad_text or
+            # user_message``, which silently dropped the user's question
+            # any time the scratchpad was non-empty (i.e. on every turn
+            # after the first). The orchestrator then saw only the
+            # scratchpad as its "task" and produced summaries / parroted
+            # prior tool outputs instead of answering the new question.
+            # Scratchpad still goes via the dedicated ``scratchpad_text``
+            # channel, where call_role threads it as a separate user
+            # message labeled as prior context.
             return call_role(Role.ORCHESTRATOR,
-                             user_input=scratchpad_text or self.opts.user_message,
+                             user_input=self.opts.user_message,
                              scratchpad_text=scratchpad_text,
                              conversation_id=self.opts.conversation_id,
                              json_mode=True,
@@ -1212,11 +1486,15 @@ class PipelineRun:
                 # Model emitted invalid JSON for the orchestrator role.
                 # Quality failure → downvote (model, orchestrator) only.
                 self._record_failure_vote("orchestrate")
+                self._bump_hint_for_label("orchestrate", self.HINT_BUMP_FAILURE)
                 decision = OrchestratorDecision(
                     action="done",
                     reasoning="orchestrator returned invalid JSON; halting",
-                    input=build_final_output(self.state.scratchpad),
+                    input=build_final_output(self.state.scratchpad, self.state.turn_start_idx),
                 )
+            else:
+                # Parsed JSON cleanly → reward the orchestrator's hint.
+                self._bump_hint_for_label("orchestrate", self.HINT_BUMP_SUCCESS)
         finally:
             self._emit_role_end(Role.ORCHESTRATOR, model_name, opts,
                                 prompt_tokens, completion_tokens)
@@ -1287,6 +1565,9 @@ class PipelineRun:
             # because a model erroring out is a quality signal specific
             # to that model, not evidence the others would do better.
             self._record_failure_vote(role.value)
+            # Hint accumulator: -0.1 for the local DB scoring layer so the
+            # next /autoconfig run prefers a different model for this role.
+            self._bump_hint_for_label(role.value, self.HINT_BUMP_FAILURE)
             push_nudge(self.state.scratchpad, iteration, f"{role.value}_failed",
                        f"Role {role.value} call failed: {exc}")
             if opts.on_role_end is not None:
@@ -1313,12 +1594,19 @@ class PipelineRun:
             timestamp=time.time(),
             duration_ms=int((time.time() - started) * 1000),
         ))
+        # Hint accumulator: +0.1 for the (model, role) pair on success.
+        # Cumulatively, this rewards models that keep delivering useful
+        # output for a role and lets autoconfig prefer them on the next
+        # startup — even when their static catalog score is tied with
+        # another candidate.
+        self._bump_hint_for_label(role.value, self.HINT_BUMP_SUCCESS)
         yield PipelineEvent(type="role", role=role.value, output=output)
 
         # Post-step guards (dead-end, anti-stuck, repeat-error)
         if self._guards["post_step"]:
             ps = self._guards["post_step"]({
                 "scratchpad": self.state.scratchpad,
+                "turn_start_idx": self.state.turn_start_idx,
                 "iteration": iteration,
                 "output_hashes": self.state.output_hashes,
                 "role": role.value,
@@ -1403,9 +1691,10 @@ class PipelineRun:
     def _handle_done(self, decision: OrchestratorDecision, user_message: str) -> str | None:
         """Run done-guards. Return final output to break, or None to continue."""
         if not self._guards["done"]:
-            return decision.input or build_final_output(self.state.scratchpad)
+            return decision.input or build_final_output(self.state.scratchpad, self.state.turn_start_idx)
         verdict = self._guards["done"]({
             "scratchpad": self.state.scratchpad,
+            "turn_start_idx": self.state.turn_start_idx,
             "iteration": self.state.iteration,
             "max_iterations_ref": [self._max_iterations],
             "user_message": user_message,
@@ -1438,6 +1727,11 @@ class PipelineRun:
         """Compress the scratchpad into a context block the chat fallback can
         feed to the model.
 
+        Scoped to THIS turn's entries (``state.turn_start_idx`` onward).
+        Round-27 caught the chat fallback regurgitating a prior turn's
+        fizzbuzz summary as the answer to "say complete" because the
+        context block fed it the entire conversation's scratchpad.
+
         Skips router classifications and system_nudges (they only describe
         flow, not data). Strips the engine's ``successfully completed:\\n``
         wrapper that the tool dispatcher adds. Truncates each entry to fit
@@ -1450,7 +1744,8 @@ class PipelineRun:
         """
         parts: list[str] = []
         used = 0
-        for e in self.state.scratchpad:
+        start = max(0, self.state.turn_start_idx)
+        for e in self.state.scratchpad[start:]:
             if e.role == "router":
                 continue
             if e.action == "system_nudge":
@@ -1473,6 +1768,58 @@ class PipelineRun:
             parts.append(f"{head}\n{snippet}")
             used += len(snippet) + len(head) + 2
         return "\n\n".join(parts)
+
+    def _is_scratchpad_leak(self, text: str) -> bool:
+        """True when ``text`` is a verbatim copy of the engine's own
+        scratchpad scaffolding rather than a real model reply.
+
+        Round-22 stress catch: once a prior turn ran a successful tool
+        action, the orchestrator's compact_scratchpad input contained the
+        engine's ``successfully completed:\\n`` wrapper from
+        ``_dispatch_tool``. On subsequent UNRELATED questions, the
+        orchestrator (a 24B model under context pressure) sometimes
+        emitted ``decision.input`` = that exact wrapped output as its
+        answer — bypassing both the chat fallback and the router-echo
+        check. Detecting the wrapper prefix gives us a mechanical, model-
+        agnostic signal that we're looking at a leak rather than a reply,
+        so we can route to ``_chat_fallback_stream`` for a fresh attempt.
+
+        ``compact_scratchpad`` now also strips the wrapper at the prompt-
+        construction layer so the model is less likely to learn the
+        pattern. This check is the safety net for the case where the
+        model already learned it during the run (or generates the prefix
+        on its own initiative).
+        """
+        if not text:
+            return False
+        norm = text.lstrip()
+        norm_lower = norm.lower()
+        # 1. Engine's tool-success wrapper. Never a real reply — only
+        #    _dispatch_tool produces this exact prefix at engine.py:1615.
+        if norm_lower.startswith("successfully completed:"):
+            return True
+        # 2. Role-prompt scaffolding regurgitation. The summarizer /
+        #    architect / planner prompts use phrases like "Summarize what
+        #    was done" and "Work completed:" that should never appear in
+        #    a model's user-facing reply — when the orchestrator emits
+        #    them as ``done.input``, it's reflecting prompt template text
+        #    rather than answering. Round-22 example: TEST 053 came back
+        #    with "Summarize what was done. User asked: ..." instead of
+        #    naming three planets.
+        if norm_lower.startswith("summarize what was done"):
+            return True
+        # 3. Multi-test-summary hallucination loop. Once the orchestrator
+        #    emits a fake "All test cases processed successfully: TEST X:
+        #    ..." block (which itself is a self-reinforcing leak from a
+        #    prior turn's bad output), every subsequent turn copies it.
+        #    The signature is: 3+ "TEST NNN:" patterns when only one
+        #    "TEST NNN" appeared in the current user message — i.e. the
+        #    reply references prior turns rather than answering this one.
+        import re as _re
+        test_refs = _re.findall(r"\bTEST\s+\d{2,3}\b", norm)
+        if len(test_refs) >= 3:
+            return True
+        return False
 
     def _is_router_echo(self, text: str) -> bool:
         """True when ``text`` is a non-answer the chat fallback should
@@ -1674,16 +2021,74 @@ class PipelineRun:
 
 def _decision_to_payload(decision: OrchestratorDecision, exec_code: str,
                         exec_language: str) -> dict[str, Any]:
+    """Map an OrchestratorDecision to the tool dispatcher's payload shape.
+
+    Always omits None-valued optional fields. The dispatcher's
+    ``_validate_payload`` enforces JSON-Schema types, so passing
+    ``"method": None`` for an optional string field fails with
+    ``"method: must be string (got NoneType)"``. Round-24 caught this
+    on ``fetch``; the same fix is now applied to every tool that has
+    optional fields the orchestrator might omit.
+
+    Tools missing here would land at the catch-all ``return {}`` and
+    fail with their schema's required-field error — silent breakage
+    that round-23 hid behind retry loops. ``http_request``, ``git``,
+    ``env``, and ``browser`` are routed below explicitly.
+    """
     a = decision.action
     if a in ("read_file", "list_dir", "delete_file"):
         return {"path": decision.path or decision.input}
     if a == "write_file":
-        return {"path": decision.path or decision.input, "content": decision.content or ""}
+        return {"path": decision.path or decision.input,
+                "content": decision.content or ""}
     if a == "execute":
         return {"language": exec_language, "code": exec_code}
     if a == "fetch":
-        return {"url": decision.url or decision.input,
-                "method": decision.method, "headers": decision.headers, "body": decision.body}
+        payload: dict[str, Any] = {"url": decision.url or decision.input}
+        if decision.method:
+            payload["method"] = decision.method
+        if decision.headers:
+            payload["headers"] = decision.headers
+        if decision.body is not None:
+            payload["body"] = decision.body
+        return payload
+    if a == "http_request":
+        # Same shape as fetch but with `json` body support implicit via
+        # ``body``. Schema requires `url`, optional `method`/`headers`/
+        # `body`. Drop None-valued optionals.
+        payload = {"url": decision.url or decision.input}
+        if decision.method:
+            payload["method"] = decision.method
+        if decision.headers:
+            payload["headers"] = decision.headers
+        if decision.body is not None:
+            payload["body"] = decision.body
+        return payload
+    if a == "git":
+        # Schema requires `verb` (status/log/diff/show/branch/ls_files);
+        # optional `n`/`revision`/`pattern`. The orchestrator's older
+        # prompt called this "command" — both names are accepted as
+        # input source for `verb`. ``message``/``files`` are NOT in the
+        # schema (this is a read-only git tool — mutations go through
+        # `execute`); they're silently dropped if the orchestrator
+        # emits them.
+        payload = {"verb": decision.command or decision.input or "status"}
+        if decision.pattern:
+            payload["pattern"] = decision.pattern
+        return payload
+    if a == "env":
+        # Schema: optional `verb` (read/list/list_filtered) + optional
+        # `name`. We pass both when present; the tool defaults `verb`
+        # to "list" if absent.
+        payload = {}
+        verb_src = decision.command or decision.input or ""
+        if verb_src and verb_src in ("read", "list", "list_filtered"):
+            payload["verb"] = verb_src
+        if decision.path:  # repurpose `path` for the var name slot
+            payload["name"] = decision.path
+        return payload
+    if a == "browser":
+        return {"url": decision.url or decision.input}
     if a == "start_process":
         return {"command": decision.command or decision.input}
     if a in ("kill_process", "check_process"):

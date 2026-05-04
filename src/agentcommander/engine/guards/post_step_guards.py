@@ -50,12 +50,14 @@ _IMPORT_TO_PIP: dict[str, str] = {
 
 
 def dead_end_guard(output_hashes: dict[str, int], role: str, validated_output: str,
-                   scratchpad: list[ScratchpadEntry]) -> GuardVerdict:
+                   scratchpad: list[ScratchpadEntry],
+                   turn_start_idx: int = 0) -> GuardVerdict:
     output_hash = f"{role}:{validated_output[:100]}"
     count = output_hashes.get(output_hash, 0) + 1
     output_hashes[output_hash] = count
     if count >= 3:
-        return GuardVerdict(action="break", final_output=build_final_output(scratchpad))
+        return GuardVerdict(action="break",
+                            final_output=build_final_output(scratchpad, turn_start_idx))
     return GuardVerdict(action="pass")
 
 
@@ -222,12 +224,13 @@ def run_post_step_guards(ctx: dict[str, Any]) -> dict[str, Any]:
     Returns dict {action, final_output?}.
     """
     scratchpad = ctx["scratchpad"]
+    turn_start_idx = int(ctx.get("turn_start_idx") or 0)
     iteration = ctx["iteration"]
     output_hashes = ctx["output_hashes"]
     role = ctx["role"]
     validated_output = ctx["validated_output"]
 
-    v1 = dead_end_guard(output_hashes, role, validated_output, scratchpad)
+    v1 = dead_end_guard(output_hashes, role, validated_output, scratchpad, turn_start_idx)
     if v1.action != "pass":
         return {"action": v1.action, "final_output": v1.final_output}
 

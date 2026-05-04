@@ -24,9 +24,6 @@ from agentcommander.tui.popouts import (  # noqa: E402
     list_block_summaries,
     render_summary_line,
 )
-from agentcommander.tui.mouse_input import (  # noqa: E402
-    parse_mouse_events,
-)
 
 
 class TestIsPopoutRole(unittest.TestCase):
@@ -218,39 +215,6 @@ class TestLineCounting(unittest.TestCase):
         # Pathological: terminal too narrow. Should fall back to plain
         # newline count without crashing.
         self.assertEqual(_count_visible_lines("a\nb", cols=2, indent_cols=4), 1)
-
-
-class TestMouseParser(unittest.TestCase):
-    def test_single_press(self) -> None:
-        rem, evs = parse_mouse_events("\x1b[<0;42;7M")
-        self.assertEqual(rem, "")
-        self.assertEqual(len(evs), 1)
-        ev = evs[0]
-        self.assertEqual(ev.button, 0)
-        self.assertEqual(ev.x, 42)
-        self.assertEqual(ev.y, 7)
-        self.assertTrue(ev.pressed)
-
-    def test_release(self) -> None:
-        _, evs = parse_mouse_events("\x1b[<0;1;1m")
-        self.assertEqual(len(evs), 1)
-        self.assertFalse(evs[0].pressed)
-
-    def test_mixed_with_typing(self) -> None:
-        rem, evs = parse_mouse_events("hello\x1b[<0;5;3Mworld!")
-        self.assertEqual(rem, "helloworld!")
-        self.assertEqual(len(evs), 1)
-
-    def test_wheel_motion_ignored(self) -> None:
-        # bit 5 (32) = motion, bit 6 (64) = wheel — both should drop.
-        _, evs = parse_mouse_events("\x1b[<32;1;1M\x1b[<64;1;1M\x1b[<0;5;3M")
-        self.assertEqual(len(evs), 1)
-        self.assertEqual(evs[0].x, 5)
-
-    def test_no_mouse_passthrough(self) -> None:
-        rem, evs = parse_mouse_events("plain text")
-        self.assertEqual(rem, "plain text")
-        self.assertEqual(evs, [])
 
 
 class TestInputChunkActions(unittest.TestCase):

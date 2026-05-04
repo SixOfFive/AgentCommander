@@ -202,6 +202,129 @@ def templating_placeholder_guard(decision: OrchestratorDecision,
     return GuardVerdict(action="continue")
 
 
+# ─── Action-verb validation ────────────────────────────────────────────────
+#
+# Round-22 model-flow testing surfaced cases where the orchestrator emitted
+# action verbs that don't exist in the dispatcher (e.g. ``send_email``,
+# ``query_database``, ``call_api``). The dispatcher returned "no such tool"
+# as a tool failure, which polluted the scratchpad and burned an iteration
+# without surfacing the real problem to the model in actionable terms. This
+# guard rejects unknown verbs at decision time with a system_nudge that
+# lists the actual registered actions, giving the orchestrator a concrete
+# correction path on the next iteration.
+
+# Special action verbs that the engine handles directly (not in any registry).
+_SPECIAL_ACTIONS: frozenset[str] = frozenset({"done", "chat", "delegate"})
+
+
+def _all_known_actions() -> frozenset[str]:
+    """Snapshot every legal action verb at the current moment.
+
+    Sources:
+      - ROLE_ACTIONS (engine.actions) — verbs that dispatch to a Role
+      - TOOL_ACTIONS (engine.actions) — verbs the tools.dispatcher knows
+      - _BROWSER_ACTIONS — opt-in browser verbs
+      - _SPECIAL_ACTIONS — done / chat / delegate
+
+    Computed lazily so test-time tool registration changes are visible.
+    """
+    from agentcommander.engine.actions import ROLE_ACTIONS, TOOL_ACTIONS
+    return ROLE_ACTIONS | TOOL_ACTIONS | _BROWSER_ACTIONS | _SPECIAL_ACTIONS
+
+
+def unknown_action_guard(decision: OrchestratorDecision,
+                          scratchpad: list[ScratchpadEntry],
+                          iteration: int) -> GuardVerdict:
+    """Reject orchestrator decisions whose ``action`` isn't a known verb.
+
+    Why this exists: when the model invents a verb (``send_email``,
+    ``query_database``, ``analyze_image``) the dispatcher records a
+    ``no such tool`` failure that then shows up in scratchpad as if the
+    user actually attempted that action. The orchestrator then keeps
+    retrying minor variations. Catching it pre-dispatch gives the model
+    one targeted nudge with the actual menu of options.
+
+    Coexists with ``sentence_as_action_guard`` — that one converts
+    multi-word actions into the embedded verb if any. By the time we
+    reach this guard the action is a single token; we just need to
+    confirm that token is real.
+    """
+    action = (decision.action or "").strip().lower()
+    if not action:
+        return GuardVerdict(action="pass")  # empty-action handles this
+    known = _all_known_actions()
+    if action in known:
+        return GuardVerdict(action="pass")
+    # Whitelist a few common synonyms the model might emit. Cheaper than
+    # nudging the model when the verb is obviously equivalent to a known
+    # one — we just rewrite the action and continue.
+    synonyms = {
+        "list_files": "list_dir",
+        "ls": "list_dir",
+        "cat": "read_file",
+        "create_file": "write_file",
+        "save_file": "write_file",
+        "run": "execute",
+        "shell": "execute",
+        "bash": "execute",
+        "curl": "fetch",
+        "get": "fetch",
+        "http": "http_request",
+        "post": "http_request",
+    }
+    if action in synonyms:
+        decision.action = synonyms[action]
+        return GuardVerdict(action="pass")
+    # Truly unknown — nudge the model with the real menu.
+    sample = sorted(known - _SPECIAL_ACTIONS)
+    # Trim to keep the nudge readable; the model just needs the gist.
+    sample_str = ", ".join(sample[:24])
+    if len(sample) > 24:
+        sample_str += f", … ({len(sample) - 24} more)"
+    push_system_nudge(scratchpad, iteration, "unknown_action",
+                      f'BLOCKED: action="{decision.action}" is not a registered '
+                      f"verb. Pick one of: {sample_str}. If the user wants "
+                      f"something none of these can do, use action=\"done\" "
+                      f"and explain in input.")
+    return GuardVerdict(action="continue")
+
+
+# ─── Role-assignment check ─────────────────────────────────────────────────
+
+
+def unassigned_role_guard(decision: OrchestratorDecision,
+                           scratchpad: list[ScratchpadEntry],
+                           iteration: int) -> GuardVerdict:
+    """Catch ``action=<role>`` when that role has no provider/model bound.
+
+    Round-22 stress: with an opt-in role like ``vision`` unassigned, the
+    orchestrator could still emit ``{"action": "vision", ...}`` and the
+    engine would raise ``RoleNotAssigned`` mid-dispatch — the run died
+    with a stack trace instead of converting the failure into a nudge.
+    This guard checks role resolvability *before* dispatch.
+    """
+    from agentcommander.engine.actions import ACTION_TO_ROLE
+    from agentcommander.engine.role_resolver import resolve as resolve_role
+    action = (decision.action or "").strip().lower()
+    role = ACTION_TO_ROLE.get(action)
+    if role is None:
+        return GuardVerdict(action="pass")  # not a role action
+    try:
+        resolved = resolve_role(role)
+    except Exception:  # noqa: BLE001 — defensive, any resolver failure
+        resolved = None
+    if resolved is not None:
+        return GuardVerdict(action="pass")
+    push_system_nudge(scratchpad, iteration, "unassigned_role",
+                      f'BLOCKED: action="{decision.action}" delegates to the '
+                      f'{role.value} role, but no provider/model is assigned '
+                      f"to it (the user hasn't run /roles set or autoconfig "
+                      f"didn't pick one). Either pick a different action, "
+                      f'or use action="done" with the answer you can give '
+                      f"directly.")
+    return GuardVerdict(action="continue")
+
+
 # ─── Runner ────────────────────────────────────────────────────────────────
 
 
@@ -219,6 +342,10 @@ def run_decision_guards(ctx: dict[str, Any]) -> dict[str, Any]:
     guards = [
         lambda: empty_action_guard(decision, scratchpad, iteration),
         lambda: sentence_as_action_guard(decision, scratchpad, iteration),
+        # unknown_action_guard runs AFTER sentence_as_action so the
+        # synonym-rewrite-or-extract logic gets first crack at the verb.
+        lambda: unknown_action_guard(decision, scratchpad, iteration),
+        lambda: unassigned_role_guard(decision, scratchpad, iteration),
         lambda: field_swap_guard(decision, scratchpad, iteration),
         lambda: missing_fields_guard(decision, scratchpad, iteration),
         lambda: malformed_url_guard(decision, scratchpad, iteration),

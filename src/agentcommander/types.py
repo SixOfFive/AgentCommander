@@ -163,6 +163,22 @@ class LoopState:
     # short-circuits to chat fallback to avoid the trivial-Q&A loop where
     # the model keeps re-emitting the same bad done shape.
     premature_done_count: int = 0
+    # FIFO queue of decisions injected by the preflight meta-agent's
+    # ``reorder`` verdict. When non-empty, the engine pops the head as the
+    # decision for the next iteration *instead* of calling the orchestrator
+    # — that's how preflight injects prerequisite steps before the action
+    # the orchestrator actually wanted. Each entry is an
+    # ``OrchestratorDecision``; the queue drains in insertion order, then
+    # the loop reverts to orchestrator-driven dispatch.
+    preflight_queue: list["OrchestratorDecision"] = field(default_factory=list)
+    # Index into ``scratchpad`` where THIS turn's entries begin. Entries
+    # before this index were hydrated from prior turns of the same
+    # conversation — useful as model context but NOT as user-visible
+    # output for the current turn. ``build_final_output`` honors this
+    # boundary so a prior turn's tool result can't leak as the answer to
+    # an unrelated current question (round-26 caught fizzbuzz26 code
+    # surfacing as the answer for a later reverse26 prompt).
+    turn_start_idx: int = 0
 
 
 # ─── Conversations / messages ──────────────────────────────────────────────
@@ -174,6 +190,7 @@ class Conversation:
     title: str
     created_at: int
     updated_at: int
+    working_directory: str | None = None
 
 
 @dataclass

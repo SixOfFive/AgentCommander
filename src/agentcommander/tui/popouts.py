@@ -9,10 +9,14 @@ Per the user's spec ("/popout" feature):
   - Tool calls invoked by that role stay visible at all times — they
     have observable side effects the user already saw fire.
   - Failed roles stay EXPANDED (the user wants to see the error).
-  - Three interaction surfaces all work:
-      mouse  — click on the summary line  (xterm SGR mouse)
+  - Two interaction surfaces:
       keyboard — Tab cycles focus, Space/Enter toggles, Esc clears
       slash    — /popout <id>  /popout list  /popout expand|collapse all
+    Mouse click-to-toggle was removed because enabling xterm SGR mouse
+    mode required disabling the terminal's QuickEdit / native mouse-
+    wheel scrollback on Windows, breaking selection-to-copy and the
+    history scroll the user actually wanted. Native scrollback works
+    again with mouse mode off.
 
 Rendering strategy: append-only with cursor-up + erase-to-EOL. When the
 block snaps shut we walk back N lines (counted while streaming) and

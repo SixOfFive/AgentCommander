@@ -101,7 +101,10 @@
       "Bash(taskkill /F /PID 291 /T)",
       "Bash(taskkill /F /PID 294 /T)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=../src py -3 stress_test_20_real_models.py)",
-      "Bash(tee round20_output.log)"
+      "Bash(tee round20_output.log)",
+      "Bash(git restore *)",
+      "Bash(git checkout *)",
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -c \"import agentcommander.engine.engine; import agentcommander.engine.meta_agents; import agentcommander.tui.commands; print\\('ok'\\)\")"
     ]
   }
 }

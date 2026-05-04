@@ -278,32 +278,6 @@ def _handle_popout_blur() -> None:
     get_registry().clear_focus()
 
 
-def _handle_popout_click(x: int, y: int) -> None:
-    """Translate a mouse-click coordinate into a popout toggle.
-
-    The 1-indexed (x, y) is in terminal cells. We don't track pixel
-    positions of every block (scrolling moves them constantly); instead
-    we treat any click on a row that recently emitted a summary line as
-    a toggle of THAT block. That's heuristic but matches user
-    expectation: "I clicked on a popout summary, it should toggle."
-
-    For now we toggle the focused block if any, otherwise the most-recent
-    interactive block. Refining to per-row tracking is a future iteration.
-    """
-    from agentcommander.tui.popouts import get_registry, toggle_block
-    reg = get_registry()
-    target_id = reg.focus_id
-    if target_id is None:
-        # Click without focus: pick the most-recent non-running block.
-        with reg.lock:
-            for b in reversed(reg.blocks):
-                if b.status != "running":
-                    target_id = b.id
-                    break
-    if target_id is not None:
-        toggle_block(target_id)
-
-
 def _refresh_or_paid_balance(bar) -> None:  # noqa: ANN001 - StatusBar local
     """Pull the OpenRouter Paid balance for the first OR Paid provider
     that's ACTUALLY IN USE by at least one role assignment, and push it
@@ -636,14 +610,6 @@ def _run_pipeline(state: dict, user_message: str) -> None:
                     chunk = poll_chars()
                     if chunk:
                         if raw_ready:
-                            # Strip mouse-click reports first so they don't
-                            # leak into the typed buffer; route hits to any
-                            # popout summary line at the click coordinate.
-                            from agentcommander.tui.mouse_input import parse_mouse_events
-                            chunk, mouse_events = parse_mouse_events(chunk)
-                            for ev in mouse_events:
-                                if ev.pressed and ev.button == 0:
-                                    _handle_popout_click(ev.x, ev.y)
                             typed_buffer, action = _consume_input_chunk(typed_buffer, chunk)
                             bar.set_pending_input(typed_buffer)
                             if action is not None:
@@ -1094,11 +1060,6 @@ def run_tui() -> int:
     bar = get_status_bar()
     bar.set_workdir(state["working_dir"])
     bar.install()
-    # Enable xterm SGR mouse so click events on popout summary lines
-    # arrive on stdin and we can dispatch them. No-op on terminals that
-    # don't speak the protocol — they fall back to keyboard + slash.
-    from agentcommander.tui.mouse_input import enable_mouse_mode
-    enable_mouse_mode()
 
     catalog = get_catalog()
     render_banner(
@@ -1343,10 +1304,6 @@ def run_tui() -> int:
                 traceback.print_exc()
 
     bar.uninstall()
-    # Tear down mouse mode BEFORE the cursor is reset so the user's
-    # shell isn't left receiving click reports for every pointer motion.
-    from agentcommander.tui.mouse_input import disable_mouse_mode
-    disable_mouse_mode()
     write(SHOW_CURSOR)
 
     # Free VRAM before goodbye: ask each provider to unload any models it's
