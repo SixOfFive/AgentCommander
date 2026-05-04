@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "hooks": {
     "PostToolUse": [
       {
@@ -6,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "git add -A && git diff --cached --quiet || git commit -m 'auto: changes from claude' >/dev/null 2>&1"
+            "command": "git add -A && (git diff --cached --quiet || git commit -m \"auto: changes from claude\" --quiet) 2>/dev/null || true"
           }
         ]
       }
