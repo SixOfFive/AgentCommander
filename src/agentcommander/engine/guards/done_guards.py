@@ -1196,6 +1196,10 @@ def run_done_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         # obviously leaked scaffolding, none of the downstream guards
         # need to look at it — they'd just rubber-stamp meaningless text.
         lambda: prompt_template_leak_guard(decision, scratchpad, iteration, max_iter),
+        # Tool-call-as-chat: catches `fetch <url>` style finals that look
+        # like tool syntax but aren't real JSON dispatches. Runs early so
+        # raw_content_guard never gets a chance to ship it as the answer.
+        lambda: tool_call_as_chat_guard(scratchpad, iteration, decision),
         # JSON-verdict gates from reviewer/tester. These run BEFORE the
         # legacy code_review/code_test guards (which only nudge to call
         # those roles in the first place). If the role already ran and
