@@ -10,9 +10,64 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+from pathlib import Path
 
 from agentcommander import __version__
+
+
+def _detect_program_folder() -> Path | None:
+    """If cwd is the AgentCommander source repo root, return that path.
+
+    Detected by: cwd resolves to the directory that contains both
+    ``pyproject.toml`` AND ``src/agentcommander/__init__.py`` (the
+    development install layout). For pip-installed packages this returns
+    ``None`` because site-packages won't have ``pyproject.toml`` next to
+    the package.
+    """
+    try:
+        import agentcommander as _ac
+        pkg_init = Path(_ac.__file__).resolve()
+    except Exception:  # noqa: BLE001
+        return None
+    candidate = pkg_init.parent.parent.parent
+    if not (candidate / "pyproject.toml").exists():
+        return None
+    if not (candidate / "src" / "agentcommander" / "__init__.py").exists():
+        return None
+    if Path(os.getcwd()).resolve() == candidate.resolve():
+        return candidate.resolve()
+    return None
+
+
+def _refuse_to_run_in_program_folder(repo_root: Path) -> None:
+    """Print a loud red banner and exit. Called when cwd is the source repo
+    root — running there pollutes the tree with ``.agentcommander/``,
+    ``logs/``, and tool-created files, and breaks the project-local DB
+    model. The fix is to run from a separate working directory."""
+    bar = "═" * 70
+    red = "\x1b[1;31m"
+    cyan = "\x1b[1;36m"
+    reset = "\x1b[0m"
+    sys.stderr.write("\n")
+    sys.stderr.write(f"{red}{bar}{reset}\n")
+    sys.stderr.write(f"{red}  REFUSING TO RUN IN THE AGENTCOMMANDER SOURCE DIRECTORY{reset}\n")
+    sys.stderr.write(f"{red}{bar}{reset}\n\n")
+    sys.stderr.write(f"  cwd: {Path.cwd()}\n\n")
+    sys.stderr.write(
+        "  Running ac in the source folder pollutes the repo with\n"
+        "  .agentcommander/ DB files, logs/, and any tool-created files,\n"
+        "  and breaks the project-local-DB model (each working directory\n"
+        "  gets its own state).\n\n"
+        "  Move to a separate working directory first:\n\n"
+    )
+    sys.stderr.write(f"      {cyan}cd AgentTesting{reset}\n")
+    sys.stderr.write(f"      {cyan}./ac.bat{reset}\n\n")
+    sys.stderr.write(
+        f"  Or use {cyan}ac --working-dir <path>{reset} from elsewhere.\n\n"
+    )
+    sys.exit(2)
 
 
 def _build_parser() -> argparse.ArgumentParser:
