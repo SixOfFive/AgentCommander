@@ -93,6 +93,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    # Refuse to run in the AgentCommander source folder. The DB lives at
+    # <cwd>/.agentcommander/ regardless of mode (primary or mirror) and
+    # regardless of --working-dir, so running here pollutes the source
+    # repo with DB files, logs/, and tool-created scratch.
+    repo_root = _detect_program_folder()
+    if repo_root is not None:
+        _refuse_to_run_in_program_folder(repo_root)
+
     # ── Mirror mode: bypasses init_db entirely; mirror.py opens RO itself.
     # Writing config (e.g. --working-dir) is meaningless without a primary,
     # so reject that combination explicitly.
