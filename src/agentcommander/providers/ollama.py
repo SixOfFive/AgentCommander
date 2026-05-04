@@ -23,6 +23,7 @@ from agentcommander.providers.base import (
     ProviderRateLimited,
     provider_factory,
 )
+from agentcommander.providers.capability_hints import infer_capabilities_from_id
 from agentcommander.safety.host_validator import validate_provider_host
 from agentcommander.types import ProviderConfig
 
