@@ -921,6 +921,10 @@ def _run_startup_autoconfigure() -> None:
            f' {style("muted", f"@ {_ftp(_gtp(applied.default_model or ""))}")}'
            f' on {applied.provider_id}')
     render_system_line(msg)
+    if applied.fallback_no_catalog:
+        render_system_line(style("muted",
+            "  no installed model is in the TypeCast catalog — assigned the "
+            "only one to all text-capable roles"))
     if n_diff:
         render_system_line(f"  + {n_diff} role(s) got a stronger TypeCast pick:")
         for role_name, model in applied.diff_picks.items():
