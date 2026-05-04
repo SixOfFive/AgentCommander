@@ -5,8 +5,16 @@ Used by:
     autocomplete (blocking reads).
   - `app._run_pipeline` for the during-run typing handler (non-blocking polls).
 
-Pure stdlib. POSIX uses termios cbreak + ECHO-off. Windows is a no-op for
-mode (msvcrt is already char-at-a-time and doesn't echo).
+Pure stdlib. POSIX uses termios cbreak + ECHO-off. Windows uses
+``msvcrt.getwch`` / ``msvcrt.kbhit`` — keyboard only, but the terminal
+keeps its native mouse-wheel scrollback and select-to-copy intact.
+
+Mouse input was removed in favor of native scrollback. The previous
+ctypes implementation enabled ``ENABLE_MOUSE_INPUT`` and disabled
+``ENABLE_QUICK_EDIT_MODE`` on the console, which broke Windows
+Terminal's mouse-wheel scrollback and right-click paste. Popout
+expand/collapse is still available via Tab/Space/Enter and the
+``/popout`` slash command.
 """
 from __future__ import annotations
 

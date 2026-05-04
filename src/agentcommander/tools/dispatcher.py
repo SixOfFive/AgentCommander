@@ -158,10 +158,15 @@ def bootstrap_builtins() -> list[str]:
 
     Idempotent — re-importing is a no-op.
     """
-    # Side-effect imports.
+    # Side-effect imports. Each module's top-level ``register(...)`` call
+    # adds itself to ``_REGISTRY`` on first import.
     from agentcommander.tools import (  # noqa: F401
+        browser_tool,
         code_tool,
+        env_tool,
         file_tool,
+        git_tool,
+        http_tool,
         process_tool,
         web_tool,
     )

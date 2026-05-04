@@ -129,8 +129,22 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
         num_ctx = resolved.context_window_tokens
 
     messages: list[ChatMessage] = [ChatMessage(role="system", content=system_prompt)]
+    # Label the scratchpad context so the model can distinguish prior
+    # conversation/tool state from the current user message. Without this
+    # wrapper, the orchestrator received two consecutive user messages —
+    # one carrying compact scratchpad text, one carrying the actual user
+    # question — and routinely answered the wrong one (round-22 caught
+    # this: simple questions came back with verbatim copies of the most
+    # recent scratchpad entry instead of an answer).
     if scratchpad_text:
-        messages.append(ChatMessage(role="user", content=scratchpad_text))
+        wrapped = (
+            "## Prior conversation context (read-only — do not copy verbatim)\n\n"
+            f"{scratchpad_text}\n\n"
+            "## End of prior context\n\n"
+            "The next message is the CURRENT user request — answer that, "
+            "do not summarize or restate the context above."
+        )
+        messages.append(ChatMessage(role="user", content=wrapped))
     messages.append(ChatMessage(role="user", content=user_input))
 
     if json_mode is None:

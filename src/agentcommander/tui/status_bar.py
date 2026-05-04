@@ -833,29 +833,6 @@ def _record_history(line: str) -> None:
         del _history[: len(_history) - _HISTORY_MAX]
 
 
-def _bottom_prompt_handle_click(x: int, y: int) -> None:  # noqa: ARG001
-    """Mouse-click dispatch for the between-runs prompt.
-
-    Toggles the focused popout block if any, otherwise the most-recent
-    interactive (non-running) block. We don't currently use ``y`` to
-    target a specific block by its on-screen row — the registry doesn't
-    track row positions across scrolls. The single-block heuristic
-    matches user expectation: "I clicked SOMEWHERE on the chat, expand
-    the most-recent finished sub-agent."
-    """
-    from agentcommander.tui.popouts import get_registry, toggle_block
-    reg = get_registry()
-    target_id = reg.focus_id
-    if target_id is None:
-        with reg.lock:
-            for b in reversed(reg.blocks):
-                if b.status != "running":
-                    target_id = b.id
-                    break
-    if target_id is not None:
-        toggle_block(target_id)
-
-
 def _paint_input_row(prompt_text: str, buffer: str, cols: int, input_row: int) -> None:
     """Repaint the input row with prompt + current buffer, leaving the cursor
     parked just after the buffer's last character.
@@ -1021,23 +998,6 @@ def read_line_at_bottom(prompt_text: str = "❯ ") -> str | None:
                 except KeyboardInterrupt:
                     interrupted = True
                     break
-
-                # Strip xterm SGR mouse reports out of the chunk before
-                # autocomplete sees it — without this, click escapes (which
-                # look like CSI sequences with a ``<`` parameter byte) get
-                # silently dropped by parse_events and the user thinks
-                # mouse mode is broken. We dispatch the click locally to
-                # the popout registry, then repaint the input row so the
-                # cursor lands back on the bottom prompt.
-                from agentcommander.tui.mouse_input import parse_mouse_events
-                chunk, mouse_events = parse_mouse_events(chunk)
-                if mouse_events:
-                    for ev in mouse_events:
-                        if ev.pressed and ev.button == 0:
-                            _bottom_prompt_handle_click(ev.x, ev.y)
-                    # Mouse-triggered expand prints content into the scroll
-                    # region; redraw the prompt so the user can keep typing.
-                    _paint_input_row(prompt_text, buffer, cols, input_row)
 
                 events = parse_events(chunk)
                 if not events:

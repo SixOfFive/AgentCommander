@@ -144,10 +144,38 @@ def build_candidates(installed_model_ids: set[str]) -> list[ModelCandidate]:
 
 
 def _role_score(entry: dict[str, Any], typecast_role: str) -> float:
+    """TypeCast catalog score for ``(model, role)``. Range: 0–100 in the
+    catalog (coarse multiples of 20). The hint accumulator adds an
+    independent ±100-clamped adjustment on top — see ``_role_score_with_hint``.
+    """
     role_scores = entry.get("roleScores") or {}
     rs = role_scores.get(typecast_role) or {}
     score = rs.get("score")
     return float(score) if isinstance(score, (int, float)) else 0.0
+
+
+def _role_score_with_hint(
+    entry: dict[str, Any], typecast_role: str, model_id: str,
+) -> float:
+    """``_role_score`` + the persisted hint bump for this ``(model, role)``.
+
+    The hint accumulator (see ``engine.engine._bump_hint_for_label``)
+    bumps a per-(model, role) score ±0.1 after every role call —
+    positive for success, negative for failure / rate-limit / role-not-
+    assigned. Hints clamp at ±100, matching the catalog's range, so a
+    chronically-broken model is reachable from the cascade only by
+    accumulating ~1000 successes after it earned its negative hint.
+
+    Hints are read lazily (one DB query per call) — overhead is fine
+    here because autoconfig runs once at startup, not per-token.
+    """
+    base = _role_score(entry, typecast_role)
+    try:
+        from agentcommander.db.repos import get_hint
+        hint = get_hint(model_id, typecast_role)
+    except Exception:  # noqa: BLE001
+        hint = 0.0
+    return base + hint
 
 
 def _avoids(entry: dict[str, Any], typecast_role: str) -> bool:
@@ -158,8 +186,10 @@ def _avoids(entry: dict[str, Any], typecast_role: str) -> bool:
 def pick_default_model(candidates: list[ModelCandidate]) -> ModelCandidate | None:
     """Pick the single best model to assign to ALL roles.
 
-    Scoring: count of roles where score > 0, weighted by score sum.
-    Filters: must fit VRAM, must have at least one positive role.
+    Scoring: count of roles where ``base_score + hint`` > 0, weighted by
+    score sum. Filters: must fit VRAM, must have at least one positive
+    role. Hints from the model_hints table are folded in — a chronic
+    failer earns a negative hint and falls behind in this election.
     """
     scored: list[tuple[ModelCandidate, int, float]] = []
     for cand in candidates:
@@ -171,7 +201,7 @@ def pick_default_model(candidates: list[ModelCandidate]) -> ModelCandidate | Non
             tc = _AC_TO_TYPECAST.get(role)
             if not tc:
                 continue
-            s = _role_score(cand.entry, tc)
+            s = _role_score_with_hint(cand.entry, tc, cand.model_id)
             if s > 0:
                 positive_count += 1
             score_sum += s
@@ -192,7 +222,7 @@ def pick_per_role(role: Role, candidates: list[ModelCandidate]) -> ModelCandidat
             continue
         if _avoids(cand.entry, tc):
             continue
-        s = _role_score(cand.entry, tc)
+        s = _role_score_with_hint(cand.entry, tc, cand.model_id)
         if s <= 0:
             continue
         scored.append((cand, s))

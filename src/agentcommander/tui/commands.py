@@ -115,6 +115,98 @@ def cmd_clear(ctx: CommandContext, _args: list[str]) -> None:
     write(CLEAR_SCREEN)
 
 
+def _toggle_meta_agent_flag(
+    args: list[str], *, config_key: str, label: str,
+) -> None:
+    """Shared logic for ``/preflight`` and ``/postmortem``: read/print/set
+    a boolean config flag. Modes:
+
+    - no args  → print current state
+    - ``on``   → set 1 + remind cost
+    - ``off``  → set 0
+    - ``rules`` (preflight only handled in caller) → ignored here
+    """
+    from agentcommander.db.repos import get_config, set_config
+
+    if not args:
+        raw = get_config(config_key, None)
+        on = bool(raw) and str(raw).strip().lower() in ("1", "true", "yes", "on", "enabled")
+        render_system_line(f"{label}: {'on' if on else 'off'} "
+                           f"(toggle with /{label} on|off)")
+        return
+    sub = args[0].strip().lower()
+    if sub in ("on", "enable", "1"):
+        set_config(config_key, "1")
+        render_system_line(style("accent", f"{label} enabled"))
+        render_system_line(style("muted",
+            f"  adds one extra LLM call per "
+            f"{'iteration' if label == 'preflight' else 'failed run'} — "
+            f"disable with /{label} off"))
+        return
+    if sub in ("off", "disable", "0"):
+        set_config(config_key, "0")
+        render_system_line(style("accent", f"{label} disabled"))
+        return
+    render_system_line(f"unknown subcommand: {sub}  (try on|off)")
+
+
+def cmd_preflight(ctx: CommandContext, args: list[str]) -> None:
+    """Toggle the preflight meta-agent.
+
+    Subcommands:
+      /preflight           — show current state
+      /preflight on        — enable (extra LLM call per orchestrator step)
+      /preflight off       — disable
+      /preflight rules     — list active operational rules
+    """
+    if args and args[0].strip().lower() == "rules":
+        from agentcommander.db.connection import get_db
+        rows = get_db().execute(
+            "SELECT id, action_type, target_pattern, constraint_text, "
+            "       origin, confidence, helped_count, hurt_count "
+            "FROM operational_rules WHERE archived = 0 "
+            "ORDER BY confidence DESC, id DESC LIMIT 50"
+        ).fetchall()
+        if not rows:
+            render_system_line("(no operational rules — postmortem hasn't"
+                               " written any yet, and no manual rules exist)")
+            return
+        from agentcommander.tui.render import render_table
+        render_table(
+            headers=("id", "action", "target", "origin", "conf",
+                     "h/h", "constraint"),
+            rows=[
+                (
+                    str(r["id"]),
+                    r["action_type"],
+                    (r["target_pattern"] or "-")[:30],
+                    r["origin"],
+                    f"{r['confidence']:.2f}",
+                    f"{r['helped_count']}/{r['hurt_count']}",
+                    (r["constraint_text"] or "")[:60],
+                )
+                for r in rows
+            ],
+        )
+        return
+    _toggle_meta_agent_flag(
+        args, config_key="preflight_enabled", label="preflight",
+    )
+
+
+def cmd_postmortem(ctx: CommandContext, args: list[str]) -> None:
+    """Toggle the postmortem meta-agent.
+
+    Subcommands:
+      /postmortem        — show current state
+      /postmortem on     — enable (one extra LLM call per failed run)
+      /postmortem off    — disable
+    """
+    _toggle_meta_agent_flag(
+        args, config_key="postmortem_enabled", label="postmortem",
+    )
+
+
 def cmd_popout(ctx: CommandContext, args: list[str]) -> None:
     """Toggle, list, or bulk-modify role popouts.
 
@@ -2095,6 +2187,57 @@ def _build_registry() -> dict[str, SlashCommand]:
                     "to it. The first message you send afterward is logged under the "
                     "new conversation. Title is optional; defaults to \"New conversation\".",
             examples=("/new", "/new Bug repro for fetch timeout"),
+        ),
+        SlashCommand(
+            name="/preflight", aliases=(),
+            summary="toggle the preflight meta-agent (off by default)",
+            handler=cmd_preflight,
+            usage=(
+                "/preflight              # show current state\n"
+                "/preflight on           # enable (extra LLM call per orchestrator step)\n"
+                "/preflight off          # disable\n"
+                "/preflight rules        # list active operational rules"
+            ),
+            details=(
+                "The preflight meta-agent runs AFTER the orchestrator picks an\n"
+                "action but BEFORE dispatch. It checks the action against\n"
+                "operational rules + recent scratchpad and may approve, inject\n"
+                "prerequisite steps, or abort the run. Off by default — adds\n"
+                "one LLM call per iteration. Enable for high-stakes runs where\n"
+                "the cost of a wrong action exceeds the cost of an extra call.\n"
+                "\n"
+                "Rules are populated by the postmortem meta-agent (also opt-in\n"
+                "via /postmortem on) when failed runs reveal patterns worth\n"
+                "catching next time. Listed via /preflight rules."
+            ),
+            examples=(
+                "/preflight",
+                "/preflight on",
+                "/preflight rules",
+            ),
+        ),
+        SlashCommand(
+            name="/postmortem", aliases=(),
+            summary="toggle the postmortem meta-agent (off by default)",
+            handler=cmd_postmortem,
+            usage=(
+                "/postmortem             # show current state\n"
+                "/postmortem on          # enable (LLM call after each failed run)\n"
+                "/postmortem off         # disable"
+            ),
+            details=(
+                "The postmortem meta-agent runs AFTER a pipeline ends with\n"
+                "status=failed (rate-limited, max-iterations, role-not-assigned,\n"
+                "or generic exception). It analyzes the run transcript and may:\n"
+                "  - persist a generalized rule to the operational_rules table\n"
+                "    so future preflights catch the same pattern,\n"
+                "  - log a retry proposal (auto-retry is a follow-up),\n"
+                "  - log a user_prompt for fixes that need human approval.\n"
+                "\n"
+                "Off by default — adds one LLM call per failure. Cancellations\n"
+                "(/stop) are intentionally not analyzed."
+            ),
+            examples=("/postmortem", "/postmortem on"),
         ),
         SlashCommand(
             name="/popout", aliases=("/po",),

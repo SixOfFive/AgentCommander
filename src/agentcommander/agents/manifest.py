@@ -117,7 +117,9 @@ AGENTS: tuple[AgentDef, ...] = (
         category=AgentCategory.PRODUCER,
         purpose="Critique recently-written code for correctness, style, and edge cases.",
         invocation="Called via 'review'. Auto-triggered by done-guards when 2+ code files written without review.",
-        output_contract=OutputContract.FREEFORM,
+        # JSON_STRICT: emits {verdict: PASS|FAIL, blockers, warnings, suggestions, summary}.
+        # Done-guards parse `verdict` to decide whether the orchestrator may emit done.
+        output_contract=OutputContract.JSON_STRICT,
         default_temperature=0.3,
         default_max_tokens=8000,
         optional=True,
@@ -188,7 +190,9 @@ AGENTS: tuple[AgentDef, ...] = (
         category=AgentCategory.PRODUCER,
         purpose="Write executable tests for code — typically pytest / unittest / vitest.",
         invocation="Called via 'test'. Auto-triggered by done-guards when code was executed but not tested.",
-        output_contract=OutputContract.FREEFORM,
+        # JSON_STRICT: emits {verdict: PASS|FAIL, test_files, command, tests_total/passed/failed, failures, summary}.
+        # Done-guards parse `verdict` to decide whether the orchestrator may emit done.
+        output_contract=OutputContract.JSON_STRICT,
         default_temperature=0.2,
         default_max_tokens=8000,
         optional=True,

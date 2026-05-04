@@ -24,15 +24,18 @@ def _now_ms() -> int:
 
 def list_conversations() -> list[Conversation]:
     rows = get_db().execute(
-        "SELECT id, title, created_at, updated_at FROM conversations "
-        "WHERE archived = 0 ORDER BY updated_at DESC"
+        "SELECT id, title, working_directory, created_at, updated_at "
+        "FROM conversations WHERE archived = 0 ORDER BY updated_at DESC"
     ).fetchall()
     return [Conversation(id=r["id"], title=r["title"],
-                         created_at=r["created_at"], updated_at=r["updated_at"]) for r in rows]
+                         working_directory=r["working_directory"],
+                         created_at=r["created_at"],
+                         updated_at=r["updated_at"]) for r in rows]
 
 
 def create_conversation(title: str, working_directory: str | None = None) -> Conversation:
     conv = Conversation(id=str(uuid.uuid4()), title=title,
+                        working_directory=working_directory,
                         created_at=_now_ms(), updated_at=_now_ms())
     get_db().execute(
         "INSERT INTO conversations (id, title, working_directory, created_at, updated_at) "
@@ -44,13 +47,16 @@ def create_conversation(title: str, working_directory: str | None = None) -> Con
 
 def get_conversation(conv_id: str) -> Conversation | None:
     row = get_db().execute(
-        "SELECT id, title, created_at, updated_at FROM conversations WHERE id = ?",
+        "SELECT id, title, working_directory, created_at, updated_at "
+        "FROM conversations WHERE id = ?",
         (conv_id,),
     ).fetchone()
     if row is None:
         return None
     return Conversation(id=row["id"], title=row["title"],
-                        created_at=row["created_at"], updated_at=row["updated_at"])
+                        working_directory=row["working_directory"],
+                        created_at=row["created_at"],
+                        updated_at=row["updated_at"])
 
 
 def delete_conversation(conv_id: str) -> None:
@@ -303,6 +309,109 @@ def get_hint(model_id: str, role: Role | str) -> float:
         (model_id, role_value),
     ).fetchone()
     return float(row["score"]) if row else 0.0
+
+
+# ─── Operational rules (preflight + postmortem) ────────────────────────────
+
+
+def insert_operational_rule(
+    *,
+    fingerprint_version: int,
+    action_type: str,
+    target_pattern: str | None,
+    context_tags: list[str] | None,
+    constraint_text: str,
+    suggested_reorder: list[dict] | None,
+    origin: str,
+    confidence: float,
+    example_run_id: str | None,
+) -> int:
+    """Insert a postmortem-derived (or manually authored) rule. Returns row id."""
+    db = get_db()
+    cur = db.execute(
+        "INSERT INTO operational_rules "
+        "(fingerprint_version, action_type, target_pattern, context_tags, "
+        " constraint_text, suggested_reorder, origin, confidence, "
+        " helped_count, hurt_count, example_run_id, created_at, archived) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, 0)",
+        (
+            fingerprint_version,
+            action_type,
+            target_pattern,
+            json.dumps(context_tags) if context_tags else None,
+            constraint_text,
+            json.dumps(suggested_reorder) if suggested_reorder else None,
+            origin,
+            float(confidence),
+            example_run_id,
+            _now_ms(),
+        ),
+    )
+    return int(cur.lastrowid or 0)
+
+
+def list_operational_rules_for_action(action_type: str) -> list[dict[str, Any]]:
+    """Return un-archived rules whose ``action_type`` matches.
+
+    Preflight calls this each iteration to find rules that should be
+    quoted to the meta-agent. We don't pre-filter on context_tags here —
+    the agent decides relevance from the tags + constraint text.
+    """
+    rows = get_db().execute(
+        "SELECT id, fingerprint_version, action_type, target_pattern, "
+        "       context_tags, constraint_text, suggested_reorder, origin, "
+        "       confidence, helped_count, hurt_count "
+        "FROM operational_rules "
+        "WHERE archived = 0 AND action_type = ? "
+        "ORDER BY confidence DESC, id DESC",
+        (action_type,),
+    ).fetchall()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        try:
+            tags = json.loads(r["context_tags"]) if r["context_tags"] else []
+        except (TypeError, ValueError):
+            tags = []
+        try:
+            reorder = json.loads(r["suggested_reorder"]) if r["suggested_reorder"] else None
+        except (TypeError, ValueError):
+            reorder = None
+        out.append({
+            "id": int(r["id"]),
+            "fingerprint_version": int(r["fingerprint_version"]),
+            "action_type": r["action_type"],
+            "target_pattern": r["target_pattern"],
+            "context_tags": tags,
+            "constraint_text": r["constraint_text"],
+            "suggested_reorder": reorder,
+            "origin": r["origin"],
+            "confidence": float(r["confidence"]),
+            "helped_count": int(r["helped_count"]),
+            "hurt_count": int(r["hurt_count"]),
+        })
+    return out
+
+
+def bump_rule_outcome(rule_id: int, *, helped: bool) -> None:
+    """Increment helped_count / hurt_count for a rule. Called by postmortem
+    when a rule's prediction matched (or contradicted) the run outcome."""
+    db = get_db()
+    if helped:
+        db.execute(
+            "UPDATE operational_rules SET helped_count = helped_count + 1 "
+            "WHERE id = ?", (rule_id,),
+        )
+    else:
+        db.execute(
+            "UPDATE operational_rules SET hurt_count = hurt_count + 1 "
+            "WHERE id = ?", (rule_id,),
+        )
+
+
+def archive_operational_rule(rule_id: int) -> None:
+    get_db().execute(
+        "UPDATE operational_rules SET archived = 1 WHERE id = ?", (rule_id,),
+    )
 
 
 # ─── Pipeline run tracking ─────────────────────────────────────────────────

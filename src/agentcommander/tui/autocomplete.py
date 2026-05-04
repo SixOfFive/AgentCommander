@@ -80,6 +80,20 @@ SUB_COMMANDS: dict[str, list[CompletionMatch]] = {
         CompletionMatch(name="off",
                         summary="clear the session-wide num_ctx override"),
     ],
+    "/preflight": [
+        CompletionMatch(name="on",
+                        summary="enable preflight (extra LLM call per orchestrator step)"),
+        CompletionMatch(name="off",
+                        summary="disable preflight"),
+        CompletionMatch(name="rules",
+                        summary="list active operational rules"),
+    ],
+    "/postmortem": [
+        CompletionMatch(name="on",
+                        summary="enable postmortem (LLM call after each failed run)"),
+        CompletionMatch(name="off",
+                        summary="disable postmortem"),
+    ],
     "/chat": [
         CompletionMatch(name="list",
                         summary="list recent chats with message counts"),

@@ -84,12 +84,27 @@ def push_nudge(scratchpad: list[ScratchpadEntry], iteration: int,
 
 def compact_scratchpad(scratchpad: list[ScratchpadEntry], *, tail: int = 20,
                        max_input: int = 200, max_output: int = 400) -> str:
-    """Compact the last `tail` entries into a string for role prompt inclusion."""
+    """Compact the last `tail` entries into a string for role prompt inclusion.
+
+    Strips the engine's ``successfully completed:\\n`` wrapper from tool
+    outputs before serialization. The wrapper is added by
+    ``engine.py:_dispatch_tool`` to make the scratchpad self-describing,
+    but feeding it back to the orchestrator across turns invites the model
+    to copy that exact prefix into its ``done.input`` as if it were a real
+    reply (round-22 stress test caught this — once a prior turn wrote a
+    file, every subsequent question got "successfully completed:\\n
+    Successfully wrote N bytes to X.txt" as the answer). Stripping here
+    means the orchestrator only sees the raw tool output, not the engine's
+    own scaffolding.
+    """
     recent = scratchpad[-tail:] if tail > 0 else scratchpad
     lines: list[str] = []
     for e in recent:
         inp = (e.input or "")[:max_input]
-        out = (e.output or "")[:max_output]
+        out_raw = e.output or ""
+        out_raw = re.sub(r"^successfully completed:\s*\n", "", out_raw,
+                         count=1)
+        out = out_raw[:max_output]
         prefix = f"step {e.step} {e.role}/{e.action}: "
         if inp:
             lines.append(f"{prefix}in={inp} out={out}")
@@ -107,7 +122,8 @@ def _same_head(a: str, b: str, n: int = 120) -> bool:
     return norm(a) == norm(b)
 
 
-def build_final_output(scratchpad: Iterable[ScratchpadEntry]) -> str:
+def build_final_output(scratchpad: Iterable[ScratchpadEntry],
+                        current_turn_start: int = 0) -> str:
     """Build a user-visible final output from scratchpad entries.
 
     Priority order (matches EC):
@@ -115,18 +131,37 @@ def build_final_output(scratchpad: Iterable[ScratchpadEntry]) -> str:
       2. Last content-role output (vision/researcher/...)
       3. Execution stdout from successful runs
       4. Step-by-step report
+
+    ``current_turn_start`` is the index into the scratchpad where THIS
+    turn's entries begin (entries before it were hydrated from prior
+    turns of the conversation). Round-26 caught a leak where prompt N
+    wrote fizzbuzz26.py, prompt N+1 (an unrelated reverse26 task) had
+    its execute fail, and the orchestrator's done fell through to
+    build_final_output — which surfaced fizzbuzz26's successful write
+    from prompt N as the "answer" for prompt N+1.
+
+    To prevent that, the priority paths that surface CONCRETE
+    work-product (files created, execution output, tool results) only
+    consider entries from this turn. The summarizer / content-role
+    paths still see the full pad — those are explicitly meant to carry
+    cross-turn narrative.
     """
     pad = list(scratchpad)
+    # Slice for paths that should NOT surface prior-turn artifacts as
+    # the current turn's answer. Round-26 caught fizzbuzz26 (from turn N)
+    # appearing as the answer to reverse26 (turn N+1).
+    current_pad = pad[max(0, current_turn_start):]
 
-    # 1. Summarizer
-    summary = next((e for e in reversed(pad)
+    # 1. Summarizer — current turn only. A summarizer output from a
+    # prior turn was meant to summarize THAT turn, not this one.
+    summary = next((e for e in reversed(current_pad)
                     if e.role == "summarizer" and e.action != "compress"), None)
     if summary and len(summary.output) > 50:
         return _clean_for_user(summary.output)
 
-    # 2. Content-role last output
+    # 2. Content-role last output — current turn only.
     content_entries = [
-        e for e in pad
+        e for e in current_pad
         if e.role in CONTENT_ROLES
         and e.action not in ("compress", "system_nudge")
         and isinstance(e.output, str)
@@ -135,21 +170,21 @@ def build_final_output(scratchpad: Iterable[ScratchpadEntry]) -> str:
     if content_entries:
         return _clean_for_user(content_entries[-1].output)
 
-    # 3. Execution stdout from success
-    files = [e for e in pad
+    # 3. Execution stdout from success — current turn only (round-26)
+    files = [e for e in current_pad
              if e.action == "write_file" and "Successfully" in (e.output or "")]
-    successful_execs = [e for e in pad
+    successful_execs = [e for e in current_pad
                         if e.action == "execute"
                         and "successfully" in (e.output or "")
                         and "SyntaxError" not in (e.output or "")]
-    errors = [e for e in pad
+    errors = [e for e in current_pad
               if (("Error" in (e.output or "")) or ("failed" in (e.output or "")))
               and e.action != "system_nudge"]
     # Failed executions specifically — different surfacing path. The user
     # cares about exit code + stderr, not the step echo (which is what was
     # happening pre-Bug-C-followup: just "### Step 1: tool/execute\nexit
     # code 1" with no actionable content).
-    failed_execs = [e for e in pad
+    failed_execs = [e for e in current_pad
                     if e.action == "execute"
                     and "successfully" not in (e.output or "").lower()
                     and (e.output or "").strip()]
@@ -159,8 +194,9 @@ def build_final_output(scratchpad: Iterable[ScratchpadEntry]) -> str:
     # asked for; without these, a question like "list files in this dir"
     # would fall through to the step-by-step echo of the router entry,
     # forcing the chat fallback to compensate (extra model call).
+    # Current turn only (round-26 leak fix).
     successful_tool_outputs = [
-        e for e in pad
+        e for e in current_pad
         if e.role == "tool"
         and e.action in ("list_dir", "read_file", "fetch")
         and "successfully" in (e.output or "").lower()
@@ -174,7 +210,19 @@ def build_final_output(scratchpad: Iterable[ScratchpadEntry]) -> str:
         if stdout and len(stdout) > 5:
             parts.append(f"**Execution Output:**\n```\n{stdout[:3000]}\n```")
     if files:
-        parts.append(f"**Files created:** {', '.join(f.input for f in files)}")
+        # Order-preserving dedup. When the orchestrator retries a write
+        # (round-23: greet23.py written 8 times during a stuck loop)
+        # without this we'd ship "Files created: greet23.py, greet23.py,
+        # greet23.py, greet23.py …" as the user-visible summary.
+        seen: set[str] = set()
+        unique_paths: list[str] = []
+        for f in files:
+            p = (f.input or "").strip()
+            if p and p not in seen:
+                seen.add(p)
+                unique_paths.append(p)
+        if unique_paths:
+            parts.append(f"**Files created:** {', '.join(unique_paths)}")
     if successful_execs:
         parts.append(f"**Successful executions:** {len(successful_execs)}")
     if successful_tool_outputs:
@@ -220,15 +268,21 @@ def build_final_output(scratchpad: Iterable[ScratchpadEntry]) -> str:
         # behavior so we don't regress).
         parts.append(f"**Errors encountered:** {len(errors)}")
 
-    # 4. Step-by-step fallback (deduped). Skip:
+    # 4. Step-by-step fallback (deduped). Scoped to current turn so a
+    # prior turn's steps don't appear in this turn's report. Skip:
     #   - router/classify: internal scaffolding, never useful as final output
     #     (and surfacing it triggers _is_router_echo, forcing chat fallback)
     #   - tool entries other than execute (their content is surfaced above
     #     when applicable; otherwise omit rather than dump raw scratchpad)
     #   - debugger / system_nudge: orchestration noise
-    meaningful = [e for e in pad
+    #   - chat/reply: that's the chat-fallback's output from a PRIOR turn
+    #     (it persists in scratchpad). Round-24 caught this: the haiku
+    #     reply from turn N kept appearing as the answer for turns N+1,
+    #     N+2 because the step-echo path picked up the prior reply.
+    meaningful = [e for e in current_pad
                   if (e.role != "tool" or e.action == "execute")
                   and e.role not in ("router", "debugger")
+                  and not (e.role == "chat" and e.action == "reply")
                   and e.action != "system_nudge"][-6:]
     deduped: list[ScratchpadEntry] = []
     for e in meaningful:

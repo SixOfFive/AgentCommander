@@ -180,6 +180,28 @@ def echo_request_guard(scratchpad: list[ScratchpadEntry], iteration: int, max_it
             and _FACTUAL_QA_PREFIX_RX.match(user_message or "")):
         return GuardVerdict(action="pass")
 
+    # Verbatim-echo backstop: if done.input EQUALS the user message
+    # (after normalization), it's an echo regardless of how many tools
+    # ran. Round-23 caught this: the haiku-and-translate task ran
+    # write_file + read_file + translate, then the orchestrator emitted
+    # done.input = "write a haiku about coffee in haiku23.txt then
+    # translate it to spanish" (the exact user message). The original
+    # overlap-ratio check skipped it because tool_count > 1. The
+    # verbatim form has no false-positive risk: a real reply just doesn't
+    # equal the user's prompt verbatim.
+    if user_message:
+        norm_user = re.sub(r"\s+", " ", user_message).strip().lower()
+        norm_done = re.sub(r"\s+", " ", text).strip().lower()
+        if (norm_user and norm_done == norm_user) or (
+                len(norm_user) > 30 and norm_user in norm_done
+                and len(norm_done) < len(norm_user) * 1.4):
+            push_system_nudge(scratchpad, iteration, "echo_verbatim",
+                              "STOP: done.input is the user's request restated "
+                              "verbatim, not an answer. Present what was actually "
+                              "produced (file contents, translation, computed "
+                              "result) — not a restatement of what was asked.")
+            return GuardVerdict(action="continue")
+
     user_words = {w for w in user_message.lower().split() if len(w) > 3}
     done_words = [w for w in text.lower().split() if len(w) > 3]
     overlap = sum(1 for w in done_words if w in user_words)
@@ -236,6 +258,19 @@ def capabilities_list_guard(scratchpad: list[ScratchpadEntry], iteration: int, m
 
 def code_review_guard(scratchpad: list[ScratchpadEntry], iteration: int, max_iter: int,
                        decision: OrchestratorDecision) -> GuardVerdict:
+    """When 2+ code files were written without a review pass, push a
+    nudge asking the orchestrator to call the reviewer next.
+
+    Round-23 bug history: this guard used to mutate ``decision.action``
+    and ``decision.input`` directly and return ``pass``. But we're called
+    from inside ``_handle_done`` — past the action-dispatch switch — so
+    the action mutation never took effect. Worse, the placeholder text
+    "Review the code that was written. Files: …" got picked up later by
+    ``raw_content_guard`` and shipped as the user-visible reply, even
+    though the orchestrator hadn't actually run a review. Fix: push a
+    system_nudge and return ``continue`` so the orchestrator gets a
+    fresh decision with the reminder visible.
+    """
     has_code_files = [
         e for e in scratchpad
         if e.action == "write_file"
@@ -245,15 +280,26 @@ def code_review_guard(scratchpad: list[ScratchpadEntry], iteration: int, max_ite
     has_review = any(e.role == "reviewer" for e in scratchpad)
     if (len(has_code_files) >= 2 and not has_review
             and _role_configured("reviewer") and iteration < max_iter - 2):
-        decision.action = "review"
-        decision.reasoning = "Multiple code files written — running quality review before completing."
-        decision.input = (f"Review the code that was written. Files: "
-                          f'{", ".join(e.input for e in has_code_files)}')
+        files = ", ".join(e.input for e in has_code_files)
+        push_system_nudge(scratchpad, iteration, "code_review_redirect",
+                          f"BLOCKED: {len(has_code_files)} code files were "
+                          f"written ({files}) without a review. Before "
+                          f"emitting done, call action=\"review\" with the "
+                          f"file list as input. Then done.")
+        return GuardVerdict(action="continue")
     return GuardVerdict(action="pass")
 
 
 def code_test_guard(scratchpad: list[ScratchpadEntry], iteration: int, max_iter: int,
                      decision: OrchestratorDecision) -> GuardVerdict:
+    """When code was written + executed successfully but never tested,
+    push a nudge asking the orchestrator to call the tester next.
+
+    Same fix as ``code_review_guard``: never mutate decision fields
+    inside _handle_done — that mutation can't reach the dispatch switch
+    and the polluted decision.input gets shipped by later guards as the
+    final answer (round-22/23 leak).
+    """
     code_files = [
         e for e in scratchpad
         if e.action == "write_file"
@@ -267,10 +313,13 @@ def code_test_guard(scratchpad: list[ScratchpadEntry], iteration: int, max_iter:
     )
     if (code_files and not has_test and _role_configured("tester")
             and iteration < max_iter - 2 and has_exec_success):
-        decision.action = "test"
-        decision.reasoning = "Code was executed but not tested. Running tests to verify correctness."
-        decision.input = (f"Write and run tests for: "
-                          f'{", ".join(e.input for e in code_files)}')
+        files = ", ".join(e.input for e in code_files)
+        push_system_nudge(scratchpad, iteration, "code_test_redirect",
+                          f"BLOCKED: code was written and run but never "
+                          f"tested. Before emitting done, call "
+                          f"action=\"test\" with these files as input: "
+                          f"{files}. Then done.")
+        return GuardVerdict(action="continue")
     return GuardVerdict(action="pass")
 
 
@@ -660,7 +709,20 @@ def code_in_done_execute_guard(scratchpad: list[ScratchpadEntry],
     return GuardVerdict(action="pass")
 
 
-def code_dump_guard(decision: OrchestratorDecision) -> GuardVerdict:
+def code_dump_guard(scratchpad: list[ScratchpadEntry], iteration: int,
+                     decision: OrchestratorDecision) -> GuardVerdict:
+    """When done.input is mostly raw code, redirect via nudge to summarize.
+
+    Round-23 fix: previously this mutated decision.action / decision.input
+    in place and returned ``pass``. The action mutation never reached the
+    dispatch switch (we're past it inside _handle_done), and the
+    instruction-string substitute for decision.input was then shipped by
+    raw_content_guard as the final answer, presenting the user with
+    "Explain what was done and present the results …" instead of the
+    actual code or its explanation. Now: push a nudge and return
+    continue so the orchestrator gets a fresh chance to call
+    summarize.
+    """
     text = decision.input or ""
     lines = [ln for ln in text.split("\n") if ln.strip()]
     if len(lines) < 5:
@@ -672,16 +734,22 @@ def code_dump_guard(decision: OrchestratorDecision) -> GuardVerdict:
         or re.match(r"^\s*\w+\s*[=({\[]", ln)
     )
     if code_lines / len(lines) > 0.7 and len(lines) > 10:
-        decision.action = "summarize"
-        decision.input = (
-            "The user's task is complete. Explain what was done and present the results "
-            "in a user-friendly way. Here is the code that was written:\n\n"
-            f"```\n{text[:6000]}\n```"
-        )
+        push_system_nudge(scratchpad, iteration, "code_dump_redirect",
+                          f"BLOCKED: done.input is mostly raw code "
+                          f"({code_lines}/{len(lines)} lines). Don't dump "
+                          f"code as the answer — call action=\"summarize\" "
+                          f"with the code as input to get a user-friendly "
+                          f"explanation, then done.")
+        return GuardVerdict(action="continue")
     return GuardVerdict(action="pass")
 
 
-def verbose_fluff_guard(decision: OrchestratorDecision) -> GuardVerdict:
+def verbose_fluff_guard(scratchpad: list[ScratchpadEntry], iteration: int,
+                         decision: OrchestratorDecision) -> GuardVerdict:
+    """When done.input is verbose with high filler-phrase ratio, redirect
+    via nudge to summarize. See ``code_dump_guard`` for why this is now
+    nudge-and-continue rather than silent mutation.
+    """
     text = decision.input or ""
     if len(text) <= 5000:
         return GuardVerdict(action="pass")
@@ -694,16 +762,18 @@ def verbose_fluff_guard(decision: OrchestratorDecision) -> GuardVerdict:
     )
     fluff_ratio = len(fluff) / (len(text) / 500)
     if fluff_ratio > 2:
-        decision.action = "summarize"
-        decision.input = (
-            f"Summarize this response concisely. Remove filler phrases and verbose "
-            f"explanations. Keep only essential information and results:\n\n{text[:8000]}"
-        )
+        push_system_nudge(scratchpad, iteration, "verbose_fluff_redirect",
+                          f"BLOCKED: done.input is {len(text)} chars with "
+                          f"{len(fluff)} filler phrases ("
+                          f"ratio {fluff_ratio:.1f}). Call "
+                          f"action=\"summarize\" to tighten it, then done.")
+        return GuardVerdict(action="continue")
     return GuardVerdict(action="pass")
 
 
 def raw_content_guard(scratchpad: list[ScratchpadEntry], decision: OrchestratorDecision,
-                       user_message: str) -> GuardVerdict:
+                       user_message: str,
+                       turn_start_idx: int = 0) -> GuardVerdict:
     raw = decision.input or ""
     looks_raw = (
         raw.startswith("<?xml")
@@ -751,7 +821,7 @@ def raw_content_guard(scratchpad: list[ScratchpadEntry], decision: OrchestratorD
         return GuardVerdict(action="pass")
 
     cleaned = _NEXT_DIRECTIVE_RX.sub("", raw).rstrip()
-    final = cleaned or build_final_output(scratchpad)
+    final = cleaned or build_final_output(scratchpad, turn_start_idx)
 
     user_wants_output = bool(re.search(
         r"\b(show.*output|show.*result|run.*it|execute.*it|print|display)\b",
@@ -780,6 +850,235 @@ def raw_content_guard(scratchpad: list[ScratchpadEntry], decision: OrchestratorD
 # ─── Runner ────────────────────────────────────────────────────────────────
 
 
+# ─── JSON-verdict gates (reviewer / tester) ───────────────────────────────
+
+
+def _parse_json_verdict(output: str) -> dict[str, Any] | None:
+    """Try to extract the JSON verdict block from a role's output.
+
+    Reviewer and tester emit JSON_STRICT — but some local models leak a
+    leading explanation or wrap the JSON in ```json ... ```. Try the
+    raw output first, then strip a markdown fence if present, then
+    salvage the first balanced ``{...}`` block.
+
+    Returns the parsed dict or None if no salvageable JSON is present.
+    """
+    if not output:
+        return None
+    s = output.strip()
+
+    # Strip markdown fence if the model added one
+    if s.startswith("```"):
+        # remove first line (``` or ```json) and trailing ```
+        first_nl = s.find("\n")
+        if first_nl != -1:
+            s = s[first_nl + 1:]
+        if s.endswith("```"):
+            s = s[:-3].rstrip()
+
+    # Direct parse attempt
+    try:
+        obj = _json.loads(s)
+        if isinstance(obj, dict):
+            return obj
+    except (ValueError, TypeError):
+        pass
+
+    # Salvage: find the first balanced top-level {...}
+    depth = 0
+    start = -1
+    for i, ch in enumerate(s):
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and start != -1:
+                candidate = s[start:i + 1]
+                try:
+                    obj = _json.loads(candidate)
+                    if isinstance(obj, dict):
+                        return obj
+                except (ValueError, TypeError):
+                    pass
+                start = -1
+    return None
+
+
+def reviewer_verdict_guard(scratchpad: list[ScratchpadEntry], iteration: int,
+                            decision: OrchestratorDecision) -> GuardVerdict:  # noqa: ARG001
+    """Read the reviewer's JSON verdict; block done if FAIL with blockers.
+
+    Reviewer emits JSON_STRICT (manifest output_contract). Schema:
+        {"verdict": "PASS"|"FAIL", "blockers": [...], "warnings": [...],
+         "suggestions": [...], "summary": "..."}
+
+    If the most-recent reviewer entry's verdict == "FAIL" with non-empty
+    blockers, push a nudge that names them and ask the orchestrator to
+    address before claiming done. If verdict == "PASS" or no reviewer
+    output exists, this guard passes — other guards still run.
+    """
+    last_review = next((e for e in reversed(scratchpad)
+                        if e.role == "reviewer" and e.action != "system_nudge"),
+                       None)
+    if last_review is None:
+        return GuardVerdict(action="pass")
+    parsed = _parse_json_verdict(last_review.output or "")
+    if parsed is None:
+        return GuardVerdict(action="pass")  # not parseable → don't block
+
+    verdict = str(parsed.get("verdict", "")).upper()
+    blockers = parsed.get("blockers") or []
+    if verdict == "FAIL" and blockers:
+        # Don't keep re-firing if the orchestrator has already been
+        # nudged about THIS verdict. Without this, a stuck orchestrator
+        # that keeps calling review (instead of code) gets nudged on
+        # every iteration and the run burns turns. After 2 nudges,
+        # accept the done with the FAIL as the user-visible answer
+        # — better to surface "the reviewer found these issues" than
+        # spin forever.
+        prior_nudges = sum(
+            1 for e in scratchpad
+            if e.action == "system_nudge" and e.input == "reviewer_failed"
+        )
+        if prior_nudges >= 2:
+            return GuardVerdict(action="pass")
+        names = []
+        for b in blockers[:3]:
+            if isinstance(b, dict):
+                where = b.get("file") or "?"
+                line = b.get("line")
+                problem = b.get("problem") or b.get("category") or "blocker"
+                loc = f"{where}:{line}" if line else where
+                names.append(f"{loc} — {problem}")
+            else:
+                names.append(str(b)[:120])
+        push_system_nudge(scratchpad, iteration, "reviewer_failed",
+                          f"BLOCKED: reviewer returned FAIL with "
+                          f"{len(blockers)} blocker(s). Do NOT re-run review — "
+                          f"dispatch action=code to FIX the blockers, then "
+                          f"action=review to re-check. First few: "
+                          + "; ".join(names))
+        return GuardVerdict(action="continue")
+    return GuardVerdict(action="pass")
+
+
+def tester_verdict_guard(scratchpad: list[ScratchpadEntry], iteration: int,
+                          decision: OrchestratorDecision) -> GuardVerdict:  # noqa: ARG001
+    """Read the tester's JSON verdict; block done if FAIL with failures.
+
+    Tester emits JSON_STRICT. Schema:
+        {"verdict": "PASS"|"FAIL", "test_files": [...], "command": "...",
+         "tests_total": N, "tests_passed": N, "tests_failed": N,
+         "failures": [{"test", "expected", "actual", ...}], "summary": "..."}
+
+    If verdict == "FAIL" with non-empty failures, push a nudge naming
+    the failing tests so the orchestrator can debug, then continue.
+    """
+    last_test = next((e for e in reversed(scratchpad)
+                      if e.role == "tester" and e.action != "system_nudge"),
+                     None)
+    if last_test is None:
+        return GuardVerdict(action="pass")
+    parsed = _parse_json_verdict(last_test.output or "")
+    if parsed is None:
+        return GuardVerdict(action="pass")
+
+    verdict = str(parsed.get("verdict", "")).upper()
+    failures = parsed.get("failures") or []
+    total = parsed.get("tests_total") or 0
+    failed = parsed.get("tests_failed") or len(failures)
+    if verdict == "FAIL" and (failures or failed > 0):
+        # Same loop-cap as reviewer_verdict_guard. After 2 nudges,
+        # accept the done with the failures as the user-visible answer.
+        prior_nudges = sum(
+            1 for e in scratchpad
+            if e.action == "system_nudge" and e.input == "tester_failed"
+        )
+        if prior_nudges >= 2:
+            return GuardVerdict(action="pass")
+        names = []
+        for f in failures[:3]:
+            if isinstance(f, dict):
+                t = f.get("test") or "?"
+                actual = f.get("actual") or "?"
+                names.append(f"{t}: {str(actual)[:80]}")
+            else:
+                names.append(str(f)[:120])
+        push_system_nudge(scratchpad, iteration, "tester_failed",
+                          f"BLOCKED: tester returned FAIL — {failed}/{total or '?'} "
+                          f"test(s) failed. Do NOT re-run tester — dispatch "
+                          f"action=debug or action=code to fix the failing "
+                          f"tests, then re-run. First few: "
+                          + "; ".join(names))
+        return GuardVerdict(action="continue")
+    # Special case: tester reported tests_total=0 → tests weren't actually
+    # run, just written. The orchestrator should dispatch execute next,
+    # not done.
+    if total == 0 and verdict != "PASS":
+        push_system_nudge(scratchpad, iteration, "tester_did_not_run",
+                          "BLOCKED: tester returned tests_total=0 — tests "
+                          "were written but not executed. Dispatch "
+                          "action=execute with the tester's command, then "
+                          "call done.")
+        return GuardVerdict(action="continue")
+    return GuardVerdict(action="pass")
+
+
+def prompt_template_leak_guard(decision: OrchestratorDecision,
+                                 scratchpad: list[ScratchpadEntry],
+                                 iteration: int,
+                                 max_iter: int) -> GuardVerdict:
+    """Reject ``done`` outputs that are obviously leaked role-prompt scaffolding.
+
+    Round-22 stress surfaced cases where the orchestrator regurgitated the
+    summarizer / planner role prompt template back as ``done.input``
+    instead of answering the user. Patterns observed:
+
+      - "Summarize what was done. User asked: ... Work completed: * fetch: ..."
+      - "Work completed:" followed by bulleted action list
+      - "Next directives:" / "Pipeline observations:"
+
+    These phrases are scaffolding the orchestrator never authored — they
+    only appear when the model is reflecting context back at us. Catch
+    them at done time, push a nudge that names the leak, and let the run
+    re-orchestrate (which after the engine.py:1438 fix means the model
+    will actually see the user's question on the next attempt).
+
+    The earlier ``_is_scratchpad_leak`` in engine.py is a backstop that
+    routes to chat fallback. This guard is the proactive version that
+    runs before that backstop and gives the orchestrator a chance to
+    self-correct without the chat-fallback round-trip.
+    """
+    text = (decision.input or "").lstrip()
+    if len(text) < 20:
+        return GuardVerdict(action="pass")
+    norm = text.lower()
+    leak_prefixes = (
+        "summarize what was done",
+        "work completed:",
+        "pipeline observations:",
+        "next directives:",
+        "task summary:",
+        "execution log:",
+    )
+    matched = next((p for p in leak_prefixes if norm.startswith(p)), None)
+    if matched is None:
+        return GuardVerdict(action="pass")
+    push_system_nudge(scratchpad, iteration,
+                      "prompt_template_leak",
+                      f'BLOCKED: done.input started with "{matched}" — that is '
+                      f"role-prompt scaffolding, not an answer the user asked "
+                      f"for. The user's actual message is in the most-recent "
+                      f"user turn; answer that directly with action=done and "
+                      f"a real reply.")
+    # Bump the iteration cap so the recovery has room to converge —
+    # rejected dones are common with weaker orchestrators on context-
+    # heavy turns.
+    return GuardVerdict(action="continue")
+
+
 def run_done_guards(ctx: dict[str, Any]) -> dict[str, Any]:
     """Run done-guards in priority order. Returns first non-pass verdict
     (or break with final_output from raw_content_guard).
@@ -788,6 +1087,7 @@ def run_done_guards(ctx: dict[str, Any]) -> dict[str, Any]:
     Returns: {action, final_output?}.
     """
     scratchpad = ctx["scratchpad"]
+    turn_start_idx = int(ctx.get("turn_start_idx") or 0)
     iteration = ctx["iteration"]
     max_iter_ref = ctx["max_iterations_ref"]  # mutable single-element list
     user_message = ctx["user_message"]
@@ -795,6 +1095,16 @@ def run_done_guards(ctx: dict[str, Any]) -> dict[str, Any]:
     max_iter = max_iter_ref[0]
 
     guards: list[Any] = [
+        # prompt_template_leak runs first because if the done.input is
+        # obviously leaked scaffolding, none of the downstream guards
+        # need to look at it — they'd just rubber-stamp meaningless text.
+        lambda: prompt_template_leak_guard(decision, scratchpad, iteration, max_iter),
+        # JSON-verdict gates from reviewer/tester. These run BEFORE the
+        # legacy code_review/code_test guards (which only nudge to call
+        # those roles in the first place). If the role already ran and
+        # returned FAIL, block done with the actual failures named.
+        lambda: reviewer_verdict_guard(scratchpad, iteration, decision),
+        lambda: tester_verdict_guard(scratchpad, iteration, decision),
         lambda: debugger_fix_incomplete_guard(scratchpad, iteration, decision),
         lambda: contradictory_done_guard(scratchpad, iteration, max_iter, decision),
         lambda: error_in_output_guard(scratchpad, iteration, max_iter, decision),
@@ -818,9 +1128,9 @@ def run_done_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         lambda: missing_results_guard(scratchpad, decision),
         lambda: incomplete_code_block_guard(decision),
         lambda: code_in_done_execute_guard(scratchpad, decision, user_message),
-        lambda: code_dump_guard(decision),
-        lambda: verbose_fluff_guard(decision),
-        lambda: raw_content_guard(scratchpad, decision, user_message),
+        lambda: code_dump_guard(scratchpad, iteration, decision),
+        lambda: verbose_fluff_guard(scratchpad, iteration, decision),
+        lambda: raw_content_guard(scratchpad, decision, user_message, turn_start_idx),
     ]
 
     for guard in guards:
@@ -828,4 +1138,5 @@ def run_done_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         if verdict.action != "pass":
             return {"action": verdict.action, "final_output": verdict.final_output}
 
-    return {"action": "break", "final_output": build_final_output(scratchpad)}
+    return {"action": "break",
+            "final_output": build_final_output(scratchpad, turn_start_idx)}

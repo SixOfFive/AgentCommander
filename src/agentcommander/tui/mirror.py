@@ -363,11 +363,6 @@ def run_mirror() -> int:
     bar.set_workdir(str(Path.cwd()))
     bar.set_mirror_mode(True)
     bar.install()
-    # Mirror gets click-to-toggle popouts too. Each viewer has its own
-    # collapsed-state map (separate process), so two watchers can have
-    # different things expanded.
-    from agentcommander.tui.mouse_input import enable_mouse_mode
-    enable_mouse_mode()
 
     render_banner(
         version=__version__,
@@ -490,27 +485,6 @@ def run_mirror() -> int:
                 # ── 4. Handle input ───────────────────────────────────
                 chunk = poll_chars()
                 if chunk:
-                    # Strip mouse reports first; route any clicks to the
-                    # local popout registry. Mirror only reacts to clicks,
-                    # not keyboard nav (no Tab/Space — keeps the read-only
-                    # promise visually obvious).
-                    from agentcommander.tui.mouse_input import parse_mouse_events
-                    chunk, mouse_events = parse_mouse_events(chunk)
-                    for ev in mouse_events:
-                        if ev.pressed and ev.button == 0:
-                            from agentcommander.tui.popouts import (
-                                get_registry, toggle_block,
-                            )
-                            reg = get_registry()
-                            target = reg.focus_id
-                            if target is None:
-                                with reg.lock:
-                                    for b in reversed(reg.blocks):
-                                        if b.status != "running":
-                                            target = b.id
-                                            break
-                            if target is not None:
-                                toggle_block(target)
                     typed, line = _drain_input(typed, chunk)
                     # Echo the in-flight buffer to the input row so the
                     # user can see what they're typing — without this they
@@ -541,8 +515,6 @@ def run_mirror() -> int:
                 continue
 
     bar.uninstall()
-    from agentcommander.tui.mouse_input import disable_mouse_mode
-    disable_mouse_mode()
     write(SHOW_CURSOR)
     writeln(style("muted",
         "  mirror exited (primary unaffected — its loaded models stay)"))

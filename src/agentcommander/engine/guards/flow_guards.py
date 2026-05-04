@@ -67,7 +67,21 @@ def plan_redirect_guard(scratchpad: list[ScratchpadEntry], iteration: int,
 def repeated_tool_call_guard(scratchpad: list[ScratchpadEntry], iteration: int,
                               decision: OrchestratorDecision, tool_call_counts: dict[str, int],
                               plan_call_count: int, consecutive_nudges: int) -> dict[str, Any]:
-    if decision.action not in ("list_dir", "fetch", "read_file", "search"):
+    """Cap repeated tool calls to the same target and overall.
+
+    Per-action caps tuned by what's idempotent vs side-effecting:
+      - read-only verbs (list_dir, fetch, read_file, search): 5 total
+      - write/execute verbs: 8 total — they often need retries with
+        different content, but 8+ on a single tool in one turn is
+        almost always a stuck-loop (round-23 caught a write_file × 8
+        loop on greet23.py).
+    """
+    capped = {
+        "list_dir": 5, "fetch": 5, "read_file": 5, "search": 5,
+        "write_file": 8, "execute": 8,
+    }
+    cap = capped.get(decision.action)
+    if cap is None:
         return _result("pass", plan_call_count=plan_call_count, consecutive_nudges=consecutive_nudges)
 
     target = decision.path or decision.url or decision.input or ""
@@ -85,7 +99,7 @@ def repeated_tool_call_guard(scratchpad: list[ScratchpadEntry], iteration: int,
 
     total = tool_call_counts.get(decision.action, 0) + 1
     tool_call_counts[decision.action] = total
-    if total > 5:
+    if total > cap:
         push_system_nudge(scratchpad, iteration, decision.action,
                           f'LIMIT: "{decision.action}" has been called {total} times total. '
                           f"Use what you have and proceed.")
@@ -298,19 +312,35 @@ def debugger_quota_guard(scratchpad: list[ScratchpadEntry], iteration: int,
 def fetch_retry_guard(scratchpad: list[ScratchpadEntry], iteration: int,
                        decision: OrchestratorDecision, plan_call_count: int,
                        consecutive_nudges: int) -> dict[str, Any]:
+    """Block repeated retries of the same URL across fetch/http_request.
+
+    Round-23 caught a 26-iteration loop on https://httpbin.org/status/200
+    where the orchestrator alternated between ``fetch`` and
+    ``http_request`` after each failure. The previous version only
+    counted the CURRENT action's failures, so each switch reset the
+    count and the cap never bit. We now count failures across both
+    verbs for the same URL — the cap is about the URL being broken,
+    not about which verb tried it.
+    """
     if decision.action not in ("fetch", "http_request"):
         return _result("pass", plan_call_count=plan_call_count, consecutive_nudges=consecutive_nudges)
     url = decision.url or decision.input or ""
+    # Count failures for this URL across BOTH verbs. The orchestrator
+    # treating fetch and http_request as alternatives doesn't change the
+    # fact that the URL is broken from our side.
     prev = [e for e in scratchpad
             if e.action in ("fetch", "http_request") and e.input == url]
     failed = [e for e in prev
               if any(m in (e.output or "")
                      for m in ("Error", "failed", "SSRF", "Rejected",
-                               "404", "403", "500"))]
+                               "404", "403", "500", "Connection",
+                               "timed out", "Timeout"))]
     if len(failed) >= 2:
         push_system_nudge(scratchpad, iteration, "fetch_retry_blocked",
-                          f'BLOCKED: "{url[:100]}" has failed {len(failed)} times. '
-                          f"Do NOT retry the same URL. Try a different URL or approach.")
+                          f'BLOCKED: "{url[:100]}" has failed {len(failed)} times '
+                          f"across fetch/http_request. Do NOT retry the same "
+                          f"URL — switching verbs won't help. Try a different "
+                          f"URL or use action=\"done\" to report the failure.")
         return _result("continue", plan_call_count=plan_call_count, consecutive_nudges=consecutive_nudges)
     return _result("pass", plan_call_count=plan_call_count, consecutive_nudges=consecutive_nudges)
 
@@ -333,13 +363,46 @@ def protected_directory_guard(scratchpad: list[ScratchpadEntry], iteration: int,
 
 
 def consecutive_nudge_guard(scratchpad: list[ScratchpadEntry],
-                              plan_call_count: int, consecutive_nudges: int) -> dict[str, Any]:
+                              plan_call_count: int, consecutive_nudges: int,
+                              turn_start_idx: int = 0) -> dict[str, Any]:
+    """Break the run when the orchestrator has made no productive
+    progress for too many iterations.
+
+    Round-23 history: this used to count *only* system_nudge entries.
+    But on the httpbin.org/status/200 test, the orchestrator alternated
+    between failing fetch calls and nudge-triggers — every failed tool
+    call reset the counter to 0, so the cap never fired and the run
+    burned 26 iterations. Now: any non-productive last entry (system
+    nudge OR a failed tool call) counts toward the budget, so a stuck
+    fetch↔http_request loop converges to break-out within the
+    threshold.
+
+    Productive entries (successful tool results, role outputs from
+    researcher/coder/etc.) reset the counter — those represent
+    forward progress.
+    """
     last = scratchpad[-1] if scratchpad else None
-    if last and (last.action == "system_nudge"
-                 or (last.action == "write_file" and (last.output or "").startswith("BLOCKED"))):
+    if last is None:
+        return _result("pass", plan_call_count=plan_call_count, consecutive_nudges=consecutive_nudges)
+
+    is_nudge = last.action == "system_nudge"
+    is_blocked_write = (last.action == "write_file"
+                       and (last.output or "").startswith("BLOCKED"))
+    # Any tool entry whose output doesn't say "successfully" is treated
+    # as a failure for stuck-loop detection. The previous keyword list
+    # missed schema-validation errors like "method: must be string (got
+    # NoneType)" — round-24 caught this. The "successfully" marker is
+    # written by every successful tool path (engine.py:1615), so its
+    # absence is a reliable signal.
+    is_failed_tool = (last.role == "tool"
+                      and last.action != "system_nudge"
+                      and bool(last.output)
+                      and "successfully" not in (last.output or "").lower())
+
+    if is_nudge or is_blocked_write or is_failed_tool:
         consecutive_nudges += 1
         if consecutive_nudges >= 5:
-            final = (build_final_output(scratchpad) if scratchpad
+            final = (build_final_output(scratchpad, turn_start_idx) if scratchpad
                      else "The pipeline could not complete this task. Please try rephrasing your request.")
             return _result("break", plan_call_count=plan_call_count,
                            consecutive_nudges=consecutive_nudges, final_output=final)
@@ -359,6 +422,7 @@ def run_flow_guards(ctx: dict[str, Any]) -> dict[str, Any]:
     Returns: {verdict: {action, final_output?}, plan_call_count, consecutive_nudges}
     """
     scratchpad = ctx["scratchpad"]
+    turn_start_idx = int(ctx.get("turn_start_idx") or 0)
     iteration = ctx["iteration"]
     decision: OrchestratorDecision = ctx["decision"]
     plan_call_count = ctx["plan_call_count"]
@@ -366,7 +430,16 @@ def run_flow_guards(ctx: dict[str, Any]) -> dict[str, Any]:
     tool_call_counts = ctx["tool_call_counts"]
     user_message = ctx.get("user_message", "")
 
+    # consecutive_nudge_guard MUST run first. The runner short-circuits on
+    # the first non-pass verdict, and every other guard returns continue
+    # (= push a nudge and retry). Round-23 caught the symptom: flow-guard
+    # nudges fired 10+ times in a row on read_file/write_file loops
+    # without consecutive_nudge_guard ever incrementing its counter,
+    # because earlier guards always returned first. Running it FIRST
+    # means it sees the PRIOR turn's nudge in scratchpad and breaks out
+    # of the loop before another nudge gets stacked on top.
     guards: list[Any] = [
+        lambda: consecutive_nudge_guard(scratchpad, plan_call_count, consecutive_nudges, turn_start_idx),
         lambda: plan_redirect_guard(scratchpad, iteration, decision, plan_call_count, consecutive_nudges),
         lambda: overkill_delegation_guard(scratchpad, iteration, decision, plan_call_count, consecutive_nudges, user_message),
         lambda: protected_directory_guard(scratchpad, iteration, decision, plan_call_count, consecutive_nudges),
@@ -379,7 +452,6 @@ def run_flow_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         lambda: oscillation_guard(scratchpad, iteration, decision, plan_call_count, consecutive_nudges),
         lambda: stale_progress_guard(scratchpad, iteration, plan_call_count, consecutive_nudges),
         lambda: rapid_rewrite_guard(scratchpad, iteration, decision, plan_call_count, consecutive_nudges),
-        lambda: consecutive_nudge_guard(scratchpad, plan_call_count, consecutive_nudges),
     ]
     for guard in guards:
         result = guard()
