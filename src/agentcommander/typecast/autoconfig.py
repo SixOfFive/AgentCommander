@@ -406,9 +406,17 @@ def apply_autoconfigure(
 
     candidates = build_candidates(installed)
     if not candidates:
-        return AutoconfigApplied(
-            default_model=None, provider_id=None,
-            skipped_reason="no installed model is in the TypeCast catalog",
+        # Fallback: nothing is in the TypeCast catalog (typical for
+        # llama.cpp serving a single uncatalogued GGUF, or an Ollama box
+        # with only out-of-catalog models). Assign the first installed
+        # model to every role that has a TypeCast role mapping
+        # (vision/audio/image_gen have no mapping and stay unset).
+        return _apply_fallback_no_catalog(
+            installed=installed,
+            model_to_provider=model_to_provider,
+            providers=providers,
+            get_role_assignment_fn=get_role_assignment_fn,
+            audit_fn=audit_fn,
         )
 
     role_picks: dict[str, tuple[str, str]] = {}
