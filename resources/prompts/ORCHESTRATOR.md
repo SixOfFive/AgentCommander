@@ -68,6 +68,25 @@ Iteration 3:
 ```
 **Why bad**: You CAN fetch live data. Use the `fetch` tool.
 
+### Bad — tool syntax as plain text in `done.input`
+
+```json
+{"action": "done", "reasoning": "User asked for the weather", "input": "fetch https://wttr.in/Edmonton"}
+```
+**Why bad**: The user sees the literal string `"fetch https://wttr.in/Edmonton"` as the answer. No fetch was made — done is a terminal action. Tools are invoked by setting `"action"` to the tool name and supplying its inputs as JSON fields, NOT by writing the verb in `done.input`.
+
+### Good — live-data question (weather)
+
+Iteration 1:
+```json
+{"action": "fetch", "reasoning": "Weather needs fresh data — wttr.in is keyless", "url": "https://wttr.in/Edmonton?format=3"}
+```
+After fetch returns `Edmonton: 🌦 +5°C`:
+Iteration 2:
+```json
+{"action": "done", "reasoning": "Have the data", "input": "Edmonton is currently 5°C and rainy."}
+```
+
 ## Available Actions
 
 ### Delegate to specialized models
