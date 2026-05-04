@@ -390,6 +390,19 @@ def _apply_fallback_no_catalog(
     fallback_model = sorted(installed)[0]
     fallback_provider = model_to_provider.get(fallback_model) or providers[0].id
 
+    # Ask the owning provider what the model can do. Defaults to {"text"} if
+    # the provider doesn't override the method or capability detection fails.
+    capabilities: set[str] = {"text"}
+    provider_obj = next(
+        (p for p in providers if getattr(p, "id", None) == fallback_provider),
+        providers[0] if providers else None,
+    )
+    if provider_obj is not None:
+        try:
+            capabilities = provider_obj.get_model_capabilities(fallback_model) or {"text"}
+        except Exception:  # noqa: BLE001 — capability lookup is best-effort
+            capabilities = {"text"}
+
     role_picks: dict[str, tuple[str, str]] = {}
     user_overrides: dict[str, str] = {}
     unset_roles: list[str] = []
@@ -399,7 +412,18 @@ def _apply_fallback_no_catalog(
         if existing and existing.get("is_override"):
             user_overrides[role.value] = existing["model"]
             continue
+        required = _ROLE_TO_REQUIRED_CAPABILITY.get(role)
+        if required is not None:
+            # Modality-specialist role: assign only when the model claims
+            # the matching capability.
+            if required in capabilities:
+                role_picks[role.value] = (fallback_provider, fallback_model)
+            else:
+                unset_roles.append(role.value)
+            continue
         if _AC_TO_TYPECAST.get(role) is None:
+            # Role has neither a TypeCast mapping nor a capability mapping —
+            # leave for manual assignment.
             unset_roles.append(role.value)
             continue
         role_picks[role.value] = (fallback_provider, fallback_model)
