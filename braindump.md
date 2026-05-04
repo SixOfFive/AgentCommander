@@ -649,3 +649,191 @@ tests/test_popouts.py                             ← TestMouseParser class remo
 tests/test_round4_features.py                     ← (added in pre-session work)
 ```
 
+---
+
+# RESUME-AFTER-COMPACTION (rounds 29–30 + ORCHESTRATOR.md cleanup, 2026-05-04)
+
+**This is the latest section. Read it first if you're a future Claude.**
+
+## TL;DR — what this session did
+
+Heavy-context multi-agent testing (rounds 29–30) surfaced several real bugs.
+Fixed all of them in 6 commits, all pushed to `origin/main`. ORCHESTRATOR.md
+also got a major cleanup — was advertising ~30 phantom tools that don't exist
+in the dispatcher; now lists exactly the 13 real ones.
+
+## Commits this session (newest first)
+
+```
+76367db  prompt: orchestrator now lists only the 13 real tools
+b38c991  done_guards: next_steps_guard catches passive intent forms
+d737bfe  flow_guards: role_spam_guard hard-break at 8+ consecutive same-role calls
+3a08ec1  guards: surface execute failures with code preview; widen next_steps_guard
+26ceffa  docs: refresh braindump + README for rounds 22-28
+4751970  engine: turn-scoped scratchpad, JSON verdict guards, payload routing,
+         prompt refactor, mouse removal
+```
+
+All on `origin/main`. Working tree is clean of source changes (only
+`.claude/*` config drift remains — that's gitignored / local-only and
+the auto-commit hook is currently NOT firing because `.claude/settings.json`
+was deleted from the index earlier).
+
+## ORCHESTRATOR.md is now accurate
+
+Massive cleanup. Removed entries for ~30 phantom verbs that the prompt
+listed but no tool dispatcher implements:
+
+> **Removed**: `search`, `screenshot`, `click`, `type_text`, `extract_text`,
+> `evaluate_js`, `browser_agent`, `browse`, `generate_image`, `generate_music`,
+> `speak`, `system_info`, `remote_exec`, `service_status`, `check_port`,
+> `dns_lookup`, `workspace_summary`, `find_files`, `diff`, `patch`, `archive`,
+> `sql_query`, `csv_read`, `curl`, `background_exec`, `scratchpad_search`,
+> `use_template`, `read_env`.
+
+The orchestrator's "Available Actions" table now contains exactly the
+13 registered tools + `done`:
+
+```
+read_file, write_file, list_dir, delete_file, execute, fetch,
+http_request, git, env, browser, start_process, kill_process,
+check_process, done
+```
+
+`execute` accepts `language` ∈ `{python, py, javascript, js, node, bash,
+sh, shell, pip, npm}` — pip/npm aren't separate tools.
+
+A **"What ISN'T a tool" table** was added that maps each phantom verb to
+the real alternative (e.g. `search` → `execute` with bash grep; `sql_query`
+→ `execute` with python sqlite3; `curl` → `fetch` or `http_request`).
+Gives the model a route forward instead of just rejection.
+
+Image-chaining and prompt-enhancement critical rules (#13 + #14) deleted
+— both referenced `generate_image` which doesn't exist. Browser-agent
+section deleted. Three-way `fetch / http_request / browser` chooser kept
+(those three DO exist).
+
+Net: ORCHESTRATOR.md went from 395 → 331 lines (~16% smaller, 100% accurate).
+
+The `unknown_action_guard` (added round 28) is the safety net — if any
+older instruction makes the orchestrator emit a phantom verb, it gets
+rejected with the real menu instead of the dispatcher returning empty
+payload + schema-validation failure.
+
+## New guards added this session (rounds 29–30)
+
+| Guard | Family | What it catches |
+|---|---|---|
+| Hard-break in `role_spam_guard` | flow | ≥8 consecutive same-role calls (e.g. `review × 16`). Returns `break` with `build_final_output` instead of just nudging. Round-29 caught a 16-iter review loop where the orchestrator ignored every nudge — `consecutive_nudge_guard` couldn't accumulate because reviewer's JSON output looked "productive". |
+| `next_steps_guard` first-person extension | done | Catches `"I'll write tests"`, `"I am going to run it"`, `"Let me X"`, `"Next, I'll Y"`. Was missing this entire pattern class. |
+| `next_steps_guard` passive-intent extension | done | Catches passive forms like `"Tests are needed next"`, `"Implementation is required"`, `"Next step is to X"`. Round-30 caught the model dodging first-person commitment. |
+
+## New diagnostic added this session
+
+**Code preview on execute failures**: when `execute` returns non-zero exit
+code with empty stdout/stderr, the failure output now includes the script
+that ran (capped 800 chars):
+
+```
+--- script (python) ---
+python binary_search_tree29.py
+--- no stdout / stderr produced ---
+```
+
+Round-29's `exit code 49` mystery was the orchestrator emitting shell
+syntax (`python file.py`) as Python code. With the preview visible in
+scratchpad, the next iteration's orchestrator can see what it sent and
+self-correct (switch language to bash). Without this, the failure was
+just `"exit code 49"` with no signal.
+
+## Open / suspected issues
+
+- **`exit code 49` from execute** — orchestrator on devstral-24B sometimes
+  emits `language: python, input: "python <file>.py"` (shell syntax in
+  the wrong language). With the new code-preview, the model has a chance
+  to self-correct, but the underlying model-quality issue persists. If
+  it keeps surfacing, consider auto-rewriting `language: python` →
+  `language: bash` when the input starts with `python` / `node` / etc.
+- **Filename misremembering on long context**: model shortens
+  `binary_search_tree29.py` → `binarysearchtree29.py` after many turns.
+  Model-side, not engine-side. No fix available.
+- **Auto-commit hook not firing**: `.claude/settings.json` was deleted
+  in the index sometime mid-session. Manual commits work fine; the
+  user's stored "commit often" feedback memory now reminds future
+  sessions to commit explicitly per unit of work rather than relying
+  on the hook.
+
+## Cross-turn artifacts work as designed
+
+Round-29 deliberately mixed cross-turn references: TEST 9 ("list every
+python file created in this conversation"), TEST 10 ("summarize what was
+built"), TEST 11 ("translate the summary to french"). All three correctly
+referenced earlier turns' outputs — cross-turn memory works WHEN
+LEGITIMATELY needed, while the turn-scoping fix prevents prior turns'
+tool results from leaking as the answer to unrelated current prompts.
+This is the intended balance and it holds.
+
+## Multi-agent coverage observed in round 29
+
+Eight distinct agents fired across the run: chat (fallback), coder,
+planner, refactorer, researcher, reviewer (JSON_STRICT), summarizer,
+translator. Reviewer JSON contract honored on every call. Translator
+output clean (Spanish + French). Researcher produced a real comparison
+of AVL vs Red-Black trees with sources.
+
+## Updated sanity-check checklist on resume
+
+1. `PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest discover tests` → **138 OK**
+2. `git log --oneline origin/main..HEAD` → empty (latest pushed `76367db`)
+3. `git status --short` → only `.claude/*` config drift
+4. `cd AgentTesting && cmd.exe //c "..\ac.bat --version"` → `AgentCommander 0.1.0`
+5. `cd AgentTesting && echo "what is 2+2" | cmd.exe //c "..\ac.bat"` → `4` somewhere in the output
+6. `PYTHONUTF8=1 PYTHONPATH=src py -3 -c "from agentcommander.tools.dispatcher import bootstrap_builtins, list_tools; bootstrap_builtins(); print(len(list_tools()))"` → **13**
+
+## File map for round 29–30 changes
+
+```
+src/agentcommander/tools/code_tool.py             ← code-preview on exit-N failure
+src/agentcommander/engine/guards/done_guards.py   ← next_steps_guard intent regex (1st-person + passive)
+src/agentcommander/engine/guards/flow_guards.py   ← role_spam_guard hard-break at 8+
+resources/prompts/ORCHESTRATOR.md                 ← 30 phantom tools removed; 13 real ones listed;
+                                                    "What ISN'T a tool" alternative table added
+braindump.md                                       ← this section (rounds 29–30)
+```
+
+## File-level reading order (for the next Claude)
+
+When debugging or extending, open in this order:
+
+1. **`braindump.md`** (this file) — high-level state. Read newest section first.
+2. `src/agentcommander/types.py` — all dataclasses (`Role`, `OrchestratorDecision`, `ScratchpadEntry`, `LoopState`, `PipelineEvent`)
+3. `src/agentcommander/engine/engine.py` — pipeline loop, chat fallback, compaction, turn-scoping, `_decision_to_payload`, `_is_scratchpad_leak`
+4. `src/agentcommander/engine/scratchpad.py` — `compact_scratchpad`, `build_final_output(scratchpad, current_turn_start=0)`, `sanitize_scratchpad_text`
+5. `src/agentcommander/engine/role_call.py` — provider invocation, scratchpad context wrapper, tool registry appendix
+6. `src/agentcommander/agents/manifest.py` — 19-role manifest with output contracts
+7. `src/agentcommander/engine/guards/{decision,done,flow,post_step}_guards.py` — guard families
+8. `src/agentcommander/tools/dispatcher.py` — schema-validated invoke; `_REGISTRY` is source of truth for tools
+9. `resources/prompts/ORCHESTRATOR.md` (+ `RECIPES.md`) — orchestrator system prompt
+10. `src/agentcommander/tui/app.py:run_tui` — startup sequence + REPL
+
+## Hard rules that haven't changed
+
+- stdlib only, serial only, modular by default
+- Project-local DB at `<cwd>/.agentcommander/db.sqlite`
+- **Always run `ac.bat` from `AgentTesting/`** (saved as feedback memory)
+- **Commit often, never batch** — per-unit-of-work commits, push at milestones (push needs confirmation, commit doesn't) — saved as feedback memory
+- Mouse removed → native scrollback works in Windows Terminal
+- Push goes directly to `main`; no PR workflow
+
+## Pointers
+
+- Memory dir: `C:\Users\sixoffive\.claude\projects\C--Users-sixoffive-Documents-AgentCommander\memory\` — see `MEMORY.md`
+- EngineCommander upstream (read-only): `C:\Users\sixoffive\Documents\Claude_Projects\EngineCommander`
+- TypeCast: `https://github.com/SixOfFive/TypeCast`
+- AgentCommander remote: `https://github.com/SixOfFive/AgentCommander`
+- User email (auto-memory): `hvr.biz@gmail.com`
+
+Last commit at compaction: **`76367db`** ("prompt: orchestrator now lists only the 13 real tools").
+138/138 unit tests pass. Working tree is clean of source changes.
+
+
