@@ -176,6 +176,46 @@ class OllamaProvider(ProviderBase):
             })
         return out
 
+    def get_model_capabilities(self, model: str) -> set[str]:
+        """Return capability tags for ``model``.
+
+        Tries Ollama's ``/api/show`` first — recent Ollama builds report a
+        ``capabilities`` array (e.g. ``["completion", "vision", "tools"]``)
+        which is authoritative. On older Ollamas / network failure we fall
+        back to the substring heuristic on the model id.
+        """
+        out: set[str] = {"text"}
+        try:
+            data = json.dumps({"model": model}).encode("utf-8")
+            req = urllib.request.Request(
+                f"{self.endpoint}/api/show",
+                data=data,
+                method="POST",
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                body = json.loads(resp.read().decode("utf-8", errors="replace"))
+            caps = body.get("capabilities") if isinstance(body, dict) else None
+            if isinstance(caps, list):
+                for c in caps:
+                    if not isinstance(c, str):
+                        continue
+                    cl = c.lower()
+                    if cl == "vision":
+                        out.add("vision")
+                    elif cl in ("audio", "speech"):
+                        out.add("audio")
+                    elif cl in ("image", "image_generation"):
+                        out.add("image_gen")
+        except (urllib.error.URLError, OSError, ValueError):
+            # Older Ollama, transient outage, or non-JSON body — fall back
+            # to name heuristic. Heuristic also runs even on success so the
+            # two sources merge (catches cases where the daemon hasn't
+            # caught up to a model's actual capabilities).
+            pass
+        out |= infer_capabilities_from_id(model)
+        return out
+
     # ── Chat ──
 
     def chat(
