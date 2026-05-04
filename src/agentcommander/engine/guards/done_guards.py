@@ -1119,6 +1119,63 @@ def prompt_template_leak_guard(decision: OrchestratorDecision,
     return GuardVerdict(action="continue")
 
 
+_TOOL_VERB_RE = re.compile(
+    r"^\s*(read_file|write_file|list_dir|delete_file|execute|fetch|"
+    r"http_request|git|env|browser|start_process|kill_process|check_process)"
+    r"\s+(?!\{)([^\n]+?)\s*$",
+    re.IGNORECASE,
+)
+
+
+def tool_call_as_chat_guard(
+    scratchpad: list[ScratchpadEntry], iteration: int,
+    decision: OrchestratorDecision,
+) -> GuardVerdict:
+    """Reject `done` whose input is a tool invocation written as plain text.
+
+    Caught case (round 30, weather-in-Edmonton trace):
+      ``fetch https://wttr.in/Edmonton``
+    The chat fallback streamed that as the final answer because the model
+    had been primed with the tool registry appendix and emitted a tool
+    call as conversational text. The shape was never JSON, so dispatch
+    never fired — the literal string shipped as the assistant reply.
+
+    Match criteria (intentionally narrow):
+      - decision.action == ``done`` (only fires here; runner pre-filters)
+      - decision.input is a string
+      - text is short (≤ 200 chars) and single-line — long prose mentioning
+        a tool name in passing won't false-positive
+      - first non-whitespace token is a registered tool verb followed by
+        whitespace and a non-``{`` argument (so genuine JSON
+        ``{"action": "fetch", ...}`` decisions slip through untouched)
+
+    On match: nudge with the right JSON shape and `continue` so the
+    orchestrator re-decides. Do NOT mutate decision.action — done-guards
+    run after dispatch and a mutation here would never fire the tool.
+    """
+    text = decision.input if isinstance(decision.input, str) else ""
+    text = text.strip()
+    if not text or "\n" in text or len(text) > 200:
+        return GuardVerdict(action="pass")
+    m = _TOOL_VERB_RE.match(text)
+    if m is None:
+        return GuardVerdict(action="pass")
+    verb = m.group(1).lower()
+    arg = m.group(2).strip()
+    push_system_nudge(
+        scratchpad, iteration,
+        "tool_call_as_chat",
+        f'BLOCKED: done.input was "{verb} {arg}" — that is a tool '
+        f"invocation written as plain text, not an answer. Tools must be "
+        f"called via JSON, e.g. "
+        f'{{"action": "{verb}", "input": {{...}}}} — see the orchestrator '
+        f"prompt for the right input shape per tool. Emit a NEW decision "
+        f"that actually calls {verb}, then summarize the result for the "
+        f"user. Do NOT emit done with the tool syntax as text.",
+    )
+    return GuardVerdict(action="continue")
+
+
 def run_done_guards(ctx: dict[str, Any]) -> dict[str, Any]:
     """Run done-guards in priority order. Returns first non-pass verdict
     (or break with final_output from raw_content_guard).
