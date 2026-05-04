@@ -118,6 +118,19 @@ class ProviderBase:
     ) -> Iterable[ChatChunk]:
         raise NotImplementedError
 
+    # ── Optional: capability detection ──
+    # Used by autoconfig's no-catalog fallback to decide whether a model can
+    # fill non-text roles (vision / audio / image_gen). Default returns
+    # `{"text"}` — overrides should ADD to that set, not replace it.
+
+    def get_model_capabilities(self, model: str) -> set[str]:
+        """Return capability tags supported by ``model``.
+
+        The closed vocabulary is ``{"text", "vision", "audio", "image_gen"}``.
+        Default: ``{"text"}``. Providers that can detect more should override.
+        """
+        return {"text"}
+
     # ── Optional: model unloading ──
     # Provider types that hold models in memory between calls can override
     # these to free resources at exit. The default is a no-op so providers
