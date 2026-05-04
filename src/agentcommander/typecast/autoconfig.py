@@ -282,6 +282,10 @@ class AutoconfigApplied:
     # threshold; left for the user to assign manually with /roles set
     unset_roles: list[str] = field(default_factory=list)
     skipped_reason: str | None = None
+    # True when no installed model was in the TypeCast catalog and we fell
+    # back to assigning the first installed model to all text-capable roles.
+    # Mainly fires for llama.cpp (single GGUF, never in the catalog).
+    fallback_no_catalog: bool = False
 
 
 def _gather_installed(providers: list) -> tuple[set[str], dict[str, str]]:
