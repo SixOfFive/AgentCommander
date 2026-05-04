@@ -261,6 +261,23 @@ def role_spam_guard(scratchpad: list[ScratchpadEntry], iteration: int,
             consecutive_same += 1
         elif e.action != "system_nudge":
             break
+    # Hard-break threshold. Round-29 caught 16 consecutive `review` calls
+    # (devstral-24B got stuck in a review→nudge→review loop on a FAIL
+    # verdict, ignoring every nudge). The previous nudge-only behavior
+    # let the loop run until max_iterations because consecutive_nudge_guard
+    # kept resetting when the role's output looked "productive" (real
+    # JSON, not a system_nudge marker). At 8+ in a row, the model is
+    # clearly not converging — break out with whatever scratchpad has.
+    if consecutive_same >= 8:
+        final = (build_final_output(scratchpad) if scratchpad
+                 else f"The pipeline got stuck calling the {decision.action} "
+                      f"agent repeatedly. Please try rephrasing your request.")
+        push_system_nudge(scratchpad, iteration, "role_spam_break",
+                          f'BREAK: "{decision.action}" agent called '
+                          f"{consecutive_same} times consecutively. Stopping.")
+        return _result("break", plan_call_count=plan_call_count,
+                       consecutive_nudges=consecutive_nudges,
+                       final_output=final)
     if consecutive_same >= 4:
         push_system_nudge(scratchpad, iteration, "role_spam",
                           f'STOP: "{decision.action}" agent called {consecutive_same} times '
