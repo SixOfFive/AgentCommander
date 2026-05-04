@@ -51,6 +51,17 @@ class LlamaCppProvider(ProviderBase):
         items = data.get("data", []) if isinstance(data, dict) else []
         return [{"id": item.get("id", "")} for item in items if isinstance(item, dict)]
 
+    def get_model_capabilities(self, model: str) -> set[str]:
+        """Detect capabilities by looking at the model id.
+
+        llama.cpp's ``/v1/models`` returns just the id, and ``/props``
+        doesn't reliably surface multimodal info — so we lean on common
+        naming conventions (``llava``, ``moondream``, ``qwen-vl``,
+        ``gemma-3``, ``llama-3.2-vision``, etc.). Misses are fine: the
+        user can still bind manually with ``/roles set``.
+        """
+        return infer_capabilities_from_id(model)
+
     def chat(
         self,
         *,
