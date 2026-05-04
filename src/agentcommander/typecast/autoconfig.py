@@ -60,6 +60,16 @@ def set_banned_models(models: set[str] | list[str]) -> None:
     set_config(BANNED_MODELS_CONFIG_KEY, sorted(set(models)))
 
 
+# Roles that have NO TypeCast role mapping (modality-specialist roles).
+# In the no-catalog fallback they only get assigned when the provider
+# reports a matching capability for the model.
+_ROLE_TO_REQUIRED_CAPABILITY: dict[Role, str] = {
+    Role.VISION: "vision",
+    Role.AUDIO: "audio",
+    Role.IMAGE_GEN: "image_gen",
+}
+
+
 # ─── Mapping: AC Role enum ↔ TypeCast role names ───────────────────────────
 #
 # TypeCast uses singular role identifiers ("router", "orchestrator", …).
