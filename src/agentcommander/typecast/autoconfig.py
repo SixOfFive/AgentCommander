@@ -361,6 +361,63 @@ def _best_pick_for_role(
     return best, best_score
 
 
+def _apply_fallback_no_catalog(
+    *,
+    installed: set[str],
+    model_to_provider: dict[str, str],
+    providers: list,
+    get_role_assignment_fn,
+    audit_fn=None,
+) -> AutoconfigApplied:
+    """Assign the first installed model to every text-capable role.
+
+    Used when the TypeCast catalog has no entry for any installed model
+    (e.g. a llama.cpp single-GGUF setup). Roles without a TypeCast role
+    mapping (``vision``, ``audio``, ``image_gen``) land in ``unset_roles``;
+    the user fills those in with ``/roles set ...`` if they have a
+    multimodal model elsewhere.
+    """
+    fallback_model = sorted(installed)[0]
+    fallback_provider = model_to_provider.get(fallback_model) or providers[0].id
+
+    role_picks: dict[str, tuple[str, str]] = {}
+    user_overrides: dict[str, str] = {}
+    unset_roles: list[str] = []
+
+    for role in ALL_ROLES:
+        existing = get_role_assignment_fn(role)
+        if existing and existing.get("is_override"):
+            user_overrides[role.value] = existing["model"]
+            continue
+        if _AC_TO_TYPECAST.get(role) is None:
+            unset_roles.append(role.value)
+            continue
+        role_picks[role.value] = (fallback_provider, fallback_model)
+
+    if audit_fn is not None:
+        try:
+            audit_fn("typecast.autoconfigure", {
+                "default_model": fallback_model,
+                "provider_id": fallback_provider,
+                "role_picks": {k: m for k, (_, m) in role_picks.items()},
+                "preserved_overrides": list(user_overrides.keys()),
+                "unset_roles": unset_roles,
+                "fallback_no_catalog": True,
+            })
+        except Exception:  # noqa: BLE001
+            pass
+
+    return AutoconfigApplied(
+        default_model=fallback_model if role_picks else None,
+        provider_id=fallback_provider if role_picks else None,
+        role_picks=role_picks,
+        user_overrides=user_overrides,
+        diff_picks={},
+        unset_roles=unset_roles,
+        fallback_no_catalog=True,
+    )
+
+
 def apply_autoconfigure(
     *,
     providers: list,
