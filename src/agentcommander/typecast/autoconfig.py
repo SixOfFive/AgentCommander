@@ -437,6 +437,7 @@ def _apply_fallback_no_catalog(
                 "preserved_overrides": list(user_overrides.keys()),
                 "unset_roles": unset_roles,
                 "fallback_no_catalog": True,
+                "detected_capabilities": sorted(capabilities),
             })
         except Exception:  # noqa: BLE001
             pass
