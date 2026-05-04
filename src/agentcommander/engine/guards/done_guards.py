@@ -354,17 +354,43 @@ def next_steps_guard(scratchpad: list[ScratchpadEntry], iteration: int,
         r"\b(next\s+steps?|to\s*do\s+next|todo|remaining\s+tasks?|still\s+need"
         r"|not\s+yet\s+completed?|follow[- ]?up)\b", text, re.IGNORECASE,
     ))
+    # Round-29 caught: orchestrator emits done with body "The X file has
+    # been created. Next, I'll write 4 test cases and run them." — an
+    # intent statement, not a completion. The first regex didn't match
+    # because "next," has a comma after "next", not " steps". Catch
+    # the common intent constructions explicitly: "I'll do X", "I will
+    # do X", "I am going to do X", "Let me do X", "Next, I'll", "Now
+    # I'll" — all signal the model is announcing future work rather
+    # than reporting completed work.
+    has_intent = bool(re.search(
+        r"(?:^|[\s.,])(?:i'?\s*ll|i\s+will|i\s+am\s+going\s+to|i'?m\s+going\s+to"
+        r"|let\s+me|now\s+i'?ll|next,?\s+i'?ll|next,?\s+i\s+will)\s+"
+        r"(?:write|create|run|execute|build|test|add|implement|make|"
+        r"finish|complete|do|verify|check)\b",
+        text, re.IGNORECASE,
+    ))
     has_instructions = bool(re.search(
         r"\b(create\s+a|write\s+a|build\s+a|run\s+the|execute\s+the|test\s+the)\b",
         text, re.IGNORECASE,
     ))
-    if has_next_steps and has_instructions and iteration < max_iter_ref[0] - 2:
+    if (has_next_steps and has_instructions
+            and iteration < max_iter_ref[0] - 2):
         m = re.search(r"(?:next\s+steps?|to\s*do|remaining)[:\s]*\n([\s\S]+?)(?:\n---|\n##|\n\n\n|$)",
                       decision.input or "", re.IGNORECASE)
         steps = (m.group(1).strip() if m else (decision.input or "")[:500])
         push_system_nudge(scratchpad, iteration, "next_steps_incomplete",
                           f"STOP: you listed next steps instead of completing the task. "
                           f"Execute them NOW. Steps:\n\n{steps}")
+        max_iter_ref[0] = min(max_iter_ref[0] + 10, 200)
+        return GuardVerdict(action="continue")
+    if has_intent and iteration < max_iter_ref[0] - 2:
+        push_system_nudge(scratchpad, iteration, "future_intent_in_done",
+                          f"STOP: done.input contains an INTENT statement "
+                          f"(\"I'll do X\" / \"Next, I'll Y\" / \"I am going "
+                          f"to Z\") instead of reporting completed work. "
+                          f"Either DO the work now (dispatch the action) "
+                          f"or report what was actually completed without "
+                          f"announcing future steps.")
         max_iter_ref[0] = min(max_iter_ref[0] + 10, 200)
         return GuardVerdict(action="continue")
     return GuardVerdict(action="pass")

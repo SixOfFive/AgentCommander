@@ -328,6 +328,19 @@ def _execute(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
             output=combined or "(no output)",
             data={"exit_code": 0},
         )
+    # Failure path. If neither stdout nor stderr captured anything, the
+    # exit code alone is useless for the orchestrator to debug from —
+    # it's just "exit code N" with no signal. Include a preview of the
+    # script that was run so the model can see what input failed.
+    # Round-29 caught this: orchestrator emitted invalid Python via
+    # ``execute`` and the failure surfaced as "exit code 49" with no
+    # context, prompting endless retries of the same broken code.
+    code_preview = code.strip()
+    if len(code_preview) > 800:
+        code_preview = code_preview[:800] + "\n…[script truncated]"
+    if not combined.strip():
+        combined = (f"--- script ({language}) ---\n{code_preview}\n"
+                    f"--- no stdout / stderr produced ---")
     return ToolResult(
         ok=False,
         error=f"exit code {proc.returncode}",
