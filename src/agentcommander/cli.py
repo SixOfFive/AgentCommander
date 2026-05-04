@@ -112,14 +112,12 @@ def main(argv: list[str] | None = None) -> int:
                   file=sys.stderr)
             return 1
 
-    # Refuse to run in the AgentCommander source folder unless --working-dir
-    # explicitly redirects to somewhere else. Pollutes git status with
-    # .agentcommander/, logs/, tool-created files; also breaks the
-    # project-local-DB model.
-    if not args.working_dir:
-        repo_root = _detect_program_folder()
-        if repo_root is not None:
-            _refuse_to_run_in_program_folder(repo_root)
+    # Refuse to run in the AgentCommander source folder. The DB lives at
+    # <cwd>/.agentcommander/ regardless of --working-dir, so running here
+    # pollutes the source repo. The fix is `cd <somewhere-else>` first.
+    repo_root = _detect_program_folder()
+    if repo_root is not None:
+        _refuse_to_run_in_program_folder(repo_root)
 
     # Lazy imports so `--version` / `--help` are instant.
     from agentcommander.db.connection import init_db, DBAlreadyOpen
