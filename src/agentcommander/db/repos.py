@@ -136,6 +136,28 @@ def append_message(conv_id: str, role: str, content: str) -> Message:
                     (derived, conv_id),
                 )
     touch_conversation(conv_id)
+
+    # File-system chat log: append a human-readable line to
+    # `<conversation_working_dir>/logs/YYYY-MM-DD-HH-MM-SS.log`. This is the
+    # user-facing chat view (NOT the scratchpad). Best-effort — log write
+    # failures must never break the chat.
+    try:
+        from agentcommander.chat_log import log_message
+        conv_row = db.execute(
+            "SELECT created_at, working_directory FROM conversations WHERE id = ?",
+            (conv_id,),
+        ).fetchone()
+        if conv_row is not None:
+            log_message(
+                conv_row["working_directory"],
+                conv_row["created_at"],
+                role,
+                content,
+                msg_time_ms=msg.created_at,
+            )
+    except Exception:  # noqa: BLE001 — never break message persistence over a log
+        pass
+
     return msg
 
 
