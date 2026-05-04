@@ -362,6 +362,8 @@ def next_steps_guard(scratchpad: list[ScratchpadEntry], iteration: int,
     # do X", "I am going to do X", "Let me do X", "Next, I'll", "Now
     # I'll" — all signal the model is announcing future work rather
     # than reporting completed work.
+    # First-person intent: "I'll write", "I will run", "I am going to",
+    # "Let me X", "Next, I'll Y", "Now I'll Z".
     has_intent = bool(re.search(
         r"(?:^|[\s.,])(?:i'?\s*ll|i\s+will|i\s+am\s+going\s+to|i'?m\s+going\s+to"
         r"|let\s+me|now\s+i'?ll|next,?\s+i'?ll|next,?\s+i\s+will)\s+"
@@ -369,6 +371,18 @@ def next_steps_guard(scratchpad: list[ScratchpadEntry], iteration: int,
         r"finish|complete|do|verify|check)\b",
         text, re.IGNORECASE,
     ))
+    # Passive intent: "Tests are needed", "Next step is to X", "Still
+    # need to Y". Round-30 caught "Tests are needed next" slipping
+    # through because it's passive — the model dodges first-person
+    # commitment but the meaning is still "work isn't done yet".
+    if not has_intent:
+        has_intent = bool(re.search(
+            r"\b(?:tests?|implementation|review|refactor(?:ing)?|fix(?:es)?|"
+            r"test\s+cases?|next\s+step|verification|further\s+work)\s+"
+            r"(?:are|is|will\s+be)\s+(?:needed|required|the\s+next|"
+            r"to\s+follow|coming|pending)\b",
+            text, re.IGNORECASE,
+        ))
     has_instructions = bool(re.search(
         r"\b(create\s+a|write\s+a|build\s+a|run\s+the|execute\s+the|test\s+the)\b",
         text, re.IGNORECASE,
