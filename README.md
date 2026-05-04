@@ -151,8 +151,8 @@ Manual recovery: `/db check`, `/db reindex`, `/db vacuum`, `/db backup <path>`, 
 | 19 role prompts | copied | `resources/prompts/*.md` |
 | Engine action set | ported | role + tool actions + `done`. **No `parallel`** (serial-only) |
 | Engine main loop | ported | scratchpad, generator-based events, guard hook points |
-| 9 guard families (~110+ guards) | ported | decision, flow, execute, write, output, fetch, post_step, done + shared types |
-| Tools: file / code / web / process | ported | sandbox-gated |
+| 9 guard families (~120+ guards) | ported + extended | decision, flow, execute, write, output, fetch, post_step, done + shared types. Round 22+ added unknown_action / unassigned_role / prompt_template_leak / reviewer_verdict / tester_verdict |
+| Tools: file / code / web / process / **http / git / env / browser** | ported + extended | sandbox-gated. `git` is read-only by design; mutating verbs go through `execute`. `git` requires `.git/` in cwd (no climbing to parent repos) |
 | Provider: Ollama | ported | streaming via stdlib `urllib`; `keep_alive=5m`; `/api/ps`; `should_cancel` mid-stream |
 | Provider: llama.cpp | ported | OpenAI-compat SSE via stdlib `urllib` |
 | TypeCast catalog | ported | startup conditional-GET from GitHub → cache → bundled fallback |
@@ -163,7 +163,8 @@ Manual recovery: `/db check`, `/db reindex`, `/db vacuum`, `/db backup <path>`, 
 - **Read-only mirror** (`ac --mirror`) — live event stream replay for a watcher process
 - **Live status bar** — bottom-anchored 3 rows showing role/model/tokens/ctx (with fill bar) / run+total timers / running-avg tok/s
 - **Streaming token deltas** — coalesced ~10 Hz to balance smooth display with low DB write pressure
-- **Cross-turn scratchpad** — model memory persisted in `scratchpad_entries`; auto-compacted via the summarizer role
+- **Cross-turn scratchpad** — model memory persisted in `scratchpad_entries`; auto-compacted via the summarizer role. Cross-turn entries are visible to the orchestrator as context but excluded from the current turn's user-visible answer (turn boundary tracked by `LoopState.turn_start_idx`).
+- **JSON verdict contracts on Reviewer / Tester** — both roles emit `{verdict: PASS|FAIL, blockers/failures, summary}`; done-guards parse the JSON and block done with named blockers when FAIL.
 - **Project-local DB** — `<cwd>/.agentcommander/db.sqlite`. Each project gets its own state; the catalog cache stays global
 - **Auto-resume on startup** — the most recent chat for this project re-renders on launch
 - **Per-model throughput tracking** — running EMA of tok/s shown everywhere a model is named
@@ -180,7 +181,8 @@ src/agentcommander/
 ├── agents/                 19-role manifest + prompt loader
 ├── db/                     connection (lock + auto-repair + signals) + schema.sql + repos
 ├── providers/              base + ollama + llamacpp (auto-registered on import)
-├── tools/                  dispatcher + file_tool / code_tool / web_tool / process_tool
+├── tools/                  dispatcher + file_tool / code_tool / web_tool / process_tool /
+│                           http_tool / git_tool / env_tool / browser_tool
 ├── engine/
 │   ├── engine.py           PipelineRun (generator yielding PipelineEvents)
 │   ├── role_call.py        invoke a role via its assigned provider
@@ -193,8 +195,11 @@ src/agentcommander/
 ├── typecast/               catalog (conditional-GET), vram detect, autoconfig
 └── tui/                    ansi.py + render.py + markdown.py + commands.py + app.py +
                             status_bar.py + autocomplete.py + terminal_input.py +
-                            permissions.py + setup.py + mirror.py
-resources/prompts/          19 role .md system prompts
+                            permissions.py + setup.py + mirror.py + popouts.py
+resources/prompts/          19 role .md system prompts (14 refactored to standard
+                            Identity / Mission / Critical Rules / Output Contract /
+                            Examples / Common Failures / Success Metrics shape;
+                            REVIEWER + TESTER emit JSON_STRICT verdicts)
 ```
 
 Every plugin layer (providers, tools, guard families) is a Python module that registers itself on import. To add a new provider type, drop a `.py` next to `providers/ollama.py` with a `@provider_factory("yourtype")` decorator. Tools follow the same pattern via `register(ToolDescriptor(...))`.
