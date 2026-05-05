@@ -1160,11 +1160,12 @@ def live_data_question_guard(
            for e in scratchpad):
         return GuardVerdict(action="pass")
     # Loop-cap on this guard's nudges so we don't pin the orchestrator.
+    # `push_system_nudge` writes the reason tag into `input`, role="tool".
     nudge_count = sum(
         1 for e in scratchpad
-        if e.role == "system" and e.action == "system_nudge"
-        and isinstance(e.output, str)
-        and "live_data_forced_fetch" in e.output
+        if e.action == "system_nudge"
+        and isinstance(e.input, str)
+        and e.input == "live_data_forced_fetch"
     )
     if nudge_count >= 2:
         return GuardVerdict(action="pass")
@@ -1260,6 +1261,12 @@ def run_done_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         # obviously leaked scaffolding, none of the downstream guards
         # need to look at it — they'd just rubber-stamp meaningless text.
         lambda: prompt_template_leak_guard(decision, scratchpad, iteration, max_iter),
+        # Live-data forced-fetch: when the user is asking about weather /
+        # current time / today's news / stock price etc., reject `done`
+        # until the orchestrator has actually fetched something. Without
+        # this, weaker models default to "I don't have access to live
+        # data" and the user gets nothing actionable.
+        lambda: live_data_question_guard(scratchpad, iteration, decision, user_message),
         # Tool-call-as-chat: catches `fetch <url>` style finals that look
         # like tool syntax but aren't real JSON dispatches. Runs early so
         # raw_content_guard never gets a chance to ship it as the answer.
