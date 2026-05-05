@@ -20,7 +20,8 @@
       "Bash(cmd.exe //c \"py -3 AgentTesting/binary_search_tree29.py\")",
       "Bash(echo \"exit: $?\")",
       "Bash(git commit *)",
-      "Bash(timeout 240 cmd.exe //c \"..\\\\\\\\ac.bat\")"
+      "Bash(timeout 240 cmd.exe //c \"..\\\\\\\\ac.bat\")",
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3)"
     ]
   }
 }

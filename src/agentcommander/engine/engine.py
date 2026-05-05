@@ -2019,10 +2019,13 @@ class PipelineRun:
 
         # Post-guard: chat fallback is supposed to produce plain prose. When
         # the model has been primed by the tool-registry appendix and emits
-        # tool syntax instead (e.g. `fetch https://wttr.in/Edmonton`), don't
-        # ship the literal command to the user — that's the round-30
-        # weather-Edmonton failure mode. Also avoid poisoning the
-        # scratchpad with the bad text so the next turn isn't biased.
+        # tool syntax instead (e.g. `fetch https://wttr.in/Edmonton`), the
+        # model has actually told us what it WANTS done. For read-only
+        # tools we can honor that intent: execute the tool ourselves, then
+        # re-run the chat call with the result in context so the user gets
+        # a real answer. For unsafe verbs (write_file, execute, git,
+        # delete_file, start_process, kill_process) we fall back to a clear
+        # error rather than auto-executing arbitrary writes.
         bad_pattern = re.match(
             r"^\s*(read_file|write_file|list_dir|delete_file|execute|fetch|"
             r"http_request|git|env|browser|start_process|kill_process|"
@@ -2032,24 +2035,11 @@ class PipelineRun:
         if bad_pattern and len(final) <= 200 and "\n" not in final:
             bad_verb = bad_pattern.group(1).lower()
             bad_arg = bad_pattern.group(2).strip()
-            replacement = (
-                f"The model returned the literal command "
-                f"`{bad_verb} {bad_arg}` instead of actually calling that "
-                f"tool. This question needs live data that the orchestrator "
-                f"should fetch — please retry the prompt. "
-                f"(If this keeps happening, the orchestrator model isn't "
-                f"following the JSON-action contract well enough — try a "
-                f"different model with /roles set orchestrator …)"
+            yield from self._honor_tool_text_as_intent(
+                bad_verb, bad_arg, user_message, opts,
+                provider, model_name, num_ctx,
+                system_content, marker_role, on_delta,
             )
-            self._push_entry(ScratchpadEntry(
-                step=self.state.iteration,
-                role=marker_role,
-                action="reply",
-                input=user_message,
-                output=replacement,
-                timestamp=time.time(),
-            ))
-            yield PipelineEvent(type="done", final=replacement)
             return
 
         # Drop a record into the scratchpad so audits / postmortems can see
