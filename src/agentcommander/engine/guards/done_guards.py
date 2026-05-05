@@ -350,6 +350,28 @@ def setup_only_guard(scratchpad: list[ScratchpadEntry], iteration: int,
 def next_steps_guard(scratchpad: list[ScratchpadEntry], iteration: int,
                       max_iter_ref: list[int], decision: OrchestratorDecision) -> GuardVerdict:
     text = (decision.input or "").lower()
+
+    # Lenient bypass: when 2+ substantive tools have actually run AND
+    # written real output in the current turn, treat the orchestrator's
+    # done as a completion report — even if the prose contains incidental
+    # "I'll verify" / "next, I'll" mentions. Round trace caught this on
+    # the multi-step "write hello.py then run it" prompt: write_file +
+    # execute both succeeded, the orchestrator emitted a 67-token done
+    # summarizing the work, and the intent regex still tripped on a
+    # trailing "I'll verify" — wasting a full chat-fallback round-trip
+    # to produce essentially the same answer.
+    successful_tool_calls = sum(
+        1 for e in scratchpad
+        if e.role == "tool"
+        and e.action in ("write_file", "execute", "fetch", "http_request",
+                         "read_file", "list_dir", "git", "browser")
+        and isinstance(e.output, str)
+        and (e.output.startswith("successfully completed:")
+             or "Successfully" in e.output)
+    )
+    if successful_tool_calls >= 2:
+        return GuardVerdict(action="pass")
+
     has_next_steps = bool(re.search(
         r"\b(next\s+steps?|to\s*do\s+next|todo|remaining\s+tasks?|still\s+need"
         r"|not\s+yet\s+completed?|follow[- ]?up)\b", text, re.IGNORECASE,
