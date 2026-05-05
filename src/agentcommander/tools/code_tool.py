@@ -294,13 +294,17 @@ def _execute(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
             # Replace word-boundary `python ` / `python3 ` at line start
             # or after whitespace/`&&`/`;`/`|`. Keeps usages inside
             # comments and strings intact (they're rarely there in shell
-            # scripts the orchestrator emits).
+            # scripts the orchestrator emits). Function-based sub so
+            # backslashes in Windows paths don't get interpreted as
+            # regex escape sequences.
             import re as _re
             pattern = _re.compile(
-                r"(^|[\s;&|]|&&|\|\|)python3?(\s)",
+                r"(^|[\s;&|])python3?(\s)",
                 _re.MULTILINE,
             )
-            code = pattern.sub(rf"\g<1>{quoted}\g<2>", code)
+            def _swap(m: "_re.Match[str]") -> str:
+                return f"{m.group(1)}{quoted}{m.group(2)}"
+            code = pattern.sub(_swap, code)
 
     with tempfile.TemporaryDirectory(prefix="ac-exec-") as tmp:
         script_path = os.path.join(tmp, f"script{ext}")
