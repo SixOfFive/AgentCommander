@@ -212,10 +212,11 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
     # measurement (zero tokens or zero duration).
     try:
         from agentcommander.db.repos import record_throughput
-        chars_total = sum(len(c) for c in collected)
+        full_text = "".join(collected)
         record_throughput(
             model, completion_tokens, duration_ms,
-            chars_completed=chars_total,
+            chars_completed=len(full_text),
+            sample_text=full_text,
         )
     except Exception:  # noqa: BLE001
         pass
