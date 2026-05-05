@@ -24,7 +24,10 @@
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3)",
       "Bash(timeout 360 cmd.exe //c \"..\\\\\\\\ac.bat\")",
       "Bash(timeout 60 cmd.exe //c \"..\\\\\\\\ac.bat\")",
-      "Bash(timeout 480 cmd.exe //c \"..\\\\\\\\ac.bat\")"
+      "Bash(timeout 480 cmd.exe //c \"..\\\\\\\\ac.bat\")",
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_live_data_inference -v)",
+      "Bash(timeout 600 cmd.exe //c \"..\\\\\\\\ac.bat\")",
+      "Bash(timeout 1500 cmd.exe //c \"..\\\\\\\\ac.bat\")"
     ]
   }
 }

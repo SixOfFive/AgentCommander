@@ -40,8 +40,24 @@ from agentcommander.tui.ansi import (
 
 # ─── Inline transforms ─────────────────────────────────────────────────────
 
-_BOLD_RX = re.compile(r"(?<!\\)\*\*([^*\n]+?)\*\*|(?<!\\)__([^_\n]+?)__")
-_ITALIC_RX = re.compile(r"(?<!\\)\*([^*\n]+?)\*|(?<!\\)_([^_\n]+?)_")
+# Underscore emphasis must NOT match intraword. CommonMark forbids
+# "intraword" underscore emphasis specifically because filenames and
+# Python identifiers (`__pycache__`, `binary_search_tree.py`,
+# `__init__.py`) routinely contain underscores. Without the lookarounds
+# below, the renderer eats the underscores: `__pycache__` shows as
+# bold "pycache", `binary_search_tree29.py` shows as
+# "binarysearchtree29.py" with `search` italicized.
+#
+# Asterisk emphasis stays intraword-allowed (the user routinely types
+# `*important*` mid-word in chat).
+_BOLD_RX = re.compile(
+    r"(?<!\\)\*\*([^*\n]+?)\*\*"
+    r"|(?<!\\)(?<!\w)__([^_\n]+?)__(?!\w)"
+)
+_ITALIC_RX = re.compile(
+    r"(?<!\\)\*([^*\n]+?)\*"
+    r"|(?<!\\)(?<!\w)_([^_\n]+?)_(?!\w)"
+)
 _INLINE_CODE_RX = re.compile(r"`([^`\n]+?)`")
 _LINK_RX = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
 _STRIKE_RX = re.compile(r"~~([^~\n]+?)~~")
