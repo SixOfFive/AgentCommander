@@ -2298,9 +2298,12 @@ def _build_registry() -> dict[str, SlashCommand]:
         ),
         SlashCommand(
             name="/compact", aliases=(),
-            summary="manually compact this chat's scratchpad via the summarizer",
+            summary="manually compact this chat's scratchpad (or undo the last compaction)",
             handler=cmd_compact,
-            usage="/compact",
+            usage=(
+                "/compact            # run compaction now\n"
+                "/compact undo       # restore the most recent compaction's originals"
+            ),
             details=(
                 "Runs the same compaction the engine fires automatically when\n"
                 "the scratchpad approaches the context budget — pull older\n"
@@ -2314,10 +2317,18 @@ def _build_registry() -> dict[str, SlashCommand]:
                 "need re-compacting. The user-view messages table is\n"
                 "untouched.\n"
                 "\n"
-                "Currently no options. Future: /compact aggressive (smaller\n"
-                "tail), /compact tail=<N>, /compact dry-run."
+                "/compact undo restores the originals from the most recent\n"
+                "compaction round (flips their is_replaced flag back to 0,\n"
+                "removes the synthetic summary row). Call repeatedly to peel\n"
+                "back further rounds. Only the last round can be undone per\n"
+                "call. The originals are never deleted by compaction —\n"
+                "they're always recoverable as long as you haven't run\n"
+                "/chat clear.\n"
+                "\n"
+                "Future: /compact aggressive (smaller tail), /compact tail=<N>,\n"
+                "/compact dry-run."
             ),
-            examples=("/compact",),
+            examples=("/compact", "/compact undo"),
         ),
         SlashCommand(
             name="/history", aliases=(),
