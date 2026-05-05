@@ -20,6 +20,33 @@ _BROWSER_ACTIONS: frozenset[str] = frozenset({
 })
 
 
+# Shared synonym table — both `unknown_action_guard` (orchestrator JSON)
+# and the chat-fallback intent detector (`_detect_tool_syntax_intent` in
+# engine.py) consult this so ``ls``, ``cat foo.py``, ``curl <url>``, etc.
+# are accepted on either surface and mapped to the canonical tool verb.
+TOOL_VERB_SYNONYMS: dict[str, str] = {
+    "list_files": "list_dir",
+    "ls": "list_dir",
+    "dir": "list_dir",
+    "cat": "read_file",
+    "type": "read_file",
+    "create_file": "write_file",
+    "save_file": "write_file",
+    "rm": "delete_file",
+    "del": "delete_file",
+    "run": "execute",
+    "shell": "execute",
+    "bash": "execute",
+    "sh": "execute",
+    "curl": "fetch",
+    "wget": "fetch",
+    "get": "fetch",
+    "http": "http_request",
+    "post": "http_request",
+    "ps": "check_process",
+}
+
+
 def empty_action_guard(decision: OrchestratorDecision,
                        scratchpad: list[ScratchpadEntry], iteration: int) -> GuardVerdict:
     if not decision.action or not decision.action.strip():
