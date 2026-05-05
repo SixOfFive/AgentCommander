@@ -584,6 +584,72 @@ def mark_scratchpad_replaced(entry_ids: list[str]) -> int:
     return cur.rowcount or 0
 
 
+def unmark_scratchpad_replaced(entry_ids: list[str]) -> int:
+    """Reverse of ``mark_scratchpad_replaced`` — restore rows to the live view.
+
+    Used by ``/compact undo``: read a synthetic compaction row's
+    ``replaced_message_ids`` JSON, flip ``is_replaced`` back to 0 on
+    every listed id, then delete (or also flag) the synthetic row so
+    the next hydrate sees the originals.
+    """
+    if not entry_ids:
+        return 0
+    placeholders = ",".join("?" * len(entry_ids))
+    cur = get_db().execute(
+        f"UPDATE scratchpad_entries SET is_replaced = 0 WHERE id IN ({placeholders})",
+        tuple(entry_ids),
+    )
+    return cur.rowcount or 0
+
+
+def latest_compaction_entry(conversation_id: str) -> "dict | None":
+    """Return the most recent ``system/compacted`` scratchpad row for the
+    conversation, or ``None`` if no compaction has happened.
+
+    Includes ``replaced_message_ids`` parsed from the stored JSON. The
+    row may itself be ``is_replaced=1`` if a *later* compaction round
+    folded it back in — that's fine for ``/compact undo`` purposes;
+    we want the most-recently-inserted synthetic row regardless of
+    its current replaced flag.
+    """
+    row = get_db().execute(
+        "SELECT id, conversation_id, output, replaced_message_ids, "
+        "       is_replaced, created_at "
+        "FROM scratchpad_entries "
+        "WHERE conversation_id = ? AND role = 'system' AND action = 'compacted' "
+        "ORDER BY created_at DESC LIMIT 1",
+        (conversation_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    raw = row["replaced_message_ids"] or "[]"
+    try:
+        ids = json.loads(raw)
+        if not isinstance(ids, list):
+            ids = []
+    except (TypeError, ValueError):
+        ids = []
+    return {
+        "id": row["id"],
+        "conversation_id": row["conversation_id"],
+        "summary_text": row["output"] or "",
+        "replaced_message_ids": [str(i) for i in ids if i],
+        "is_replaced": bool(row["is_replaced"]),
+        "created_at": row["created_at"],
+    }
+
+
+def delete_scratchpad_entry(entry_id: str) -> int:
+    """Delete a single scratchpad row by id. Returns rowcount.
+    Used by ``/compact undo`` to remove the synthetic compaction row
+    once its originals are restored."""
+    cur = get_db().execute(
+        "DELETE FROM scratchpad_entries WHERE id = ?",
+        (entry_id,),
+    )
+    return cur.rowcount or 0
+
+
 def clear_scratchpad(conversation_id: str) -> int:
     """Delete every scratchpad row for one conversation. Returns rowcount.
     Used when starting a fresh /new conversation, not by compaction."""
