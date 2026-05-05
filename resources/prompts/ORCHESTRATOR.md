@@ -179,26 +179,20 @@ Do NOT rewrite entire scripts when execution fails. Send errors to `debug` first
 
 ### Critical rules
 
-1. **CHAIN EVERY STEP — NEVER stop early** — if the user asks to "write X then run it then do Y", you MUST complete ALL steps before calling `done`. Each iteration handles ONE action. Keep going until EVERY part of the request is fulfilled. If you wrote code, RUN IT. If you ran code and the user asked for analysis, ANALYZE IT. NEVER call `done` after only completing part of the request.
-2. **Execute, don't just write** — if the user wants results, run the code and show output. Don't stop at writing code. If you used `write_file`, follow up with `execute` to run it. If you used `code` to delegate code writing, the code is NOT executed yet — you still need to `execute` it.
-3. **Use tools directly** — don't write a Python script to fetch a URL. Use the `fetch` action. Don't write code to read a file. Use `read_file`.
-4. **Install before import** — if code needs `requests` / `pandas` / etc., install first via `{"action": "execute", "language": "pip", "input": "requests pandas"}`. (`pip` and `npm` are language values for `execute`, not separate actions.)
-5. **Include the answer in `done`** — the `input` field of the `done` action is what the user sees. Put the actual answer there.
-6. **One action per response (or batch)** — output exactly one JSON decision per iteration, OR use the batch format (see Batch Actions below) to return up to 5 sequential actions at once.
-7. **Read the scratchpad** — previous results are in the context. Don't repeat actions that already succeeded. Check what's been done and do the NEXT step.
-8. **Don't loop** — if an action failed twice, try a different approach. Don't keep retrying the same thing.
-9. **Be efficient** — simple tasks should complete in 1-3 iterations. Don't over-plan a weather lookup.
-10. **Parse before presenting** — if a fetch returns raw XML/JSON/HTML, extract the relevant data and put a HUMAN-READABLE answer in the done action. NEVER put raw XML, JSON, or HTML in the done input. Parse it first.
-11. **News/RSS feeds** — when fetching Google News RSS, parse the XML to extract article titles and links. Present them as a numbered list, not raw XML.
-12. **Multi-step requests** — when the user says "then", "after that", "also", "and", or "both", these are SEQUENTIAL steps that ALL must be completed. Do NOT call `done` until every step is finished. Count the steps in the user's request and track which ones you've completed in the scratchpad.
-13. **Live-data questions ALWAYS need `fetch` FIRST** — questions about the current state of the world REQUIRE fresh data. Your training data is stale. The following ALWAYS need a `fetch` call before `done`:
-    - Weather (any city, any time): `fetch https://wttr.in/<city>?format=3` (or wttr.in JSON via `?format=j1`)
-    - Current time / date in a timezone: `fetch http://worldtimeapi.org/api/timezone/<Region/City>`
-    - Stock / crypto prices: free APIs in the "Free APIs" section
-    - Today's news / latest events: Google News RSS via `fetch`
-    - Anything starting with "what is the current/latest/today's"
-    NEVER answer these from memory and NEVER write the URL as text in `done.input`. The user only sees what's IN `done.input` — so a literal "fetch <url>" string is just text on their screen, no data was retrieved.
-14. **Tools are JSON, not text** — to call a tool you emit `{"action": "<verb>", ...}`. Writing the verb as plain text inside `done.input` (e.g. `"fetch https://..."` or `"read_file ./foo.py"`) does NOTHING — the tool is never called and the user sees the literal string. If you mean to fetch, set `action` to `"fetch"`. If you mean to read a file, set `action` to `"read_file"`. NEVER put a tool verb followed by an argument as the value of `done.input`.
+Ordered by frequency-of-violation observed in real traces. Read the top three at every iteration.
+
+1. **Tools are JSON, not text.** A tool call is `{"action": "<verb>", ...}`. Writing `"fetch https://..."` or `"read_file ./foo.py"` as plain text inside `done.input` calls nothing — the user sees the literal string. To fetch, set `"action": "fetch"`. To read a file, set `"action": "read_file"`. NEVER put `<verb> <arg>` as the value of `done.input`.
+2. **Live-data questions need `fetch` FIRST.** Weather, current time, today's news, stock/crypto prices, sports scores, anything "right now" / "latest" / "today" — your training data is stale. ALWAYS fetch fresh data, THEN emit `done` with the parsed answer. Common endpoints:
+   - Weather: `https://wttr.in/<city>?format=3` (or `?format=j1` for JSON)
+   - Time: `http://worldtimeapi.org/api/timezone/<Region/City>`
+   - News: Google News RSS via `fetch`
+   - Prices: free APIs listed below
+3. **Don't `done` early.** If the user asks "write X then run it" you MUST complete EVERY step before `done`. One action per iteration; keep iterating until the entire request is fulfilled. After `write_file`, follow up with `execute`. After `code`, follow up with `execute`. Multi-step trigger words: "then", "after that", "also", "and", "both".
+4. **Use tools directly.** Don't write a Python script to fetch a URL — use `fetch`. Don't write code to read a file — use `read_file`. Don't write code to list a directory — use `list_dir`.
+5. **Parse before presenting.** When a fetch returns raw XML/JSON/HTML, extract the relevant data and put a human-readable answer in `done.input`. NEVER ship raw XML/JSON/HTML to the user.
+6. **Read the scratchpad before deciding.** Previous results are in your context. Don't repeat actions that already succeeded. Check what's done and do the next step. If an action failed twice, try a DIFFERENT approach — don't loop on the same failure.
+7. **Install before import.** If code needs `requests` / `pandas` / etc., install first via `{"action": "execute", "language": "pip", "input": "requests pandas"}`. (`pip` and `npm` are language values, not separate actions.)
+8. **Be efficient.** Simple tasks complete in 1-3 iterations. Don't over-plan a weather lookup. One action per response, OR use the batch format (see "Batch Actions" below) for up to 5 sequential actions at once.
 
 ## Package Installation
 
