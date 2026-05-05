@@ -22,6 +22,18 @@ from pathlib import Path
 
 _LOGS_DIRNAME = "logs"
 
+# Rotate the active log when it crosses this many bytes. Long sessions can
+# otherwise grow unbounded — at ~2 KB per turn average, 10 MB is roughly
+# 5000 turns, plenty for any single conversation. After rotation the next
+# write starts a fresh file at `<base>.log`; the prior content lands at
+# `<base>.001.log` (or 002, 003, …).
+_LOG_ROTATE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+# Cap on rotated parts kept on disk per conversation. The oldest one is
+# deleted to enforce this — prevents a runaway agent from filling the
+# disk if it gets stuck in a loop.
+_LOG_MAX_PARTS = 20
+
 
 def _filename_for(created_at_ms: int) -> str:
     """``YYYY-MM-DD-HH-MM-SS.log`` derived from the conversation's start time
