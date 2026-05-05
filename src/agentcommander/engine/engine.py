@@ -2002,13 +2002,14 @@ class PipelineRun:
             )
             # Same running-average update the role_call path does, so the
             # bar's "@ N t/s" stays accurate even when the chat fallback
-            # is what drove this turn. Pass `chars_completed` so providers
-            # that don't report usage (some llama.cpp builds) still get
-            # a real tok/s number via char-based estimation.
-            chars_total = sum(len(c) for c in collected)
+            # is what drove this turn. Pass the full sample text so
+            # `record_throughput`'s char-based estimator picks the right
+            # divisor (CJK / code / prose) when the provider reports 0.
+            sample = "".join(collected)
             record_throughput(
                 model_name, completion_tokens, fallback_duration_ms,
-                chars_completed=chars_total,
+                chars_completed=len(sample),
+                sample_text=sample,
             )
         except Exception:  # noqa: BLE001
             pass
