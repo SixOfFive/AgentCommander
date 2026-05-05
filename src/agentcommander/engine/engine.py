@@ -33,7 +33,12 @@ from agentcommander.engine.role_call import (
     tool_registry_appendix,
 )
 from agentcommander.engine.role_resolver import resolve as resolve_role
-from agentcommander.engine.scratchpad import build_final_output, compact_scratchpad, push_nudge
+from agentcommander.engine.scratchpad import (
+    build_final_output,
+    compact_conversation_db,
+    compact_scratchpad,
+    push_nudge,
+)
 from agentcommander.providers.base import (
     ChatMessage,
     ProviderError,
