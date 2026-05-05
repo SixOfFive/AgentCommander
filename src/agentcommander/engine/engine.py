@@ -2057,6 +2057,222 @@ class PipelineRun:
 
         yield PipelineEvent(type="done", final=final)
 
+    # Tools that are safe to auto-execute when the model emits them as
+    # plain-text in chat fallback (HTTP-only or filesystem-read). Mutating
+    # tools (write_file, delete_file, execute, git, start/kill_process)
+    # are intentionally excluded — auto-running arbitrary writes from
+    # ambiguous text would be a foot-gun.
+    _AUTO_EXEC_SAFE_VERBS: tuple[str, ...] = (
+        "fetch", "http_request", "read_file", "list_dir",
+        "browser", "check_process",
+    )
+
+    def _payload_from_textual_call(self, verb: str, arg: str) -> dict[str, Any] | None:
+        """Best-effort: map ``<verb> <arg>`` to a real tool payload.
+
+        Returns ``None`` when the verb isn't safely auto-executable or the
+        arg shape doesn't match what the tool expects. Conservative on
+        purpose — better to fall back to the apology than to ship a
+        malformed payload.
+        """
+        if verb in ("fetch", "browser"):
+            return {"url": arg}
+        if verb == "http_request":
+            return {"url": arg, "method": "GET"}
+        if verb in ("read_file", "list_dir"):
+            return {"path": arg}
+        if verb == "check_process":
+            return {"name": arg}
+        return None
+
+    def _honor_tool_text_as_intent(
+        self, verb: str, arg: str, user_message: str, opts: "RunOptions",
+        provider: Any, model_name: str, num_ctx: int | None,
+        system_content: str, marker_role: str,
+        on_delta: Any,
+    ) -> "Iterator[PipelineEvent]":
+        """When chat fallback emits ``<verb> <arg>`` as plain text, take
+        that as the intent it actually was, run the tool ourselves (for
+        safe verbs), then re-stream a chat call with the result in
+        context so the user gets a real answer.
+
+        Falls back to a clean apology when the verb is unsafe to
+        auto-execute or the tool itself fails.
+        """
+        # Unsafe verb (write_file / execute / git / delete_file / start_process /
+        # kill_process) → don't auto-run. Surface a clear message instead.
+        if verb not in self._AUTO_EXEC_SAFE_VERBS:
+            replacement = (
+                f"The model emitted `{verb} {arg}` as plain text, which is "
+                f"not a real tool call and is not safe to auto-execute "
+                f"(write/execute tools require an explicit JSON action). "
+                f"Please retry the prompt — the orchestrator should call "
+                f"`{verb}` properly. If this keeps happening, try "
+                f"/roles set orchestrator <a model that follows JSON better>."
+            )
+            self._push_entry(ScratchpadEntry(
+                step=self.state.iteration, role=marker_role, action="reply",
+                input=user_message, output=replacement, timestamp=time.time(),
+            ))
+            yield PipelineEvent(type="done", final=replacement)
+            return
+
+        payload = self._payload_from_textual_call(verb, arg)
+        if payload is None:
+            yield PipelineEvent(type="done",
+                final=f"Couldn't auto-recover from `{verb} {arg}` "
+                      f"— retry the prompt.")
+            return
+
+        # Surface the auto-execute as a normal tool event so the bar /
+        # mirror see the same thing they would for a JSON dispatch.
+        started = time.time()
+        try:
+            result = invoke_tool(verb, payload,
+                                  working_directory=opts.working_directory,
+                                  conversation_id=opts.conversation_id)
+        except Exception as exc:  # noqa: BLE001
+            yield PipelineEvent(type="done",
+                final=f"Tried to auto-run `{verb} {arg}` after the model "
+                      f"emitted it as text, but the tool itself raised: "
+                      f"{type(exc).__name__}: {exc}. Retry the prompt.")
+            return
+
+        output_text = result.output or ""
+        if self._guards["output"] and output_text:
+            output_text = self._guards["output"](output_text)
+
+        if not result.ok:
+            err = result.error or "tool returned no output"
+            yield PipelineEvent(type="tool", tool=verb, ok=False,
+                                output=output_text, error=err)
+            apology = (
+                f"Auto-recovered from `{verb} {arg}` (the model emitted it "
+                f"as text instead of a JSON action) but the tool failed: "
+                f"{err}. Retry or rephrase."
+            )
+            self._push_entry(ScratchpadEntry(
+                step=self.state.iteration, role=marker_role, action="reply",
+                input=user_message, output=apology, timestamp=time.time(),
+            ))
+            yield PipelineEvent(type="done", final=apology)
+            return
+
+        # Persist the tool call so /chat / scratchpad reflect it.
+        self._push_entry(ScratchpadEntry(
+            step=self.state.iteration, role="tool", action=verb,
+            input=arg, output=f"successfully completed:\n{output_text}",
+            timestamp=time.time(),
+            duration_ms=int((time.time() - started) * 1000),
+        ))
+        yield PipelineEvent(type="tool", tool=verb, ok=True,
+                            output=output_text, error=None)
+
+        # Re-stream the chat call with the tool result baked in. We don't
+        # recurse into _chat_fallback_stream — just do a single LLM call
+        # bounded to summarizing the data we already have.
+        summary_prompt_user = (
+            f"User asked: {user_message}\n\n"
+            f"--- Output of `{verb} {arg}` ---\n"
+            f"{output_text[:8000]}\n"
+            f"--- End output ---\n\n"
+            f"Answer the user's question using the data above. Plain text "
+            f"only — no JSON, no tool-call syntax. If the data is HTML or "
+            f"raw, extract the answer from it. Be concise."
+        )
+        messages = [
+            ChatMessage(role="system", content=system_content),
+            ChatMessage(role="user", content=summary_prompt_user),
+        ]
+
+        if opts.on_role_start is not None:
+            try:
+                opts.on_role_start(marker_role, model_name, num_ctx)
+            except Exception:  # noqa: BLE001
+                pass
+
+        summary_collected: list[str] = []
+        summary_started = time.time()
+        sp_tokens: int | None = None
+        sc_tokens: int | None = None
+        try:
+            for chunk in provider.chat(
+                model=model_name, messages=messages,
+                num_ctx=num_ctx, json_mode=False,
+                should_cancel=self.is_cancelled,
+            ):
+                if chunk.content:
+                    summary_collected.append(chunk.content)
+                    if on_delta:
+                        on_delta(chunk.content)
+                if chunk.done:
+                    sp_tokens = chunk.prompt_tokens
+                    sc_tokens = chunk.completion_tokens
+        except Exception as exc:  # noqa: BLE001
+            yield PipelineEvent(
+                type="error",
+                error=f"chat re-summarize after auto-{verb} failed: "
+                      f"{type(exc).__name__}: {exc}",
+            )
+            return
+
+        summary_duration_ms = int((time.time() - summary_started) * 1000)
+        if opts.on_role_end is not None:
+            try:
+                opts.on_role_end(marker_role, model_name,
+                                 sp_tokens or 0, sc_tokens or 0)
+            except Exception:  # noqa: BLE001
+                pass
+
+        # Throughput tracking — same path as the primary chat fallback.
+        try:
+            from agentcommander.db.repos import insert_token_usage, record_throughput
+            chars_total = sum(len(c) for c in summary_collected)
+            insert_token_usage(
+                conversation_id=opts.conversation_id,
+                role=marker_role,
+                provider_id=resolve_role(Role.ORCHESTRATOR).provider_id,  # type: ignore[union-attr]
+                model=model_name,
+                prompt_tokens=sp_tokens,
+                completion_tokens=sc_tokens,
+                duration_ms=summary_duration_ms,
+            )
+            record_throughput(
+                model_name, sc_tokens, summary_duration_ms,
+                chars_completed=chars_total,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        final = "".join(summary_collected).strip()
+        if not final:
+            final = (f"Fetched data from `{verb} {arg}` but the model "
+                     f"didn't produce a summary. Raw:\n{output_text[:600]}")
+
+        # Re-check the auto-recovery summary for the SAME pattern. If the
+        # model managed to emit tool syntax AGAIN, don't loop — surface a
+        # clean apology and stop.
+        recheck = re.match(
+            r"^\s*(read_file|write_file|list_dir|delete_file|execute|fetch|"
+            r"http_request|git|env|browser|start_process|kill_process|"
+            r"check_process)\s+(?!\{)([^\n]+?)\s*$",
+            final, re.IGNORECASE,
+        )
+        if recheck and len(final) <= 200 and "\n" not in final:
+            final = (
+                f"I auto-fetched `{verb} {arg}` and got data, but the "
+                f"summarizer model emitted more tool syntax instead of "
+                f"summarizing. The orchestrator model isn't following "
+                f"the chat contract on this hardware — try a different "
+                f"model with /roles set."
+            )
+
+        self._push_entry(ScratchpadEntry(
+            step=self.state.iteration, role=marker_role, action="reply",
+            input=user_message, output=final, timestamp=time.time(),
+        ))
+        yield PipelineEvent(type="done", final=final)
+
 
 def _decision_to_payload(decision: OrchestratorDecision, exec_code: str,
                         exec_language: str) -> dict[str, Any]:
