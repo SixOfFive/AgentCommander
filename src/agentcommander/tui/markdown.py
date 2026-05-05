@@ -85,8 +85,8 @@ def _render_inline(line: str) -> str:
     """Apply inline transforms (bold / italic / code / link / strike)."""
     if not supports_color():
         # Strip the markup but keep text.
-        line = _BOLD_RX.sub(lambda m: m.group(1) or m.group(2), line)
-        line = _ITALIC_RX.sub(lambda m: m.group(1) or m.group(2), line)
+        line = _BOLD_RX.sub(lambda m: m.group(1), line)
+        line = _ITALIC_RX.sub(lambda m: m.group(1), line)
         line = _INLINE_CODE_RX.sub(lambda m: m.group(1), line)
         line = _LINK_RX.sub(lambda m: f"{m.group(1)} ({m.group(2)})", line)
         line = _STRIKE_RX.sub(lambda m: m.group(1), line)
@@ -98,10 +98,10 @@ def _render_inline(line: str) -> str:
         line,
     )
     line = _BOLD_RX.sub(
-        lambda m: f"{BOLD}{m.group(1) or m.group(2)}{RESET}", line,
+        lambda m: f"{BOLD}{m.group(1)}{RESET}", line,
     )
     line = _ITALIC_RX.sub(
-        lambda m: f"{ITALIC}{m.group(1) or m.group(2)}{RESET}", line,
+        lambda m: f"{ITALIC}{m.group(1)}{RESET}", line,
     )
     line = _STRIKE_RX.sub(
         lambda m: f"{DIM}{m.group(1)}{RESET}", line,
