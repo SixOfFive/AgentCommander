@@ -148,6 +148,7 @@ def record_observation(
     completion_tokens: int | None = None,
     duration_ms: int | None = None,
     chars_completed: int | None = None,
+    sample_text: str | None = None,
     prompt_tokens: int | None = None,
     prompt_eval_ms: int | None = None,
 ) -> dict[str, Any] | None:
