@@ -708,6 +708,53 @@ class PipelineRun:
                         yield PipelineEvent(type="guard", family="done",
                                             reason="rejecting premature done")
                         if self.state.premature_done_count >= 2:
+                            # Cheap escape hatch: when scratchpad already
+                            # holds the work product (a successful execute,
+                            # write_file, or fetch in this turn), don't
+                            # pay for another full chat-fallback LLM call
+                            # just to restate what's already there.
+                            # `build_final_output` walks the scratchpad
+                            # priority list (summarizer / content roles /
+                            # execute stdout / step report) and builds a
+                            # user-visible answer for free. Round-trace
+                            # multistep3 burned ~5400 prompt tokens on a
+                            # chat fallback that produced essentially
+                            # what `build_final_output` would have given.
+                            current_work = [
+                                e for e in self.state.scratchpad[self.state.turn_start_idx:]
+                                if e.role == "tool"
+                                and e.action in ("write_file", "execute",
+                                                 "fetch", "http_request",
+                                                 "read_file", "list_dir",
+                                                 "git", "browser")
+                                and isinstance(e.output, str)
+                                and (e.output.startswith("successfully completed:")
+                                     or "Successfully" in e.output)
+                            ]
+                            if len(current_work) >= 2:
+                                final_from_pad = build_final_output(
+                                    self.state.scratchpad,
+                                    self.state.turn_start_idx,
+                                )
+                                if final_from_pad and len(final_from_pad.strip()) > 30:
+                                    yield PipelineEvent(
+                                        type="guard", family="done",
+                                        reason=(
+                                            "2 premature dones — using "
+                                            "scratchpad summary directly "
+                                            "(cheaper than chat fallback)"
+                                        ),
+                                    )
+                                    yield PipelineEvent(
+                                        type="done", final=final_from_pad,
+                                    )
+                                    update_pipeline_run(
+                                        self.run_id, status="done",
+                                        iterations=iteration,
+                                        category=category,
+                                    )
+                                    return
+
                             # Deterministic forced-fetch: if the user asked
                             # about live data (weather, time, news) and the
                             # orchestrator declined twice, infer the URL
