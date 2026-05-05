@@ -2252,6 +2252,10 @@ class PipelineRun:
             ChatMessage(role="user", content=summary_prompt_user),
         ]
 
+        if self.is_cancelled():
+            yield PipelineEvent(type="error", error="cancelled by /stop")
+            return
+
         if opts.on_role_start is not None:
             try:
                 opts.on_role_start(marker_role, model_name, num_ctx)
@@ -2262,7 +2266,15 @@ class PipelineRun:
         summary_started = time.time()
         sp_tokens: int | None = None
         sc_tokens: int | None = None
-        try:
+
+        # Wrap the summarize call in the same retry-on-rate-limit + cancel
+        # plumbing the primary chat fallback uses, so a 429 here doesn't
+        # crash the recovery path and /stop breaks out cleanly.
+        def _do_summary_stream() -> None:
+            nonlocal sp_tokens, sc_tokens
+            summary_collected.clear()
+            sp_tokens = None
+            sc_tokens = None
             for chunk in provider.chat(
                 model=model_name, messages=messages,
                 num_ctx=num_ctx, json_mode=False,
@@ -2275,12 +2287,26 @@ class PipelineRun:
                 if chunk.done:
                     sp_tokens = chunk.prompt_tokens
                     sc_tokens = chunk.completion_tokens
-        except Exception as exc:  # noqa: BLE001
+
+        try:
+            yield from self._retry_on_rate_limit("chat", _do_summary_stream)
+        except ProviderRateLimited:
+            yield PipelineEvent(
+                type="error",
+                error=(f"auto-{verb} recovery rate-limited (retries "
+                       f"exhausted) — wait or switch providers"),
+            )
+            return
+        except (ProviderError, Exception) as exc:  # noqa: BLE001
             yield PipelineEvent(
                 type="error",
                 error=f"chat re-summarize after auto-{verb} failed: "
                       f"{type(exc).__name__}: {exc}",
             )
+            return
+
+        if self.is_cancelled():
+            yield PipelineEvent(type="error", error="cancelled by /stop")
             return
 
         summary_duration_ms = int((time.time() - summary_started) * 1000)
