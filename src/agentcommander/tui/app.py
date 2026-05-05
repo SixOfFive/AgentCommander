@@ -779,9 +779,9 @@ def _print_role_assignments() -> None:
       - 'auto':     picked by /roles auto / startup autoconfigure (in-memory)
       - 'unset':    no binding from either source
 
-    'tok/s' is the running-average tokens-per-second for that model
-    (default 100 when no measurement exists yet — converges to the real
-    rate after a few calls).
+    'tok/s' is the running-average tokens-per-second for that model.
+    Shows "—" when no measurement exists yet (a real number appears after
+    the first call to that model).
     """
     from agentcommander.db.repos import get_throughput
     from agentcommander.tui.status_bar import _fmt_tps
@@ -792,9 +792,9 @@ def _print_role_assignments() -> None:
         if rr is None:
             rows.append([role.value, "—", "—", "—", style("warn", "unset")])
         else:
-            tps = get_throughput(rr.model)
+            tps_str = _fmt_tps(get_throughput(rr.model)) or "—"
             rows.append([role.value, rr.model, rr.provider_id,
-                         _fmt_tps(tps), rr.kind])
+                         tps_str, rr.kind])
     render_system_line("Role → model assignments:")
     render_table(["role", "model", "provider", "tok/s", "kind"], rows)
 
