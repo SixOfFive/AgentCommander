@@ -35,7 +35,8 @@
       "Bash(echo 'print\\(\"hi\"\\)')",
       "Bash(bash /tmp/test49.sh)",
       "Bash(echo \"python hello.py\")",
-      "Bash(py -3 /tmp/wrong.py)"
+      "Bash(py -3 /tmp/wrong.py)",
+      "Bash(tasklist //FI \"IMAGENAME eq python.exe\")"
     ]
   }
 }
