@@ -2029,47 +2029,11 @@ class PipelineRun:
         # start_process, kill_process) we fall back to a clear error
         # rather than auto-executing arbitrary writes.
         #
-        # Match policy: look at the LAST non-empty line of the final. If
-        # that line is bare ``<verb>`` or ``<verb> <arg>``, treat the
-        # whole final as a tool intent. This catches the multi-line case
-        # where the model wraps the call in a preamble sentence
-        # ("I'll list the files for you.\n\nlist_dir"), while still
-        # rejecting prose that just MENTIONS a tool ("you can use fetch
-        # to grab a URL.").
-        #
-        # Limitation: when the model emits MULTIPLE tool calls
-        # (`read_file ./a.py\nlist_dir ./b/`), only the last line is
-        # honored. Two compounding factors keep this acceptable for now:
-        # (1) chat fallback is a recovery path, not the primary tool
-        # dispatch surface — the orchestrator's JSON-action path handles
-        # multi-step plans correctly; (2) running multiple
-        # auto-recovered tools without re-prompting the orchestrator
-        # would risk feedback loops we haven't bounded. If multi-tool
-        # chat-fallback intents become common, the right fix is feeding
-        # the result of the first tool back into a fresh orchestrator
-        # iteration, not extending this regex matcher.
-        lines = [l for l in (ln.strip() for ln in final.split("\n")) if l]
-        last_line = lines[-1] if lines else ""
-        verb_re = (
-            r"(read_file|write_file|list_dir|delete_file|execute|fetch|"
-            r"http_request|git|env|browser|start_process|kill_process|"
-            r"check_process)"
-        )
-        bad_with_arg = re.match(
-            r"^" + verb_re + r"\s+(?!\{)([^\s].*?)\s*$",
-            last_line, re.IGNORECASE,
-        )
-        bad_verb_only = re.match(
-            r"^" + verb_re + r"\s*$",
-            last_line, re.IGNORECASE,
-        )
-        if (bad_with_arg or bad_verb_only) and len(last_line) <= 300:
-            if bad_with_arg:
-                bad_verb = bad_with_arg.group(1).lower()
-                bad_arg = bad_with_arg.group(2).strip()
-            else:
-                bad_verb = bad_verb_only.group(1).lower()
-                bad_arg = ""
+        # Detector shared with the done-branch interceptor — same
+        # last-line policy and same auto-recovery treatment.
+        intent = self._detect_tool_syntax_intent(final)
+        if intent is not None:
+            bad_verb, bad_arg = intent
             yield from self._honor_tool_text_as_intent(
                 bad_verb, bad_arg, user_message, opts,
                 provider, model_name, num_ctx,
