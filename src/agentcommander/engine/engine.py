@@ -2036,6 +2036,18 @@ class PipelineRun:
         # ("I'll list the files for you.\n\nlist_dir"), while still
         # rejecting prose that just MENTIONS a tool ("you can use fetch
         # to grab a URL.").
+        #
+        # Limitation: when the model emits MULTIPLE tool calls
+        # (`read_file ./a.py\nlist_dir ./b/`), only the last line is
+        # honored. Two compounding factors keep this acceptable for now:
+        # (1) chat fallback is a recovery path, not the primary tool
+        # dispatch surface — the orchestrator's JSON-action path handles
+        # multi-step plans correctly; (2) running multiple
+        # auto-recovered tools without re-prompting the orchestrator
+        # would risk feedback loops we haven't bounded. If multi-tool
+        # chat-fallback intents become common, the right fix is feeding
+        # the result of the first tool back into a fresh orchestrator
+        # iteration, not extending this regex matcher.
         lines = [l for l in (ln.strip() for ln in final.split("\n")) if l]
         last_line = lines[-1] if lines else ""
         verb_re = (
