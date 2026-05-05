@@ -108,6 +108,10 @@ SUB_COMMANDS: dict[str, list[CompletionMatch]] = {
         CompletionMatch(name="export",
                         summary="write chat to markdown: /chat export <path>"),
     ],
+    "/compact": [
+        CompletionMatch(name="undo",
+                        summary="restore the most recent compaction's originals"),
+    ],
 }
 
 
