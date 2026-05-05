@@ -2077,7 +2077,7 @@ class PipelineRun:
     # ambiguous text would be a foot-gun.
     _AUTO_EXEC_SAFE_VERBS: tuple[str, ...] = (
         "fetch", "http_request", "read_file", "list_dir",
-        "browser", "check_process",
+        "browser", "check_process", "env",
     )
 
     def _payload_from_textual_call(self, verb: str, arg: str) -> dict[str, Any] | None:
