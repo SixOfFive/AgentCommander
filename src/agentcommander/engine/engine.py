@@ -2019,22 +2019,35 @@ class PipelineRun:
 
         # Post-guard: chat fallback is supposed to produce plain prose. When
         # the model has been primed by the tool-registry appendix and emits
-        # tool syntax instead (e.g. `fetch https://wttr.in/Edmonton`), the
-        # model has actually told us what it WANTS done. For read-only
-        # tools we can honor that intent: execute the tool ourselves, then
-        # re-run the chat call with the result in context so the user gets
-        # a real answer. For unsafe verbs (write_file, execute, git,
-        # delete_file, start_process, kill_process) we fall back to a clear
-        # error rather than auto-executing arbitrary writes.
-        bad_pattern = re.match(
+        # tool syntax instead (e.g. `fetch https://wttr.in/Edmonton` or just
+        # `list_dir`), the model has actually told us what it WANTS done.
+        # For read-only tools we can honor that intent: execute the tool
+        # ourselves, then re-run the chat call with the result in context
+        # so the user gets a real answer. For unsafe verbs (write_file,
+        # execute, git, delete_file, start_process, kill_process) we fall
+        # back to a clear error rather than auto-executing arbitrary writes.
+        # Two shapes match: ``<verb> <arg>`` (most common) and ``<verb>``
+        # alone — the latter for tools whose payload defaults are obvious
+        # (``env`` needs nothing; ``list_dir`` defaults to ``.``).
+        bad_with_arg = re.match(
             r"^\s*(read_file|write_file|list_dir|delete_file|execute|fetch|"
             r"http_request|git|env|browser|start_process|kill_process|"
             r"check_process)\s+(?!\{)([^\n]+?)\s*$",
             final, re.IGNORECASE,
         )
-        if bad_pattern and len(final) <= 200 and "\n" not in final:
-            bad_verb = bad_pattern.group(1).lower()
-            bad_arg = bad_pattern.group(2).strip()
+        bad_verb_only = re.match(
+            r"^\s*(read_file|write_file|list_dir|delete_file|execute|fetch|"
+            r"http_request|git|env|browser|start_process|kill_process|"
+            r"check_process)\s*$",
+            final, re.IGNORECASE,
+        )
+        if (bad_with_arg or bad_verb_only) and len(final) <= 200 and "\n" not in final:
+            if bad_with_arg:
+                bad_verb = bad_with_arg.group(1).lower()
+                bad_arg = bad_with_arg.group(2).strip()
+            else:
+                bad_verb = bad_verb_only.group(1).lower()
+                bad_arg = ""
             yield from self._honor_tool_text_as_intent(
                 bad_verb, bad_arg, user_message, opts,
                 provider, model_name, num_ctx,
