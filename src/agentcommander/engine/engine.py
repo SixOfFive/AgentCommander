@@ -2191,6 +2191,10 @@ class PipelineRun:
                       f"— retry the prompt.")
             return
 
+        if self.is_cancelled():
+            yield PipelineEvent(type="error", error="cancelled by /stop")
+            return
+
         # Surface the auto-execute as a normal tool event so the bar /
         # mirror see the same thing they would for a JSON dispatch.
         started = time.time()
