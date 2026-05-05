@@ -1701,20 +1701,29 @@ def cmd_new(ctx: CommandContext, args: list[str]) -> None:
 
 
 def cmd_compact(ctx: CommandContext, args: list[str]) -> None:
-    """Manually compact the active chat's scratchpad.
+    """Manually compact the active chat's scratchpad — or undo the last compaction.
 
-    Runs the same routine the engine fires automatically when the
-    scratchpad approaches ~90% of the session context budget — pull the
-    older entries, summarize them via the SUMMARIZER role, replace them
-    with a single synthetic ``compacted`` row. Subsequent runs of this
-    command summarize the prior summary too (summary-of-summaries),
-    which is exactly what users want when iterating long sessions.
+    Subcommands:
 
-    No options for now — the no-arg invocation is the only supported
-    form. The command parser accepts trailing args without erroring
-    so future extensions (e.g. ``/compact aggressive``,
-    ``/compact tail=10``) can land without breaking muscle memory.
+      /compact              run compaction (same routine as auto-compact at ~90%
+                            of context budget). Subsequent runs summarize the
+                            prior summary too.
+      /compact undo         restore the most recent compaction's originals.
+                            Reads the synthetic row's `replaced_message_ids`
+                            and flips `is_replaced` back to 0 on every listed
+                            id; deletes the synthetic row so next hydrate
+                            sees the originals. Only the LAST round can be
+                            undone in one call — call repeatedly to peel
+                            back further.
+
+    Future: ``/compact aggressive``, ``/compact tail=10``,
+    ``/compact dry-run``. Trailing args other than ``undo`` are ignored
+    (with a muted note) for forward compatibility.
     """
+    from agentcommander.db.repos import (
+        delete_scratchpad_entry, latest_compaction_entry,
+        unmark_scratchpad_replaced,
+    )
     from agentcommander.engine.role_call import RoleNotAssigned, call_role
     from agentcommander.engine.scratchpad import compact_conversation_db
     from agentcommander.providers.base import ProviderError
@@ -1727,6 +1736,43 @@ def cmd_compact(ctx: CommandContext, args: list[str]) -> None:
         )
         return
 
+    sub = (args[0] if args else "").lower()
+
+    # ── Undo branch ──
+    if sub == "undo":
+        latest = latest_compaction_entry(cid)
+        if latest is None:
+            render_system_line(
+                "  no compaction to undo — this chat has never been "
+                "compacted."
+            )
+            return
+        if not latest["replaced_message_ids"]:
+            render_system_line(style("warn",
+                "  the most recent compaction row has no "
+                "replaced_message_ids list — can't undo (compacted "
+                "by an older AC version that didn't record the link)."))
+            return
+        n_restored = unmark_scratchpad_replaced(latest["replaced_message_ids"])
+        deleted = delete_scratchpad_entry(latest["id"])
+        try:
+            from agentcommander.db.repos import audit
+            audit("compaction.undone", {
+                "synth_id": latest["id"],
+                "restored_count": n_restored,
+                "deleted_synth": bool(deleted),
+            })
+        except Exception:  # noqa: BLE001
+            pass
+        render_system_line(
+            f"  undid the most recent compaction: restored "
+            f"{n_restored} entr{'y' if n_restored == 1 else 'ies'} "
+            f"from is_replaced=1, removed the synthetic summary row. "
+            f"Run /compact undo again to peel back the prior round."
+        )
+        return
+
+    # ── Forward (run new compaction) branch ──
     if args:
         # Future-proofing — surface the rejected args clearly so a user
         # who tried `/compact aggressive` or similar knows it's ignored
