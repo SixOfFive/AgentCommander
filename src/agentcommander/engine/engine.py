@@ -744,6 +744,55 @@ class PipelineRun:
                         yield PipelineEvent(type="guard", family="done",
                                             reason="rejecting premature done")
                         if self.state.premature_done_count >= 2:
+                            # Deterministic forced-fetch: if the user asked
+                            # about live data (weather, time, news) and the
+                            # orchestrator declined twice, infer the URL
+                            # from the user message and run the fetch
+                            # ourselves. Without this, weak orchestrators
+                            # (Qwen3.6-35B etc.) fall through to chat
+                            # fallback which just declines politely — the
+                            # user gets nothing actionable. With this, the
+                            # engine picks the right wttr.in / worldtime /
+                            # Google News URL and `_honor_tool_text_as_intent`
+                            # runs it + summarizes. Returns None when the
+                            # message doesn't match any live-data pattern,
+                            # in which case we fall through to the existing
+                            # chat fallback unchanged.
+                            forced_url = self._infer_live_data_url(opts.user_message)
+                            if forced_url is not None:
+                                rr_orch = resolve_role(Role.ORCHESTRATOR)
+                                if rr_orch is not None:
+                                    yield PipelineEvent(
+                                        type="guard", family="done",
+                                        reason=(
+                                            "2 premature dones on a live-data "
+                                            "question — engine forcing fetch"
+                                        ),
+                                    )
+                                    from agentcommander.providers.base import (
+                                        resolve as resolve_provider,
+                                    )
+                                    provider_obj = resolve_provider(rr_orch.provider_id)
+                                    sys_content = CHAT_FALLBACK_SYSTEM_PROMPT
+                                    appendix = tool_registry_appendix()
+                                    if appendix:
+                                        sys_content = sys_content.rstrip() + "\n" + appendix + "\n"
+                                    on_delta_cb = None
+                                    if opts.on_role_delta is not None:
+                                        def on_delta_cb(delta: str) -> None:  # noqa: E306
+                                            opts.on_role_delta("chat", delta)
+                                    yield from self._honor_tool_text_as_intent(
+                                        "fetch", forced_url, opts.user_message, opts,
+                                        provider_obj, rr_orch.model,
+                                        rr_orch.context_window_tokens,
+                                        sys_content, "chat", on_delta_cb,
+                                    )
+                                    update_pipeline_run(
+                                        self.run_id, status="done",
+                                        iterations=iteration, category=category,
+                                    )
+                                    return
+
                             yield PipelineEvent(
                                 type="guard", family="done",
                                 reason="2 premature dones — handing off to chat fallback",
