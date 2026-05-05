@@ -692,6 +692,42 @@ class PipelineRun:
 
                 # Done branch
                 if decision.action == "done":
+                    # Symmetry with chat-fallback's auto-recovery: if the
+                    # orchestrator emits `done` with `input` containing
+                    # tool syntax (e.g. "fetch https://wttr.in/Edmonton"
+                    # as plain text), honor the intent — run the tool,
+                    # then re-stream chat with the result in context. The
+                    # alternative (just nudging via tool_call_as_chat_guard)
+                    # forces another full orchestrator iteration which on
+                    # weaker models burns time without fixing the format.
+                    di_text = decision.input if isinstance(decision.input, str) else ""
+                    intent = self._detect_tool_syntax_intent(di_text)
+                    if intent is not None:
+                        rr_orch = resolve_role(Role.ORCHESTRATOR)
+                        if rr_orch is not None:
+                            verb_v, arg_v = intent
+                            from agentcommander.providers.base import resolve as resolve_provider
+                            provider_obj = resolve_provider(rr_orch.provider_id)
+                            sys_content = CHAT_FALLBACK_SYSTEM_PROMPT
+                            appendix = tool_registry_appendix()
+                            if appendix:
+                                sys_content = sys_content.rstrip() + "\n" + appendix + "\n"
+                            on_delta_cb = None
+                            if opts.on_role_delta is not None:
+                                def on_delta_cb(delta: str) -> None:  # noqa: E306
+                                    opts.on_role_delta("chat", delta)
+                            yield from self._honor_tool_text_as_intent(
+                                verb_v, arg_v, opts.user_message, opts,
+                                provider_obj, rr_orch.model,
+                                rr_orch.context_window_tokens,
+                                sys_content, "chat", on_delta_cb,
+                            )
+                            update_pipeline_run(
+                                self.run_id, status="done",
+                                iterations=iteration, category=category,
+                            )
+                            return
+
                     final = self._handle_done(decision, opts.user_message)
                     if final is None:
                         # Track repeated premature-done rejections. Trivia /
