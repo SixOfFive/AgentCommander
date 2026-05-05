@@ -1700,6 +1700,98 @@ def cmd_new(ctx: CommandContext, args: list[str]) -> None:
     cmd_chat(ctx, ["new", *args])
 
 
+def cmd_compact(ctx: CommandContext, args: list[str]) -> None:
+    """Manually compact the active chat's scratchpad.
+
+    Runs the same routine the engine fires automatically when the
+    scratchpad approaches ~90% of the session context budget — pull the
+    older entries, summarize them via the SUMMARIZER role, replace them
+    with a single synthetic ``compacted`` row. Subsequent runs of this
+    command summarize the prior summary too (summary-of-summaries),
+    which is exactly what users want when iterating long sessions.
+
+    No options for now — the no-arg invocation is the only supported
+    form. The command parser accepts trailing args without erroring
+    so future extensions (e.g. ``/compact aggressive``,
+    ``/compact tail=10``) can land without breaking muscle memory.
+    """
+    from agentcommander.engine.role_call import RoleNotAssigned, call_role
+    from agentcommander.engine.scratchpad import compact_conversation_db
+    from agentcommander.providers.base import ProviderError
+    from agentcommander.types import Role
+
+    cid = ctx.state.get("conversation_id")
+    if not cid:
+        render_system_line(
+            "no active chat — start one by sending a prompt or /chat new"
+        )
+        return
+
+    if args:
+        # Future-proofing — surface the rejected args clearly so a user
+        # who tried `/compact aggressive` or similar knows it's ignored
+        # for now rather than wondering why their option had no effect.
+        render_system_line(style("muted",
+            f"  /compact takes no options yet (ignoring: {' '.join(args)})"))
+
+    def _summarize(prompt: str) -> "str | None":
+        """Closure: call SUMMARIZER role with no cancel hook (slash
+        commands run synchronously on the main thread, the user can
+        Ctrl-C if they really want to bail)."""
+        try:
+            out = call_role(
+                Role.SUMMARIZER,
+                user_input=prompt,
+                conversation_id=cid,
+                json_mode=False,
+            )
+        except (ProviderError, RoleNotAssigned) as exc:
+            render_system_line(style("warn",
+                f"  summarizer call failed: {type(exc).__name__}: {exc}"))
+            return None
+        except Exception as exc:  # noqa: BLE001
+            render_system_line(style("warn",
+                f"  summarizer raised: {type(exc).__name__}: {exc}"))
+            return None
+        return out.strip() if out else None
+
+    render_system_line(style("muted", "  compacting scratchpad…"))
+
+    try:
+        from agentcommander.db.repos import audit
+    except Exception:  # noqa: BLE001
+        audit = None  # type: ignore[assignment]
+
+    try:
+        result = compact_conversation_db(
+            cid,
+            summarize_fn=_summarize,
+            audit_fn=audit,
+        )
+    except Exception as exc:  # noqa: BLE001
+        render_system_line(style("warn",
+            f"  compaction failed: {type(exc).__name__}: {exc}"))
+        return
+
+    if result is None:
+        render_system_line(
+            "  nothing to compact (scratchpad is already short or "
+            "summarizer returned empty)"
+        )
+        return
+
+    saved = result["original_chars"] - result["summary_chars"]
+    pct = (saved / result["original_chars"] * 100.0
+           if result["original_chars"] else 0.0)
+    render_system_line(
+        f"  compacted {result['replaced_count']} entr"
+        f"{'y' if result['replaced_count'] == 1 else 'ies'} → "
+        f"{result['summary_chars']:,} char summary "
+        f"({result['original_chars']:,} → {result['summary_chars']:,}, "
+        f"{pct:.0f}% smaller)"
+    )
+
+
 # ─── /status — model usage stacked bar ─────────────────────────────────────
 
 
