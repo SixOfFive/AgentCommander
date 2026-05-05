@@ -91,6 +91,20 @@ def _session_ceiling_tokens() -> int | None:
         return None
 
 
+# Roles that don't need the full ceiling context — bounding them here
+# saves significant KV-cache allocation on local models (e.g. running a
+# 35B at num_ctx=131072 means a 5-10 GB KV cache; capping the router
+# at 8k cuts it to ~50 MB and dramatically speeds up the cold-load and
+# prompt-eval phase). The user can still override via ``/context`` (which
+# takes precedence) — this just changes the *default* ceiling for these
+# specific roles.
+_PER_ROLE_DEFAULT_CTX_CAP: dict[Role, int] = {
+    Role.ROUTER: 8192,
+    # Chat fallback uses orchestrator role; don't cap it here because
+    # scratchpad context can grow large within a chat-fallback summarize.
+}
+
+
 def resolve(role: Role | str) -> ResolvedRole | None:
     """Look up the (provider, model) bound to a role. Override beats autoconfig.
 
@@ -104,7 +118,10 @@ def resolve(role: Role | str) -> ResolvedRole | None:
          across picked models, computed at startup. Without this, the bar
          would announce e.g. "8k" but providers would actually receive
          num_ctx=None and fall back to Ollama's 2048/4096 default.
-      4. None — provider's built-in default (only when no autoconfig has
+      4. Per-role default cap (router → 8k) — applied when (1) and (2)
+         are unset; bounds KV-cache allocation for roles that never need
+         huge contexts.
+      5. None — provider's built-in default (only when no autoconfig has
          run yet, e.g. before first /providers add).
     """
     from agentcommander.db.repos import get_role_assignment  # lazy: avoid circulars
@@ -112,12 +129,20 @@ def resolve(role: Role | str) -> ResolvedRole | None:
     role_enum = Role(role) if isinstance(role, str) else role
     session_ctx = _session_context_override()
     ceiling = _session_ceiling_tokens()
+    per_role_cap = _PER_ROLE_DEFAULT_CTX_CAP.get(role_enum)
 
     def _pick_ctx(per_role_ctx: int | None) -> int | None:
         if session_ctx is not None:
             return session_ctx
         if per_role_ctx is not None:
             return per_role_ctx
+        # Apply per-role cap as a ceiling on the autoconfig ceiling.
+        # If the user set /context 16k (session_ctx), that wins; if they
+        # /roles set a per-role ctx, that wins. This branch only kicks
+        # in for the autoconfig fall-through case — which is exactly
+        # where a 35B router calling out to 128k ctx makes no sense.
+        if per_role_cap is not None and (ceiling is None or ceiling > per_role_cap):
+            return per_role_cap
         return ceiling
 
     # 1. DB override (user-set)
