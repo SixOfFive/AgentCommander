@@ -947,6 +947,32 @@ def _run_startup_autoconfigure() -> None:
         render_system_line(f"  preserved {n_overrides} user override(s) "
                            f"(use /roles unset <role> to release)")
 
+    # Latency hint: when the router is bound to the same large model as
+    # the orchestrator, every turn pays the orchestrator's prompt-eval
+    # cost twice (router classify + orchestrator decide). A small
+    # classifier (1-3B) handles intent classification in <1 s and saves
+    # 5-15 s per turn on local 30B+ stacks. We can't auto-pick one (no
+    # candidate scoring exists for "small models"), but we can flag it.
+    router_pick = applied.role_picks.get("router")
+    orch_pick = applied.role_picks.get("orchestrator")
+    if (router_pick and orch_pick and router_pick == orch_pick
+            and "router" not in applied.user_overrides):
+        router_model = router_pick[1]
+        # Heuristic: warn when the bound router model name suggests it's
+        # large. Substring match on common big-model size markers; if any
+        # match, flag it. False-positives are cheap (the user reads a
+        # one-line hint); false-negatives miss the optimization.
+        big_markers = ("70b", "65b", "35b", "34b", "32b", "30b",
+                       "27b", "24b", "22b", "20b", "13b", "70B",
+                       "35B", "34B", "32B", "30B", "27B", "24B")
+        if any(m in router_model for m in big_markers):
+            render_system_line(style("muted",
+                f"  hint: router uses the same large model as the "
+                f"orchestrator ({router_model}). A small 1-3B model "
+                f"would classify intent in <1 s. Bind one with "
+                f"`/roles set router <provider_id> <small_model>` "
+                f"to drop ~5-15 s per turn."))
+
     _print_session_context_summary(applied)
 
 
