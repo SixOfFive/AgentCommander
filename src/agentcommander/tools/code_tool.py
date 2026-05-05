@@ -272,6 +272,36 @@ def _execute(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
     ext, cmd_prefix = runner
     timeout_s = max(1, min(int(timeout_s), MAX_TIMEOUT_S))
 
+    # Windows-specific quirk: when a bash script invokes `python` or
+    # `python3`, the Microsoft Store app-execution-alias at
+    # `%LocalAppData%\Microsoft\WindowsApps\python3.exe` shadows the
+    # real interpreter and exits 49 with a "Python was not found"
+    # message. Even users with Python properly installed via the `py`
+    # launcher hit this — Git Bash's PATH resolves the stub first.
+    # Rewrite leading-token `python`/`python3` invocations to the
+    # resolved real interpreter so scripts like `python hello.py` work.
+    if (sys.platform == "win32" and language.lower() in ("bash", "sh", "shell")
+            and ("python " in code or "python3 " in code)):
+        real_py = _resolve_python_cmd()
+        if real_py:
+            # Quote the path if it contains spaces; bash splits on
+            # whitespace otherwise. The launcher ``py -3`` becomes
+            # ``"C:/.../py.exe" -3`` after this.
+            quoted = " ".join(
+                f'"{p}"' if (" " in p and not p.startswith('"')) else p
+                for p in real_py
+            )
+            # Replace word-boundary `python ` / `python3 ` at line start
+            # or after whitespace/`&&`/`;`/`|`. Keeps usages inside
+            # comments and strings intact (they're rarely there in shell
+            # scripts the orchestrator emits).
+            import re as _re
+            pattern = _re.compile(
+                r"(^|[\s;&|]|&&|\|\|)python3?(\s)",
+                _re.MULTILINE,
+            )
+            code = pattern.sub(rf"\g<1>{quoted}\g<2>", code)
+
     with tempfile.TemporaryDirectory(prefix="ac-exec-") as tmp:
         script_path = os.path.join(tmp, f"script{ext}")
         with open(script_path, "w", encoding="utf-8", newline="\n") as f:
