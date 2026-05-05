@@ -27,7 +27,15 @@
       "Bash(timeout 480 cmd.exe //c \"..\\\\\\\\ac.bat\")",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_live_data_inference -v)",
       "Bash(timeout 600 cmd.exe //c \"..\\\\\\\\ac.bat\")",
-      "Bash(timeout 1500 cmd.exe //c \"..\\\\\\\\ac.bat\")"
+      "Bash(timeout 1500 cmd.exe //c \"..\\\\\\\\ac.bat\")",
+      "Bash(bash -c \"exit 49\")",
+      "Bash(echo \"exit=$?\")",
+      "Bash(bash -c \"python hello.py\")",
+      "Bash(cat)",
+      "Bash(echo 'print\\(\"hi\"\\)')",
+      "Bash(bash /tmp/test49.sh)",
+      "Bash(echo \"python hello.py\")",
+      "Bash(py -3 /tmp/wrong.py)"
     ]
   }
 }
