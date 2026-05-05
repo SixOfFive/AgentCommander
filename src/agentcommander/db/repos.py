@@ -851,28 +851,31 @@ def _json_default(obj: Any) -> Any:
 DEFAULT_TOKENS_PER_SECOND = 100.0
 
 
-def get_throughput(model: str | None) -> float:
-    """Return the current running-average tokens/sec for ``model``.
+def get_throughput(model: str | None) -> float | None:
+    """Return the current running-average tokens/sec for ``model``, or
+    ``None`` when no measurement exists yet.
 
-    Falls back to ``DEFAULT_TOKENS_PER_SECOND`` (100) when the model has no
-    row yet — this is the "haven't measured yet" default the UI shows so a
-    fresh install doesn't display a blank rate next to every model.
+    Returning ``None`` (rather than the historic 100 t/s seed) lets the UI
+    render an honest "—" for unmeasured models. ``_fmt_tps`` on the TUI
+    side already converts ``None`` to an empty string, so callers don't
+    need to special-case it; they just don't show a tok/s badge until
+    real data has flowed.
     """
     if not model:
-        return DEFAULT_TOKENS_PER_SECOND
+        return None
     try:
         row = get_db().execute(
             "SELECT tokens_per_second FROM model_throughput WHERE model = ?",
             (model,),
         ).fetchone()
     except sqlite3.OperationalError:
-        return DEFAULT_TOKENS_PER_SECOND
+        return None
     if row is None:
-        return DEFAULT_TOKENS_PER_SECOND
+        return None
     try:
         return float(row["tokens_per_second"])
     except (TypeError, ValueError):
-        return DEFAULT_TOKENS_PER_SECOND
+        return None
 
 
 def record_throughput(model: str | None, completion_tokens: int | None,
