@@ -2081,21 +2081,33 @@ class PipelineRun:
     )
 
     def _payload_from_textual_call(self, verb: str, arg: str) -> dict[str, Any] | None:
-        """Best-effort: map ``<verb> <arg>`` to a real tool payload.
+        """Best-effort: map ``<verb> [<arg>]`` to a real tool payload.
 
-        Returns ``None`` when the verb isn't safely auto-executable or the
-        arg shape doesn't match what the tool expects. Conservative on
-        purpose — better to fall back to the apology than to ship a
-        malformed payload.
+        Returns ``None`` when the verb isn't safely auto-executable, when
+        a required arg is missing, or when the arg shape doesn't match
+        what the tool expects. Conservative on purpose — better to fall
+        back to the apology than to ship a malformed payload.
+
+        For verbs whose default behavior is unambiguous (``env``,
+        ``list_dir``), missing args fill in sensibly (``list_dir`` →
+        current working dir; ``env`` → all env vars).
         """
-        if verb in ("fetch", "browser"):
-            return {"url": arg}
+        if verb == "fetch":
+            return {"url": arg} if arg else None
+        if verb == "browser":
+            return {"url": arg} if arg else None
         if verb == "http_request":
-            return {"url": arg, "method": "GET"}
-        if verb in ("read_file", "list_dir"):
-            return {"path": arg}
+            return {"url": arg, "method": "GET"} if arg else None
+        if verb == "read_file":
+            return {"path": arg} if arg else None
+        if verb == "list_dir":
+            # `list_dir` alone → assume the working directory.
+            return {"path": arg or "."}
         if verb == "check_process":
-            return {"name": arg}
+            return {"name": arg} if arg else None
+        if verb == "env":
+            # `env` alone → list all env. With an arg, treat it as a key.
+            return {"name": arg} if arg else {}
         return None
 
     def _honor_tool_text_as_intent(
