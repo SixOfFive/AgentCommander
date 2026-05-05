@@ -836,4 +836,322 @@ When debugging or extending, open in this order:
 Last commit at compaction: **`76367db`** ("prompt: orchestrator now lists only the 13 real tools").
 138/138 unit tests pass. Working tree is clean of source changes.
 
+---
+
+# RESUME-AFTER-COMPACTION (rounds 31–40, 2026-05-04 → 2026-05-05)
+
+**Newest section. Read first if you're a future Claude resuming after compaction.**
+
+## TL;DR — what shipped
+
+Major round of follow-ups after rounds 29–30. Highlights:
+
+- **Auto-fetch path on weak orchestrators** — when chat fallback or `done.input` emits `fetch <url>` / `list_dir` / etc. as plain text, the engine actually runs the tool and re-streams a summary. Symmetrical between both surfaces.
+- **Deterministic forced-fetch** for live-data questions when the orchestrator refuses despite nudges. Pattern-match → URL → execute. Closed the weather-question case end-to-end on Qwen3.6-35B (which couldn't follow JSON).
+- **Chat log feature** — every user/assistant message also gets appended to `<wd>/logs/<conv-time>.log`. New chat → new file. Rotation at 10 MB × 20 parts. Refuses to run in the AC source repo.
+- **Self-measured throughput** in `<wd>/.agentcommander/model_stats.json` (with shape-aware char→token estimation). Honest "—" instead of fake `100 t/s` for unmeasured models.
+- **`/compact` slash command** — manual scratchpad compaction. Reuses the auto-compact routine; subsequent calls do summary-of-summaries.
+- **Per-role num_ctx cap** for router (8 k by default; was inheriting session ceiling). Skip tool-registry appendix on router.
+- **shell-in-wrong-language guard** — `execute(language=python, input="python file.py")` → auto-rewrites to `bash`. Closes round-29's exit-49 mystery.
+- **Windows Microsoft Store Python stub workaround** — bash on Windows resolves `python` to a stub that exits 49; the engine now rewrites those tokens to the real `py -3` path.
+- **Markdown underscore-emphasis killed** — was eating filename underscores (`__pycache__` → `pycache`).
+- **17 sub-fixes** in one batch (URL cleanup, retry+cancel on auto-fetch, host validation, multi-step support via lenient `next_steps_guard`, smaller-router-model hint, etc.)
+- **Provider startup retry** (1.5 s + 1 retry) for transient llama-server / Ollama unreachability.
+- Latest commit: **`f3c0088`**.
+
+## Test count
+
+**176/176** unit tests pass (was 138). Net +38 over these rounds:
+- 21 new tests in `tests/test_live_data_inference.py`
+- 17 new tests in `tests/test_shell_in_wrong_language.py`
+
+Test runner: `PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest discover tests` (must run from repo root).
+
+## New / restructured files
+
+| File | What | Why |
+|---|---|---|
+| `src/agentcommander/chat_log.py` | NEW — file-system chat transcript | User-spec'd readable log next to the DB. Per-conversation file at `<wd>/logs/YYYY-MM-DD-HH-MM-SS.log`. Rotates at 10 MB. |
+| `src/agentcommander/model_stats.py` | NEW — side-by-side throughput JSON | Catalog-independent self-measured rates. Shape-aware char→token estimate (CJK 1.5, code 3.0, prose 4.0). |
+| `src/agentcommander/providers/capability_hints.py` | NEW — capability inference from id | Substring-match on model id for vision/audio/image_gen capabilities. Used by autoconfig fallback when catalog is silent. |
+| `src/agentcommander/cli.py` | EXTENDED — program-folder check | Refuses to launch with cwd == repo root. Loud red banner. |
+| `src/agentcommander/engine/scratchpad.py` | EXTENDED — `compact_conversation_db`, `build_compaction_prompt` | Standalone helpers used by both auto- and manual-compaction. |
+| `tests/test_live_data_inference.py` | NEW — 21 tests | Weather/news/time URL inference. |
+| `tests/test_shell_in_wrong_language.py` | NEW — 17 tests | `execute(language=python, input="python <file>")` rewrite. |
+
+## Engine changes — auto-fetch + forced-fetch
+
+The orchestrator on weaker models routinely emits tool syntax as plain text instead of JSON actions. Two recovery paths now exist:
+
+### A. Chat fallback / done.input — auto-execute on tool syntax
+
+`PipelineRun._detect_tool_syntax_intent(text)` looks at the **last non-empty line** of:
+- The chat fallback's streamed reply
+- The orchestrator's `done.input`
+
+If it matches `^<verb>[\s+<arg>]?$` and the line is ≤ 300 chars, treat it as the tool call the model intended. Honored by `_honor_tool_text_as_intent(verb, arg, …)`:
+
+1. Validates the URL via `safety.host_validator.validate_user_host` (rejects loopback, link-local, non-HTTP)
+2. Cleans the arg via `_clean_textual_arg` (strips trailing punctuation, surrounding quotes/backticks/brackets, `<>`)
+3. Builds the payload via `_payload_from_textual_call`
+4. Runs the tool
+5. Re-streams chat with the result in context, wrapped in retry-on-rate-limit + cancel checks
+
+**Safe verbs** (auto-executed): `fetch`, `http_request`, `read_file`, `list_dir`, `browser`, `check_process`, `env`.
+
+**Unsafe verbs** (apologize, never auto-run): `write_file`, `delete_file`, `execute`, `git`, `start_process`, `kill_process`. Refusal message asks the user to retry — orchestrator must follow the JSON contract for these.
+
+**Synonyms accepted** (via shared `TOOL_VERB_SYNONYMS` in `decision_guards.py`): `ls`/`dir`→`list_dir`, `cat`→`read_file`, `curl`/`wget`→`fetch`, `rm`/`del`→`delete_file`, `bash`/`sh`→`execute`, `ps`→`check_process`. Same map drives both `unknown_action_guard` and the chat-fallback intent detector.
+
+### B. Live-data forced-fetch — deterministic URL inference
+
+When `premature_done_count >= 2` (orchestrator declined twice) AND the user message matches a live-data pattern, the engine infers a URL and runs it itself.
+
+`_LIVE_DATA_PATTERNS_FORCED` table:
+
+| Pattern | URL builder |
+|---|---|
+| `weather/forecast/temperature in <X>` | `https://wttr.in/<city>?format=3` |
+| `weather` (bare) | `https://wttr.in/?format=3` (IP geolocation) |
+| `current time / time in <X>` | `https://worldtimeapi.org/api/timezone/<region>` |
+| `what time is it` (bare) | `https://worldtimeapi.org/api/ip` |
+| `today's news / latest news / breaking news / top stories` | `https://news.google.com/rss` |
+
+Priority ordering matters — specific patterns (with location) win over bare fallbacks.
+
+Falls through to chat fallback when nothing matches.
+
+## Engine changes — premature-done escape hatch
+
+After 2 premature dones, if scratchpad has ≥ 2 successful tool calls (write_file / execute / fetch / read_file / list_dir / git / browser / http_request) **in the current turn**, use `build_final_output(scratchpad, turn_start_idx)` directly instead of paying for another chat-fallback LLM call. This shaves ~5400 prompt tokens off multi-step runs where the answer is already in the pad.
+
+## Guard changes
+
+- **`live_data_question_guard`** (NEW, in done_guards) — pre-empts `done` on weather/news/time questions when no fetch has happened yet. 2-nudge cap to avoid loops.
+- **`tool_call_as_chat_guard`** (NEW, in done_guards) — `done.input` matches `<verb> <arg>`? Push a JSON-shape nudge and continue.
+- **`shell_in_wrong_language_guard`** (NEW, in decision_guards) — `execute(language=python, input="python <file>")` → silently rewrites `language` to `bash`. Strips `.exe` extensions and path prefixes when matching the first token. Inserted in `run_decision_guards` BEFORE `missing_fields_guard` so the rewritten language is what gets validated.
+- **`next_steps_guard`** — added a lenient bypass: when scratchpad has ≥ 2 successful tool calls in this turn, the guard exits before checking for "I'll" / "next, I'll" intent prose. Avoids rejecting completion-report dones that incidentally mention "I'll verify".
+- **Decision-guard runner order**: `empty_action` → `sentence_as_action` → `unknown_action` → `unassigned_role` → `field_swap` → **`shell_in_wrong_language`** → `missing_fields` → `malformed_url` → `templating_placeholder` → `disabled_browser` → `delete_new_file`.
+
+## Chat-fallback prompt tightening
+
+`CHAT_FALLBACK_SYSTEM_PROMPT` (engine.py:47) explicitly says:
+
+> You are NOT the orchestrator and you CANNOT call tools from this role. Do NOT emit tool-call syntax such as `fetch <url>`, `read_file <path>`, `execute ...`. If you need data you don't have, say so plainly.
+
+Combined with the post-guard, this either prevents the leak entirely or auto-recovers when the model still leaks.
+
+## ORCHESTRATOR.md prune
+
+Was 14 critical rules + bigger appendix; now 8 rules ordered by frequency-of-violation. Top 3:
+
+1. **Tools are JSON, not text.** `{"action":"<verb>",...}`. Writing `"fetch https://..."` in `done.input` ships the literal string.
+2. **Live-data questions need `fetch` FIRST.** Lists weather/time/news/price endpoints.
+3. **Don't `done` early.** Multi-step trigger words ("then", "after", "also") → all steps before done.
+
+Plus new "Bad — tool syntax as plain text" + "Good — live-data question (weather)" few-shot examples.
+
+## Self-measured throughput
+
+`record_throughput(model, completion_tokens, duration_ms, *, chars_completed, sample_text)`:
+
+- When `completion_tokens` is missing (some llama.cpp builds report 0), falls back to `estimate_tokens_from_chars(chars, sample_text)` — divisor depends on content shape:
+  - CJK ≥ 20% of chars → 1.5
+  - Code-heavy punctuation ≥ 10% → 3.0
+  - Else (prose) → 4.0
+- Mirrors observation to `<wd>/.agentcommander/model_stats.json` with `source: "estimated"|"measured"` flag.
+- DB `model_throughput` table still operational, but first measurement uses `rate` directly (was averaging with the 100 t/s seed which skewed early reads).
+- `get_throughput()` returns `None` for unmeasured models so UI renders "—" instead of a fake `100 t/s`.
+
+## Per-role num_ctx caps
+
+`engine/role_resolver.py` has `_PER_ROLE_DEFAULT_CTX_CAP`:
+
+```python
+{Role.ROUTER: 8192}
+```
+
+When the autoconfig session-ceiling is None or larger than the cap, the cap wins for these roles. `/context` override beats this; `/roles set` per-role context beats this. Saves the router from allocating a 128 k KV cache on local 30B+ stacks.
+
+`role_call.py` skips the tool registry appendix for `Role.ROUTER` — saves ~400 prompt tokens per turn.
+
+## Provider probe retry
+
+`autoconfig._gather_installed` retries each provider's `list_models()` once with a 1.5 s pause on first failure. Closes the "all roles unset on first launch after server restart" race.
+
+## Capability detection
+
+`provider.get_model_capabilities(model)` returns a set of tags from `{"text", "vision", "audio", "image_gen"}`:
+
+- **Ollama** — calls `/api/show` and reads the `capabilities` array; merges with name-heuristic.
+- **llama.cpp** — name-heuristic only (`/v1/models` doesn't surface modality).
+
+Capability hints (`providers/capability_hints.py`) substring-match against tables like `_VISION_HINTS` (llava, moondream, qwen-vl, llama-3.2-vision, gemma-3, pixtral, internvl, smolvlm, …).
+
+Autoconfig's fallback path uses these to decide which non-text roles get the model: `vision` role only assigned when `vision` capability detected; same for `audio`/`image_gen`. Default → goes to `unset_roles`.
+
+## /compact slash command
+
+`cmd_compact` in `tui/commands.py` calls the same routine as the auto-compact (90 % threshold) but unconditionally. Subsequent calls summarize the prior summary too — true summary-of-summaries.
+
+Standalone helper in `engine/scratchpad.py`:
+
+```python
+def compact_conversation_db(conversation_id, *, summarize_fn, keep_tail=6, run_id=None, audit_fn=None) -> dict | None:
+```
+
+Lists live (non-replaced) scratchpad rows, splits off the last `keep_tail` as live working context, summarizes the rest via the caller's `summarize_fn`, inserts a synthetic `system/compacted` row, marks originals `is_replaced=1`. Returns `{summary_id, replaced_count, original_chars, summary_chars, summary_text}` or `None`.
+
+`_maybe_compact_scratchpad` in engine.py refactored to use this helper.
+
+**Important design fact**: compaction is layered. Layer 1 (`messages` table — user view) is **never** compacted. Layer 2 (`scratchpad_entries`) — old rows are flagged `is_replaced=1` but **never deleted**, so audit/postmortem/future re-analysis sees full fidelity. Only Layer 3 (the prompt fed to the model) sees the summary instead of originals.
+
+## Markdown renderer fix
+
+Old `_BOLD_RX = ... | __([^_\n]+?)__` and `_ITALIC_RX = ... | _([^_\n]+?)_` ate filename underscores: `__pycache__` rendered as bold "pycache", `binary_search_tree29.py` showed as "binarysearchtree29.py" with `search` italicized. Even with CommonMark-style intraword lookarounds, `__pycache__` at line edges still matched.
+
+**Fix**: killed underscore-emphasis entirely in `tui/markdown.py`. `**bold**` and `*italic*` still work. Filenames preserved.
+
+## Logs feature
+
+`<wd>/logs/<conversation-created-at>.log` plain-text transcript. Append on every `messages` row insert via hook in `db/repos.py:append_message`. Format:
+
+```
+[YYYY-MM-DD HH:MM:SS] USER:
+<content>
+
+[YYYY-MM-DD HH:MM:SS] ASSISTANT:
+<content>
+```
+
+Best-effort — log failures never break the chat. Rotation at 10 MB; up to 20 historical parts (`<base>.001.log`, `<base>.002.log`, …) before oldest is deleted.
+
+`/chat new` and `/chat clear` produce a new conversation → new log file. `/chat resume` appends to the existing file.
+
+`AgentTesting/` is gitignored → `logs/` inside it is implicitly covered.
+
+## Program-folder check
+
+`cli.py:_detect_program_folder()` finds the AC source repo by walking from `agentcommander.__file__` up to a directory containing both `pyproject.toml` and `src/agentcommander/__init__.py`. If `cwd` resolves to that path, exit code 2 with a loud red banner — refuses to start. Pollution prevention.
+
+## Auto-commit hook restored
+
+`.claude/settings.json` was deleted from the index mid-session at compaction time. Restored:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {"type": "command", "command": "git add -A && (git diff --cached --quiet || git commit -m \"auto: changes from claude\" --quiet) 2>/dev/null || true"}
+        ]
+      }
+    ]
+  }
+}
+```
+
+Loaded at session start; new sessions auto-commit on every Edit/Write.
+
+## Smaller-router-model startup hint
+
+When autoconfig binds the same big model to both `router` and `orchestrator`, startup prints a muted hint:
+
+> hint: router uses the same large model as the orchestrator (devstral-small-2:24b). A small 1-3B model would classify intent in <1 s. Bind one with `/roles set router <provider_id> <small_model>` to drop ~5-15 s per turn.
+
+Only fires when the bound model name contains a "big-marker" substring (70b, 35b, 24b, 22b, 20b, 13b, etc.). Easy win the user can act on without engine work.
+
+## Windows Microsoft Store Python stub workaround
+
+Bash on Windows (Git Bash) resolves `python` / `python3` to `%LocalAppData%/Microsoft/WindowsApps/python3.exe` — a stub that exits 49 with "Python was not found, install from the Microsoft Store". This caused round-29-style mysterious exit-49 failures even on systems with Python correctly installed via `py -3`.
+
+Fix in `code_tool.py`: when `language ∈ {bash, sh, shell}` on Windows AND the script contains `python ` / `python3 `, rewrite those tokens to the resolved real interpreter path. Backslashes converted to forward slashes (bash escape-strips them otherwise). Quote paths with spaces.
+
+Regex: `(^|[\s;&|])python3?(\s)` → `\1<resolved-path>\2`. Function-based substitution avoids regex-escape issues with Windows backslashes.
+
+## Updated sanity-check checklist
+
+1. `cd C:\Users\sixoffive\Documents\AgentCommander && PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest discover tests` → **176 OK**
+2. `git log --oneline origin/main..HEAD` → empty (everything pushed; auto-commits land continuously)
+3. `git status --short` → only `.claude/settings.local.json` drift (local-only permissions)
+4. `cd AgentTesting && cmd.exe //c "..\ac.bat --version"` → `AgentCommander 0.1.0`
+5. `cd AgentTesting && echo "what is 2+2" | cmd.exe //c "..\ac.bat"` → `4` somewhere
+6. `cd AgentTesting && echo "what is the weather in edmonton" | cmd.exe //c "..\ac.bat"` → real weather data via wttr.in (live-data forced-fetch path)
+7. `PYTHONUTF8=1 PYTHONPATH=src py -3 -c "from agentcommander.tools.dispatcher import bootstrap_builtins, list_tools; bootstrap_builtins(); print(len(list_tools()))"` → **13**
+
+## File map for rounds 31–40
+
+```
+src/agentcommander/chat_log.py                       NEW — chat transcript writer + rotation
+src/agentcommander/model_stats.py                    NEW — side-by-side throughput JSON
+src/agentcommander/providers/capability_hints.py     NEW — name-heuristic capability inference
+src/agentcommander/providers/base.py                 + get_model_capabilities default
+src/agentcommander/providers/ollama.py               + get_model_capabilities via /api/show
+src/agentcommander/providers/llamacpp.py             + get_model_capabilities via name heuristic
+src/agentcommander/cli.py                            + program-folder refuse banner
+src/agentcommander/db/repos.py                       record_throughput sample_text path,
+                                                     get_throughput → Optional[float],
+                                                     append_message → chat_log hook
+src/agentcommander/typecast/autoconfig.py            fallback_no_catalog + role-required-capability
+                                                     map; _gather_installed retry
+src/agentcommander/engine/role_resolver.py           _PER_ROLE_DEFAULT_CTX_CAP (router=8192)
+src/agentcommander/engine/role_call.py               skip tool-registry appendix on router;
+                                                     pass sample_text to record_throughput
+src/agentcommander/engine/engine.py                  _honor_tool_text_as_intent,
+                                                     _detect_tool_syntax_intent,
+                                                     _infer_live_data_url + table,
+                                                     premature-done escape via build_final_output,
+                                                     _maybe_compact_scratchpad refactored to
+                                                     compact_conversation_db
+src/agentcommander/engine/scratchpad.py              compact_conversation_db,
+                                                     build_compaction_prompt
+src/agentcommander/engine/guards/done_guards.py      tool_call_as_chat_guard,
+                                                     live_data_question_guard,
+                                                     next_steps_guard lenient bypass
+src/agentcommander/engine/guards/decision_guards.py  shell_in_wrong_language_guard,
+                                                     TOOL_VERB_SYNONYMS shared map
+src/agentcommander/tools/code_tool.py                Windows MS-store-Python-stub workaround
+src/agentcommander/tui/app.py                        autoconfig fallback note,
+                                                     smaller-router-model hint,
+                                                     "—" instead of fake tok/s
+src/agentcommander/tui/commands.py                   cmd_compact + /compact registry entry
+src/agentcommander/tui/markdown.py                   killed underscore emphasis
+resources/prompts/ORCHESTRATOR.md                    prune 14→8 critical rules,
+                                                     live-data + tool-syntax-as-text examples
+resources/prompts/ROUTER.md                          unchanged
+.claude/settings.json                                restored auto-commit hook
+tests/test_live_data_inference.py                    NEW — 21 tests
+tests/test_shell_in_wrong_language.py                NEW — 17 tests
+```
+
+## Open / known issues (model-side, not engine)
+
+- **Router miscategorizes "write X then run it" as `question`** sometimes (10-iter cap). Better with "project" classification. Model-quality issue; could prompt-tune but root cause is model strength.
+- **`WinError 10061` flapping** on first chat-call after fresh ac.bat launch — Ollama loading the model and rejecting parallel requests during. Worked on second turn. Could add a one-shot retry on connection-refused at the provider layer.
+- **worldtimeapi.org SSL handshake unreliable** on user's network. Could add a backup time API to the live-data table.
+- **Filename underscore mangling on long-context devstral** — separate from the markdown fix. Model itself drops underscores on summarization. No engine fix.
+
+## Hard rules (unchanged)
+
+- stdlib only, serial only, modular by default
+- Project-local DB at `<cwd>/.agentcommander/db.sqlite`
+- **Always run `ac.bat` from `AgentTesting/`** (saved as feedback memory)
+- **Commit often, never batch** — auto-commit hook fires per Edit/Write; push at milestones (push needs confirmation)
+- Mouse removed → native scrollback works in Windows Terminal
+- Push goes directly to `main`; no PR workflow
+- Slash commands and their output are screen-only — never enter `messages` or `scratchpad_entries`
+
+## Pointers
+
+- Memory dir: `C:\Users\sixoffive\.claude\projects\C--Users-sixoffive-Documents-AgentCommander\memory\` — see `MEMORY.md`
+- EngineCommander upstream (read-only): `C:\Users\sixoffive\Documents\Claude_Projects\EngineCommander`
+- TypeCast: `https://github.com/SixOfFive/TypeCast`
+- AgentCommander remote: `https://github.com/SixOfFive/AgentCommander`
+- User email (auto-memory): `hvr.biz@gmail.com`
+
+Last commit at update: **`f3c0088`**.
+**176/176** unit tests pass. Working tree is clean of source changes.
+
 
