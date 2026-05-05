@@ -50,3 +50,8 @@ AgentTesting/
 # providers, role assignments, and conversation history isolated per
 # project. The DB carries endpoints + api_keys; never commit it.
 .agentcommander/
+
+# Chat transcripts written by the chat-log feature
+# (<working_dir>/logs/<conversation-start-time>.log). User-facing, can
+# contain quoted file content / outputs / arbitrary user messages.
+logs/
