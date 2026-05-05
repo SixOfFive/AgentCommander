@@ -34,13 +34,66 @@ from pathlib import Path
 from typing import Any
 
 
-# Approximate chars-per-token for the fallback when the provider
-# doesn't report usage (e.g. some llama.cpp builds with streaming
-# /v1/chat/completions). 4 is a widely-used English approximation for
-# BPE-style tokenizers; it's coarse but consistent enough for tok/s
-# rate tracking, which is what the bar shows. Math/code skews lower
-# (closer to 3); freeform prose skews higher (closer to 4.5).
+# Approximate chars-per-token for the fallback when the provider doesn't
+# report usage (some llama.cpp builds via streaming /v1/chat/completions).
+# We pick the divisor based on rough content shape because BPE token
+# rates differ a lot across content types:
+#
+#   English prose:  ~4.0 chars/token  (the canonical default)
+#   Code / heavy punctuation:  ~3.0   (`def foo():` is 4 tokens, 11 chars)
+#   CJK / Japanese / Korean:   ~1.5   (one CJK char often = 1 token)
+#
+# Misclassifying skews tok/s reporting by a multiplicative factor — bad
+# for the user's mental model of how fast their model is. The detector
+# is intentionally conservative: it only switches off the prose default
+# when the signal is strong (>20% CJK, or code-heavy punctuation).
 DEFAULT_CHARS_PER_TOKEN = 4.0
+CODE_CHARS_PER_TOKEN = 3.0
+CJK_CHARS_PER_TOKEN = 1.5
+
+# Punctuation that's denser-than-prose-average in code: braces, semicolons,
+# parentheses with operators, etc. Used as a heuristic for "is this code?".
+_CODE_HEAVY_PUNCT = "{}();[]:=<>!&|+*/-"
+
+
+def _looks_like_cjk(text: str) -> bool:
+    """True when at least 20% of chars are in CJK Unicode blocks.
+
+    Covers Hiragana / Katakana / CJK Unified Ideographs / Hangul, which
+    is the bulk of what gets misestimated by the chars/4 default.
+    """
+    if not text:
+        return False
+    cjk = 0
+    for ch in text:
+        cp = ord(ch)
+        if (0x3040 <= cp <= 0x30FF        # Hiragana + Katakana
+                or 0x3400 <= cp <= 0x4DBF      # CJK Ext A
+                or 0x4E00 <= cp <= 0x9FFF      # CJK Unified
+                or 0xAC00 <= cp <= 0xD7AF      # Hangul Syllables
+                or 0xF900 <= cp <= 0xFAFF):    # CJK Compatibility
+            cjk += 1
+    return cjk * 5 >= len(text)
+
+
+def _looks_like_code(text: str) -> bool:
+    """True when ≥10% of chars are code-heavy punctuation.
+
+    English prose runs ~3-4% on this set; code runs 12-25%.
+    """
+    if not text:
+        return False
+    hits = sum(1 for ch in text if ch in _CODE_HEAVY_PUNCT)
+    return hits * 10 >= len(text)
+
+
+def _chars_per_token_for(text: str) -> float:
+    """Pick the right divisor based on rough content shape."""
+    if _looks_like_cjk(text):
+        return CJK_CHARS_PER_TOKEN
+    if _looks_like_code(text):
+        return CODE_CHARS_PER_TOKEN
+    return DEFAULT_CHARS_PER_TOKEN
 
 
 def _stats_path() -> Path:
