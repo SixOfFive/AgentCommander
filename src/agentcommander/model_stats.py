@@ -170,7 +170,7 @@ def record_observation(
     tokens = completion_tokens or 0
     estimated = False
     if tokens <= 0 and chars_completed and chars_completed > 0:
-        tokens = estimate_tokens_from_chars(chars_completed)
+        tokens = estimate_tokens_from_chars(chars_completed, sample_text)
         estimated = True
     if tokens <= 0:
         return None
