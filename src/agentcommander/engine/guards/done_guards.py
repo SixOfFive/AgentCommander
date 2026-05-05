@@ -1119,6 +1119,70 @@ def prompt_template_leak_guard(decision: OrchestratorDecision,
     return GuardVerdict(action="continue")
 
 
+# Live-data trigger words. Matched case-insensitively, with word
+# boundaries so prose like "newscast" doesn't trip the news rule.
+_LIVE_DATA_PATTERNS = re.compile(
+    r"\b(weather|forecast|temperature|today|currently|right now|"
+    r"latest|recent news|breaking|stock price|share price|exchange "
+    r"rate|crypto price|score|fixture|standings|"
+    r"current time|time in|what time)\b",
+    re.IGNORECASE,
+)
+
+
+def live_data_question_guard(
+    scratchpad: list[ScratchpadEntry], iteration: int,
+    decision: OrchestratorDecision, user_message: str,
+) -> GuardVerdict:
+    """Reject `done` on live-data questions when no fetch has happened.
+
+    The orchestrator on weaker models routinely emits ``done`` on iter 1
+    for "weather in X" / "current time in Y" / "today's stock price"
+    questions instead of dispatching ``fetch``. The chat fallback then
+    either declines or leaks tool syntax — and the user gets nothing
+    real. This guard catches that pattern proactively: when the user's
+    message contains live-data trigger words AND no ``fetch`` /
+    ``http_request`` / ``browser`` entry exists in the current turn's
+    scratchpad, push a hard nudge demanding a fetch and re-orchestrate.
+
+    Loop-cap: only fires twice per turn. After two nudges the
+    orchestrator gets one more attempt, then the engine's other guards
+    (or the chat fallback's auto-recovery) handle whatever the model
+    produces. Without the cap, a stubborn model could spin to the
+    iteration limit producing nothing.
+    """
+    if not _LIVE_DATA_PATTERNS.search(user_message or ""):
+        return GuardVerdict(action="pass")
+    # Has the orchestrator already fetched something in this turn? If
+    # so the data is in scratchpad and `done` is legitimate.
+    if any(e.action in ("fetch", "http_request", "browser")
+           and e.role == "tool"
+           for e in scratchpad):
+        return GuardVerdict(action="pass")
+    # Loop-cap on this guard's nudges so we don't pin the orchestrator.
+    nudge_count = sum(
+        1 for e in scratchpad
+        if e.role == "system" and e.action == "system_nudge"
+        and isinstance(e.output, str)
+        and "live_data_forced_fetch" in e.output
+    )
+    if nudge_count >= 2:
+        return GuardVerdict(action="pass")
+    push_system_nudge(
+        scratchpad, iteration,
+        "live_data_forced_fetch",
+        "BLOCKED: this question needs LIVE data your training cannot "
+        "have. Emit a `fetch` action FIRST (e.g. wttr.in for weather, "
+        "worldtimeapi.org for current time, a free price API for "
+        "stocks/crypto, Google News RSS for news), wait for the result "
+        "in scratchpad, THEN emit `done` with the parsed answer. Do "
+        "NOT emit `done` with the URL as plain text — that ships the "
+        "literal command to the user. Required JSON shape: "
+        '{"action": "fetch", "url": "<https://...>"}.',
+    )
+    return GuardVerdict(action="continue")
+
+
 _TOOL_VERB_RE = re.compile(
     r"^\s*(read_file|write_file|list_dir|delete_file|execute|fetch|"
     r"http_request|git|env|browser|start_process|kill_process|check_process)"
