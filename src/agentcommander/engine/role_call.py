@@ -96,15 +96,23 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
     model = resolved.model
     system_prompt = get_role_prompt(role_enum)
 
-    # Self-introspection: append the live tool registry to *every* role's
-    # system prompt so a "what tools do you have access to?" question can
-    # be answered honestly even when the orchestrator delegates the response
-    # to a specialist role (e.g. researcher) instead of answering directly.
-    # Without this, delegated roles invent fictional tools because their
-    # static prompts have no awareness of the program's actual capabilities.
-    appendix = tool_registry_appendix()
-    if appendix:
-        system_prompt = system_prompt.rstrip() + "\n" + appendix + "\n"
+    # Self-introspection: append the live tool registry to most roles'
+    # system prompts so a "what tools do you have access to?" question
+    # can be answered honestly even when the orchestrator delegates the
+    # response to a specialist role (e.g. researcher) instead of
+    # answering directly. Without this, delegated roles invent fictional
+    # tools because their static prompts have no awareness of the
+    # program's actual capabilities.
+    #
+    # ROUTER is the one exception: it only classifies user intent into
+    # one of five categories, never invokes tools, and never answers
+    # the user. Adding the ~400-token appendix to every router call
+    # bought nothing and cost ~1.5 s of prompt-eval per turn on
+    # consumer hardware.
+    if role_enum is not Role.ROUTER:
+        appendix = tool_registry_appendix()
+        if appendix:
+            system_prompt = system_prompt.rstrip() + "\n" + appendix + "\n"
 
     # Extra directive for the orchestrator: don't delegate self-introspection.
     # The list above is authoritative and current — research-style decomposition
