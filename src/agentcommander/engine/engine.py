@@ -2325,7 +2325,7 @@ class PipelineRun:
         # Throughput tracking — same path as the primary chat fallback.
         try:
             from agentcommander.db.repos import insert_token_usage, record_throughput
-            chars_total = sum(len(c) for c in summary_collected)
+            sample = "".join(summary_collected)
             insert_token_usage(
                 conversation_id=opts.conversation_id,
                 role=marker_role,
@@ -2337,7 +2337,8 @@ class PipelineRun:
             )
             record_throughput(
                 model_name, sc_tokens, summary_duration_ms,
-                chars_completed=chars_total,
+                chars_completed=len(sample),
+                sample_text=sample,
             )
         except Exception:  # noqa: BLE001
             pass
