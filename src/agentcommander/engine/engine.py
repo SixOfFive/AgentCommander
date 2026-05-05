@@ -2110,6 +2110,11 @@ class PipelineRun:
         ``done.input`` branch — both surfaces leak tool syntax under the
         same conditions, and both should recover the same way.
 
+        Accepts synonyms (``ls``, ``cat``, ``curl``, ``rm``, …) via the
+        shared ``TOOL_VERB_SYNONYMS`` map so a model that emits
+        shell-style verbs gets routed to the right tool just like the
+        decision-guards path does.
+
         Returns ``(verb, arg)`` (arg may be ``""``) or ``None`` when the
         last line isn't a recognizable tool invocation. The cap on line
         length (300 chars) prevents false-positives on legitimate prose
@@ -2123,20 +2128,33 @@ class PipelineRun:
         last = lines[-1]
         if len(last) > 300:
             return None
-        verb_re = (
-            r"(read_file|write_file|list_dir|delete_file|execute|fetch|"
-            r"http_request|git|env|browser|start_process|kill_process|"
-            r"check_process)"
+        from agentcommander.engine.guards.decision_guards import (
+            TOOL_VERB_SYNONYMS,
         )
+        # Build the verb alternation from canonical names + synonyms so
+        # `ls`, `cat`, `curl`, etc. trigger the same auto-recovery path.
+        canonical = (
+            "read_file", "write_file", "list_dir", "delete_file", "execute",
+            "fetch", "http_request", "git", "env", "browser",
+            "start_process", "kill_process", "check_process",
+        )
+        all_verbs = sorted(set(canonical) | set(TOOL_VERB_SYNONYMS.keys()),
+                           key=len, reverse=True)
+        verb_alt = "|".join(re.escape(v) for v in all_verbs)
         m_arg = re.match(
-            r"^" + verb_re + r"\s+(?!\{)([^\s].*?)\s*$",
+            r"^(" + verb_alt + r")\s+(?!\{)([^\s].*?)\s*$",
             last, re.IGNORECASE,
         )
         if m_arg:
-            return m_arg.group(1).lower(), m_arg.group(2).strip()
-        m_only = re.match(r"^" + verb_re + r"\s*$", last, re.IGNORECASE)
+            verb = m_arg.group(1).lower()
+            verb = TOOL_VERB_SYNONYMS.get(verb, verb)
+            return verb, m_arg.group(2).strip()
+        m_only = re.match(r"^(" + verb_alt + r")\s*$",
+                          last, re.IGNORECASE)
         if m_only:
-            return m_only.group(1).lower(), ""
+            verb = m_only.group(1).lower()
+            verb = TOOL_VERB_SYNONYMS.get(verb, verb)
+            return verb, ""
         return None
 
     @staticmethod
