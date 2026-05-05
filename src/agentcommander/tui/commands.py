@@ -2243,6 +2243,29 @@ def _build_registry() -> dict[str, SlashCommand]:
             ),
         ),
         SlashCommand(
+            name="/compact", aliases=(),
+            summary="manually compact this chat's scratchpad via the summarizer",
+            handler=cmd_compact,
+            usage="/compact",
+            details=(
+                "Runs the same compaction the engine fires automatically when\n"
+                "the scratchpad approaches the context budget — pull older\n"
+                "entries, summarize via the SUMMARIZER role, replace them\n"
+                "with a single synthetic 'compacted' row. Calling /compact\n"
+                "again summarizes the prior summary too (summary-of-summaries),\n"
+                "useful for trimming long sessions iteratively.\n"
+                "\n"
+                "Affects only the current chat. Slash commands and their\n"
+                "output never enter the scratchpad, so /compact itself doesn't\n"
+                "need re-compacting. The user-view messages table is\n"
+                "untouched.\n"
+                "\n"
+                "Currently no options. Future: /compact aggressive (smaller\n"
+                "tail), /compact tail=<N>, /compact dry-run."
+            ),
+            examples=("/compact",),
+        ),
+        SlashCommand(
             name="/history", aliases=(),
             summary="show recent conversations",
             handler=cmd_history,
