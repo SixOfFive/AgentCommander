@@ -284,13 +284,19 @@ def _execute(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
             and ("python " in code or "python3 " in code)):
         real_py = _resolve_python_cmd()
         if real_py:
-            # Quote the path if it contains spaces; bash splits on
-            # whitespace otherwise. The launcher ``py -3`` becomes
-            # ``"C:/.../py.exe" -3`` after this.
-            quoted = " ".join(
-                f'"{p}"' if (" " in p and not p.startswith('"')) else p
-                for p in real_py
-            )
+            # bash strips backslashes as escape sequences, so a Windows
+            # path like `C:\Windows\py.exe` ends up as `C:Windowspy.exe`
+            # inside the script. Convert backslashes to forward slashes
+            # — bash on Windows accepts both, and the script never
+            # executes through CMD/PowerShell so the canonical Windows
+            # form isn't required. Quote paths with spaces so bash
+            # doesn't split on them.
+            def _bashify(p: str) -> str:
+                forward = p.replace("\\", "/")
+                if " " in forward and not forward.startswith('"'):
+                    return f'"{forward}"'
+                return forward
+            quoted = " ".join(_bashify(p) for p in real_py)
             # Replace word-boundary `python ` / `python3 ` at line start
             # or after whitespace/`&&`/`;`/`|`. Keeps usages inside
             # comments and strings intact (they're rarely there in shell
