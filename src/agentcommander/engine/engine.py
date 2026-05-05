@@ -2192,6 +2192,27 @@ class PipelineRun:
                       f"— retry the prompt.")
             return
 
+        # Host validation for any URL-bearing verb. The orchestrator's
+        # JSON path runs the same check via `_dispatch_tool` (host_validator
+        # rejects loopback / link-local / non-HTTP schemes); the auto-fetch
+        # path used to bypass it. Closes that gap so the model can't
+        # exfiltrate data to internal services by emitting `fetch
+        # http://localhost:9000/admin` as plain text.
+        if verb in ("fetch", "http_request", "browser"):
+            from agentcommander.safety.host_validator import validate_user_host
+            url = payload.get("url", "")
+            check = validate_user_host(url)
+            if not check.ok:
+                msg = (f"Refused to auto-{verb} `{url}`: {check.reason}. "
+                       f"This protection rejects loopback, link-local, "
+                       f"and non-HTTP schemes for LLM-picked URLs.")
+                self._push_entry(ScratchpadEntry(
+                    step=self.state.iteration, role=marker_role, action="reply",
+                    input=user_message, output=msg, timestamp=time.time(),
+                ))
+                yield PipelineEvent(type="done", final=msg)
+                return
+
         if self.is_cancelled():
             yield PipelineEvent(type="error", error="cancelled by /stop")
             return
