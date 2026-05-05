@@ -876,36 +876,59 @@ def get_throughput(model: str | None) -> float:
 
 
 def record_throughput(model: str | None, completion_tokens: int | None,
-                      duration_ms: int | None) -> float | None:
+                      duration_ms: int | None,
+                      *, chars_completed: int | None = None) -> float | None:
     """Update the running-average tokens/sec for ``model`` from one call's
     measurement.
 
-    Formula (matches the user's spec):
+    Formula:
 
         rate    = completion_tokens / (duration_ms / 1000)
         new_avg = (old_avg + rate) / 2
 
-    Where ``old_avg`` is whatever the table currently has for this model, or
-    ``DEFAULT_TOKENS_PER_SECOND`` if there's no row yet. The 50/50 weighting
-    means each fresh measurement is half the new value — quick to adapt
-    when a model's real throughput changes (e.g. a different size / quant
-    is swapped in under the same alias) without thrashing on noisy single
-    calls.
+    When the provider doesn't report ``completion_tokens`` (e.g. some
+    llama.cpp builds — Qwen3.6-35B-A3B-UD ships ``usage`` as zeros over
+    the streaming OpenAI-compat endpoint), fall back to estimating tokens
+    from ``chars_completed`` (chars / 4 ≈ tokens). Without this, the table
+    stays pinned to the seed default and ``/status`` shows a meaningless
+    100 t/s for every uncatalogued local model.
+
+    Also mirrors the observation into the side-by-side
+    ``model_stats.json`` file (see ``agentcommander.model_stats``) so the
+    user has a transparent, hand-readable record of self-measured rates
+    independent of the SQLite store.
 
     Skips the write entirely (returns the existing average instead) when
-    the inputs would produce a meaningless rate: zero/missing tokens, zero
-    duration, or no model name. Returns ``None`` on DB error so callers
-    can detect the failure and avoid teeing it.
+    the inputs would produce a meaningless rate: zero duration, no model
+    name, AND neither tokens nor chars supplied.
     """
     if not model:
         return None
-    if not completion_tokens or not duration_ms or duration_ms <= 0 or completion_tokens <= 0:
-        # Nothing useful to learn from this sample — return the existing
-        # value so callers that want to display "current rate" still get
-        # the right number.
+    if not duration_ms or duration_ms <= 0:
         return get_throughput(model)
+
+    effective_tokens = completion_tokens if (completion_tokens and completion_tokens > 0) else 0
+    if effective_tokens <= 0 and chars_completed and chars_completed > 0:
+        # Lazy import — repos.py is imported very early; keep this cycle-safe.
+        from agentcommander.model_stats import estimate_tokens_from_chars
+        effective_tokens = estimate_tokens_from_chars(chars_completed)
+    if effective_tokens <= 0:
+        return get_throughput(model)
+
+    # Mirror to the side-by-side JSON file. Best-effort.
+    try:
+        from agentcommander.model_stats import record_observation
+        record_observation(
+            model,
+            completion_tokens=completion_tokens,
+            duration_ms=duration_ms,
+            chars_completed=chars_completed,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
     seconds = duration_ms / 1000.0
-    rate = float(completion_tokens) / seconds
+    rate = float(effective_tokens) / seconds
     db = get_db()
     try:
         row = db.execute(
