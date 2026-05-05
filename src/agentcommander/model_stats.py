@@ -127,11 +127,19 @@ def _save(data: dict[str, Any]) -> None:
         pass
 
 
-def estimate_tokens_from_chars(chars: int) -> int:
-    """Coarse estimate when the provider doesn't report usage."""
+def estimate_tokens_from_chars(chars: int, sample_text: str | None = None) -> int:
+    """Coarse estimate when the provider doesn't report usage.
+
+    When ``sample_text`` is supplied, the divisor adapts to content
+    shape (CJK ≈ 1.5, code ≈ 3.0, prose ≈ 4.0). Otherwise falls back
+    to the prose default. Always returns at least 1 for non-empty
+    input so a tiny output still produces a measurable rate.
+    """
     if chars <= 0:
         return 0
-    return max(1, int(chars / DEFAULT_CHARS_PER_TOKEN))
+    divisor = (_chars_per_token_for(sample_text)
+               if sample_text else DEFAULT_CHARS_PER_TOKEN)
+    return max(1, int(chars / divisor))
 
 
 def record_observation(
