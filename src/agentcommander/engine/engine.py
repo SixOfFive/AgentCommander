@@ -2102,6 +2102,107 @@ class PipelineRun:
         "browser", "check_process", "env",
     )
 
+    # Live-data → URL table for deterministic forced-fetch. Each entry is
+    # ``(category_name, regex_against_user_message, url_builder)``. The URL
+    # builder takes the regex match object and returns a concrete URL or
+    # ``None`` if it can't construct one. Order matters: more-specific
+    # patterns first (weather/time/news) so they win over the broad
+    # "anything with 'today/latest' in it" fall-through.
+    _LIVE_DATA_PATTERNS_FORCED: tuple[tuple[str, "re.Pattern[str]", Any], ...] = (
+        # Weather: "weather in <X>", "forecast for <X>", "temperature in <X>".
+        # We extract the location after the preposition and stop at the
+        # first punctuation / "today" / "now" / end-of-string.
+        (
+            "weather",
+            re.compile(
+                r"\b(?:weather|forecast|temperature)\s+"
+                r"(?:in|for|at|of)\s+"
+                r"([a-zA-Z][a-zA-Z\s\-']*?)"
+                r"(?:[,\.\?!;]|\s+today|\s+now|\s+right now|\s*$)",
+                re.IGNORECASE,
+            ),
+            lambda m: f"https://wttr.in/{m.group(1).strip().replace(' ', '+')}?format=3",
+        ),
+        # Bare "weather" with no location — wttr.in falls back to the
+        # caller's IP-resolved location.
+        (
+            "weather-bare",
+            re.compile(
+                r"\b(?:weather|forecast|temperature)\b"
+                r"(?!\s+(?:in|for|at|of))",
+                re.IGNORECASE,
+            ),
+            lambda m: "https://wttr.in/?format=3",
+        ),
+        # Current time in a location: "time in <X>", "current time in <X>".
+        # worldtimeapi.org accepts /api/timezone/<Region/City> — when we
+        # don't have a region it accepts the city alone in many cases via
+        # the /api/timezone/<Area> endpoint as a fallback.
+        (
+            "time",
+            re.compile(
+                r"\b(?:current\s+time|time)\s+(?:in|for|at)\s+"
+                r"([a-zA-Z][a-zA-Z\s/\-']*?)"
+                r"(?:[,\.\?!;]|\s*$)",
+                re.IGNORECASE,
+            ),
+            lambda m: (
+                f"https://worldtimeapi.org/api/timezone/"
+                f"{m.group(1).strip().replace(' ', '_')}"
+            ),
+        ),
+        # Bare "what time is it" — falls back to the IP endpoint.
+        (
+            "time-bare",
+            re.compile(
+                r"\b(?:what\s+time(?:\s+is\s+it)?|current\s+time)\b"
+                r"(?!\s+(?:in|for|at))",
+                re.IGNORECASE,
+            ),
+            lambda m: "https://worldtimeapi.org/api/ip",
+        ),
+        # News: "today's news", "latest news", "headlines", "breaking news"
+        # → Google News top-stories RSS. Generic and reliable.
+        (
+            "news",
+            re.compile(
+                r"\b(?:today'?s?\s+news|latest\s+news|news\s+headlines|"
+                r"breaking\s+news|top\s+(?:stories|headlines))\b",
+                re.IGNORECASE,
+            ),
+            lambda m: "https://news.google.com/rss",
+        ),
+    )
+
+    def _infer_live_data_url(self, user_message: str) -> str | None:
+        """Pattern-match a live-data question to a concrete URL.
+
+        Returns ``None`` when no pattern matches — caller should fall
+        back to chat-fallback then. Used by the deterministic forced-
+        fetch path: when the orchestrator has refused to fetch despite
+        repeated nudges, the engine takes over and runs the inferred
+        URL itself.
+
+        We deliberately keep the table small (weather, time, news) and
+        the patterns specific. Stock/crypto and sports scores aren't
+        included because the URL space is too varied to pick a
+        reasonable default — the user's better off with the apology
+        than with us guessing wrong.
+        """
+        if not user_message:
+            return None
+        for _name, rx, builder in self._LIVE_DATA_PATTERNS_FORCED:
+            m = rx.search(user_message)
+            if m is None:
+                continue
+            try:
+                url = builder(m)
+            except Exception:  # noqa: BLE001
+                continue
+            if url and isinstance(url, str):
+                return url
+        return None
+
     @staticmethod
     def _detect_tool_syntax_intent(text: str) -> tuple[str, str] | None:
         """Detect ``<verb> [<arg>]`` in the LAST non-empty line of ``text``.
