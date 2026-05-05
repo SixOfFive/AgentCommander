@@ -338,33 +338,10 @@ class PipelineRun:
             tokens = self.COMPACTION_DEFAULT_NUM_CTX
         return int(tokens * 4 * self.COMPACTION_TRIGGER_FRACTION)
 
-    def _summarize_rows_for_compaction(self, rows: list[dict]) -> str | None:
-        """Summarize old scratchpad rows via the summarizer role.
-
-        Returns the summary text (stripped), or ``None`` on any failure
-        (summarizer unassigned, network error, empty reply). Caller falls
-        back to "no compaction" — better to keep originals than to lose
-        context to a botched summary.
-        """
-        if not rows:
-            return None
-        lines: list[str] = []
-        for r in rows:
-            inp = (r.get("input") or "")[:400]
-            out = (r.get("output") or "")[:800]
-            prefix = f"step {r['step']} {r['role']}/{r['action']}: "
-            if inp:
-                lines.append(f"{prefix}in={inp} out={out}")
-            else:
-                lines.append(f"{prefix}out={out}")
-        body = "\n".join(lines)
-        prompt = (
-            "Compress this prior conversation history into a concise summary "
-            "(under 800 words). Preserve: user's stated goals, key facts and "
-            "results from tool calls, decisions made, unresolved questions. "
-            "Plain text only — no markdown headers, no JSON.\n\n"
-            + body
-        )
+    def _call_summarizer_for_compaction(self, prompt: str) -> str | None:
+        """Single-shot summarizer call used by both auto- and manual-compact
+        paths. Returns the stripped summary text, or ``None`` on any
+        failure (summarizer unassigned, network error, empty reply)."""
         try:
             summary = call_role(
                 Role.SUMMARIZER,
