@@ -82,6 +82,128 @@ def push_nudge(scratchpad: list[ScratchpadEntry], iteration: int,
     ))
 
 
+def build_compaction_prompt(rows: "list[dict]") -> str:
+    """Build the summarizer prompt that compacts a list of scratchpad rows.
+
+    Used by both the auto-compaction path (engine's
+    ``_maybe_compact_scratchpad``) and the manual ``/compact`` slash
+    command. Keeping the prompt building in one place means future
+    tweaks (e.g. preserving a "topic stack" or surfacing unresolved
+    failures more aggressively) propagate to both paths automatically.
+    """
+    lines: list[str] = []
+    for r in rows:
+        inp = (r.get("input") or "")[:400]
+        out = (r.get("output") or "")[:800]
+        prefix = f"step {r.get('step', 0)} {r.get('role', '?')}/{r.get('action', '?')}: "
+        if inp:
+            lines.append(f"{prefix}in={inp} out={out}")
+        else:
+            lines.append(f"{prefix}out={out}")
+    body = "\n".join(lines)
+    return (
+        "Compress this prior conversation history into a concise summary "
+        "(under 800 words). Preserve: user's stated goals, key facts and "
+        "results from tool calls, decisions made, unresolved questions. "
+        "Plain text only — no markdown headers, no JSON.\n\n"
+        + body
+    )
+
+
+def compact_conversation_db(
+    conversation_id: str,
+    *,
+    summarize_fn,
+    keep_tail: int = 6,
+    run_id: str | None = None,
+    audit_fn=None,
+) -> "dict | None":
+    """Run scratchpad compaction against the DB for ``conversation_id``.
+
+    DB-only operation: lists current (non-replaced) scratchpad rows for
+    the conversation, splits off the last ``keep_tail`` as live working
+    context, summarizes the rest via ``summarize_fn`` (which the caller
+    supplies — typically a closure around ``call_role(Role.SUMMARIZER,
+    ...)``), inserts the synthetic compaction entry, and marks the
+    originals ``is_replaced=1``.
+
+    The summarizer is fed the **current** scratchpad — which may include
+    prior compaction summaries — so calling this repeatedly produces a
+    summary-of-summaries, exactly what the user wants when they invoke
+    ``/compact`` on an already-tight pad.
+
+    Returns ``{"summary_id", "replaced_count", "original_chars",
+    "summary_chars"}`` on success, or ``None`` when there's nothing to
+    compact (≤ ``keep_tail`` rows) or the summarizer failed / returned
+    empty.
+
+    The caller is responsible for refreshing in-memory scratchpad state
+    if it has any (the engine path does; the slash-command path doesn't
+    — the next pipeline run hydrates fresh from DB).
+    """
+    # Lazy imports — keeps scratchpad.py importable from low-level paths
+    # that haven't bootstrapped DB yet.
+    from agentcommander.db.repos import (
+        insert_scratchpad_entry,
+        list_scratchpad_entries,
+        mark_scratchpad_replaced,
+    )
+
+    rows = list_scratchpad_entries(conversation_id)
+    if len(rows) <= keep_tail:
+        return None
+    old_rows = rows[: -keep_tail] if keep_tail > 0 else rows
+    old_ids = [r["id"] for r in old_rows]
+    if not old_ids:
+        return None
+
+    prompt = build_compaction_prompt(old_rows)
+    try:
+        summary = summarize_fn(prompt)
+    except Exception:  # noqa: BLE001 — summarize_fn is caller-supplied
+        return None
+    if not summary or not summary.strip():
+        return None
+    summary = summary.strip()
+
+    original_chars = sum(
+        len(r.get("input") or "") + len(r.get("output") or "")
+        for r in old_rows
+    )
+    synth_id = insert_scratchpad_entry(
+        conversation_id=conversation_id,
+        run_id=run_id or "manual-compact",
+        step=0,
+        role="system",
+        action="compacted",
+        input_text=f"compacted {len(old_ids)} entries",
+        output_text=summary,
+        timestamp=time.time(),
+        replaced_message_ids=old_ids,
+    )
+    mark_scratchpad_replaced(old_ids)
+
+    if audit_fn is not None:
+        try:
+            audit_fn("compaction.applied", {
+                "summary_id": synth_id,
+                "replaced_count": len(old_ids),
+                "original_chars": original_chars,
+                "summary_chars": len(summary),
+                "trigger": "manual" if run_id is None else "auto",
+            })
+        except Exception:  # noqa: BLE001
+            pass
+
+    return {
+        "summary_id": synth_id,
+        "replaced_count": len(old_ids),
+        "original_chars": original_chars,
+        "summary_chars": len(summary),
+        "summary_text": summary,
+    }
+
+
 def compact_scratchpad(scratchpad: list[ScratchpadEntry], *, tail: int = 20,
                        max_input: int = 200, max_output: int = 400) -> str:
     """Compact the last `tail` entries into a string for role prompt inclusion.
