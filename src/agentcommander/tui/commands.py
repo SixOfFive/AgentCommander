@@ -1780,16 +1780,24 @@ def cmd_compact(ctx: CommandContext, args: list[str]) -> None:
         )
         return
 
-    saved = result["original_chars"] - result["summary_chars"]
-    pct = (saved / result["original_chars"] * 100.0
-           if result["original_chars"] else 0.0)
-    render_system_line(
-        f"  compacted {result['replaced_count']} entr"
-        f"{'y' if result['replaced_count'] == 1 else 'ies'} → "
-        f"{result['summary_chars']:,} char summary "
-        f"({result['original_chars']:,} → {result['summary_chars']:,}, "
-        f"{pct:.0f}% smaller)"
+    orig = result["original_chars"]
+    summ = result["summary_chars"]
+    n = result["replaced_count"]
+    suffix = (
+        f"{n} entr{'y' if n == 1 else 'ies'} → "
+        f"{summ:,} char summary ({orig:,} → {summ:,}"
     )
+    # Only show a "% smaller" tag when there was an actual reduction.
+    # Compacting a single short entry routinely produces a bigger blob
+    # than the input — the summarizer's prose-padding overhead exceeds
+    # the savings — and "−394% smaller" is a confusing UX.
+    if orig > summ:
+        pct = (orig - summ) / orig * 100.0
+        suffix += f", {pct:.0f}% smaller"
+    elif orig < summ:
+        suffix += f", {summ - orig:,} chars LARGER — too little to compact usefully"
+    suffix += ")"
+    render_system_line(f"  compacted {suffix}")
 
 
 # ─── /status — model usage stacked bar ─────────────────────────────────────
