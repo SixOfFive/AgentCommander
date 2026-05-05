@@ -295,15 +295,6 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
     target = Path(db_path) if db_path else _project_db_dir() / "db.sqlite"
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    # Drop a self-ignoring `.gitignore` inside `.agentcommander/` so a user
-    # who runs ac inside a tracked git project never accidentally commits
-    # the DB / lock / WAL / model_stats.json. Idempotent — only writes when
-    # absent.
-    _write_self_gitignore(target.parent)
-    # Same for `<wd>/logs/` (if it exists yet — chat_log creates it lazily
-    # on the first appended message).
-    _write_self_gitignore(target.parent.parent / "logs")
-
     # Single-instance lock: prevents two ac.bat processes from opening the
     # same project DB at once. The original corruption ("Tree 21 page 40
     # btreeInitPage error 11") came from concurrent test sessions plus a
