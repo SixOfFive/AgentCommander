@@ -353,7 +353,7 @@ def cmd_models(ctx: CommandContext, args: list[str]) -> None:
     rows = [
         [m.get("id", ""), m.get("family") or "",
          m.get("parameter_size") or "",
-         _fmt_tps(get_throughput(m.get("id") or ""))]
+         _fmt_tps(get_throughput(m.get("id") or "")) or "—"]
         for m in models
     ]
     render_table(["model", "family", "size", "tok/s"], rows)
