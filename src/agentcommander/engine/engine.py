@@ -372,71 +372,53 @@ class PipelineRun:
         if len(text) <= budget:
             return
 
-        # Pull the same rows from DB — we need their ids to flag is_replaced.
-        from agentcommander.db.repos import (
-            list_scratchpad_entries, mark_scratchpad_replaced,
-        )
+        # Snapshot the chars-before figure for the announce line; the
+        # actual DB row split happens inside `compact_conversation_db`.
+        from agentcommander.db.repos import list_scratchpad_entries
         rows = list_scratchpad_entries(self.opts.conversation_id)
         if len(rows) <= self.COMPACTION_KEEP_TAIL:
             return  # safety: in-memory and DB views disagreed; skip
-        old_rows = rows[: -self.COMPACTION_KEEP_TAIL]
-        old_ids = [r["id"] for r in old_rows]
-        if not old_ids:
-            return
+        will_replace = len(rows) - self.COMPACTION_KEEP_TAIL
 
         yield PipelineEvent(
             type="guard", family="compaction",
-            reason=(f"compacting {len(old_ids)} prior scratchpad entr"
-                    f"{'y' if len(old_ids) == 1 else 'ies'} via summarizer "
+            reason=(f"compacting {will_replace} prior scratchpad entr"
+                    f"{'y' if will_replace == 1 else 'ies'} via summarizer "
                     f"(prompt was {len(text)} chars, budget {budget})"),
         )
 
-        summary = self._summarize_rows_for_compaction(old_rows)
-        if summary is None:
+        result = compact_conversation_db(
+            self.opts.conversation_id,
+            summarize_fn=self._call_summarizer_for_compaction,
+            keep_tail=self.COMPACTION_KEEP_TAIL,
+            run_id=self.run_id,
+            audit_fn=audit,
+        )
+        if result is None:
             yield PipelineEvent(
                 type="guard", family="compaction",
                 reason="summarizer unavailable / failed — keeping originals",
             )
             return
 
-        # Insert synthetic compaction entry, flag the originals, and rebuild
-        # the in-memory scratchpad. The DB's is_replaced=1 hides the
-        # originals from future hydrate calls but keeps them queryable for
-        # audit / /history paths.
-        from agentcommander.db.repos import insert_scratchpad_entry
-        synth_id = insert_scratchpad_entry(
-            conversation_id=self.opts.conversation_id,
-            run_id=self.run_id,
-            step=0,
-            role="system",
-            action="compacted",
-            input_text=f"compacted {len(old_ids)} entries",
-            output_text=summary,
-            timestamp=time.time(),
-            replaced_message_ids=old_ids,
-        )
-        mark_scratchpad_replaced(old_ids)
-        audit("compaction.applied", {
-            "summary_id": synth_id,
-            "replaced_count": len(old_ids),
-            "original_chars": len(text),
-            "summary_chars": len(summary),
-        })
-
         # Rebuild state.scratchpad: synthetic summary first, then the
         # untouched tail (which already exists in the in-memory list).
         keep = self.state.scratchpad[-self.COMPACTION_KEEP_TAIL:]
+        # We can't get replaced_message_ids back from compact_conversation_db
+        # without an extra query — but the in-memory ScratchpadEntry's
+        # replaced_message_ids is only used for audit cross-referencing,
+        # not for the live prompt. Leave empty here; the DB row has the full list.
         self.state.scratchpad.clear()
         self.state.scratchpad.append(ScratchpadEntry(
             step=0, role="system", action="compacted",
-            input="", output=summary, timestamp=time.time(),
-            replaced_message_ids=old_ids,
+            input="", output=result["summary_text"], timestamp=time.time(),
+            replaced_message_ids=[],
         ))
         self.state.scratchpad.extend(keep)
 
         yield PipelineEvent(
             type="guard", family="compaction",
-            reason=(f"compacted into {len(summary)} char summary "
+            reason=(f"compacted into {result['summary_chars']} char summary "
                     f"(scratchpad now {self.COMPACTION_KEEP_TAIL + 1} entries)"),
         )
 
