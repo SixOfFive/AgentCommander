@@ -880,7 +880,8 @@ def get_throughput(model: str | None) -> float | None:
 
 def record_throughput(model: str | None, completion_tokens: int | None,
                       duration_ms: int | None,
-                      *, chars_completed: int | None = None) -> float | None:
+                      *, chars_completed: int | None = None,
+                      sample_text: str | None = None) -> float | None:
     """Update the running-average tokens/sec for ``model`` from one call's
     measurement.
 
