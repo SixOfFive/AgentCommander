@@ -1182,6 +1182,13 @@ def run_tui() -> int:
                 f"  resuming chat {most_recent.id[:8]} "
                 f"({len(past_msgs)} message(s)) — "
                 "use /chat list to switch, /chat clear to start fresh"))
+            # Visual delimiter so the user can tell scrollback from live
+            # activity. Without it, the replayed pipeline events
+            # ("router: category = X", "⟳ iter 1 → done", role traces, etc.)
+            # look identical to a fresh turn happening at startup —
+            # the round-41 confusion that triggered this.
+            render_system_line(style("muted",
+                "  ─────── begin replay (chat history below) ───────"))
             # Replay the chat by interleaving user/assistant messages with
             # the pipeline events that happened between them. Without the
             # events we'd show only "You: …" / "AC: …" — losing the iter
