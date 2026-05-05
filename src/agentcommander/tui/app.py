@@ -910,15 +910,21 @@ def _run_startup_autoconfigure() -> None:
     def _model_with_tps(name: str | None) -> str:
         if not name:
             return "?"
-        return f"{name} {style('muted', f'@ {_ftp(_gtp(name))}')}"
+        tps_text = _ftp(_gtp(name))
+        if not tps_text:
+            return name
+        return f"{name} {style('muted', f'@ {tps_text}')}"
 
     n_auto = len(applied.role_picks)
     n_overrides = len(applied.user_overrides)
     n_diff = len(applied.diff_picks)
     n_unset = len(applied.unset_roles)
+    primary_tps = _ftp(_gtp(applied.default_model or ""))
+    primary_suffix = (f' {style("muted", f"@ {primary_tps}")}'
+                      if primary_tps else "")
     msg = (f"autoconfigured {n_auto} role(s) → primary model "
            f'{style("accent", applied.default_model or "?")}'
-           f' {style("muted", f"@ {_ftp(_gtp(applied.default_model or ""))}")}'
+           f'{primary_suffix}'
            f' on {applied.provider_id}')
     render_system_line(msg)
     if applied.fallback_no_catalog:
