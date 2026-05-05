@@ -939,7 +939,11 @@ def record_throughput(model: str | None, completion_tokens: int | None,
             (model,),
         ).fetchone()
         if row is None:
-            new_avg = (DEFAULT_TOKENS_PER_SECOND + rate) / 2.0
+            # First measurement → trust it directly. Averaging against the
+            # 100 t/s seed used to skew early reads (e.g. a first sample
+            # of 30 t/s would land at 65 t/s, way over-reporting until
+            # several more samples pulled it down).
+            new_avg = rate
             db.execute(
                 "INSERT INTO model_throughput (model, tokens_per_second, samples, updated_at) "
                 "VALUES (?, ?, 1, ?)",
