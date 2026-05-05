@@ -2019,29 +2019,38 @@ class PipelineRun:
 
         # Post-guard: chat fallback is supposed to produce plain prose. When
         # the model has been primed by the tool-registry appendix and emits
-        # tool syntax instead (e.g. `fetch https://wttr.in/Edmonton` or just
-        # `list_dir`), the model has actually told us what it WANTS done.
-        # For read-only tools we can honor that intent: execute the tool
-        # ourselves, then re-run the chat call with the result in context
-        # so the user gets a real answer. For unsafe verbs (write_file,
-        # execute, git, delete_file, start_process, kill_process) we fall
-        # back to a clear error rather than auto-executing arbitrary writes.
-        # Two shapes match: ``<verb> <arg>`` (most common) and ``<verb>``
-        # alone — the latter for tools whose payload defaults are obvious
-        # (``env`` needs nothing; ``list_dir`` defaults to ``.``).
-        bad_with_arg = re.match(
-            r"^\s*(read_file|write_file|list_dir|delete_file|execute|fetch|"
+        # tool syntax instead (e.g. `fetch https://wttr.in/Edmonton` or
+        # `I'll list the files...\n\nlist_dir`), the model has actually told
+        # us what it WANTS done. For read-only tools we can honor that
+        # intent: execute the tool ourselves, then re-run the chat call
+        # with the result in context so the user gets a real answer. For
+        # unsafe verbs (write_file, execute, git, delete_file,
+        # start_process, kill_process) we fall back to a clear error
+        # rather than auto-executing arbitrary writes.
+        #
+        # Match policy: look at the LAST non-empty line of the final. If
+        # that line is bare ``<verb>`` or ``<verb> <arg>``, treat the
+        # whole final as a tool intent. This catches the multi-line case
+        # where the model wraps the call in a preamble sentence
+        # ("I'll list the files for you.\n\nlist_dir"), while still
+        # rejecting prose that just MENTIONS a tool ("you can use fetch
+        # to grab a URL.").
+        lines = [l for l in (ln.strip() for ln in final.split("\n")) if l]
+        last_line = lines[-1] if lines else ""
+        verb_re = (
+            r"(read_file|write_file|list_dir|delete_file|execute|fetch|"
             r"http_request|git|env|browser|start_process|kill_process|"
-            r"check_process)\s+(?!\{)([^\n]+?)\s*$",
-            final, re.IGNORECASE,
+            r"check_process)"
+        )
+        bad_with_arg = re.match(
+            r"^" + verb_re + r"\s+(?!\{)([^\s].*?)\s*$",
+            last_line, re.IGNORECASE,
         )
         bad_verb_only = re.match(
-            r"^\s*(read_file|write_file|list_dir|delete_file|execute|fetch|"
-            r"http_request|git|env|browser|start_process|kill_process|"
-            r"check_process)\s*$",
-            final, re.IGNORECASE,
+            r"^" + verb_re + r"\s*$",
+            last_line, re.IGNORECASE,
         )
-        if (bad_with_arg or bad_verb_only) and len(final) <= 200 and "\n" not in final:
+        if (bad_with_arg or bad_verb_only) and len(last_line) <= 300:
             if bad_with_arg:
                 bad_verb = bad_with_arg.group(1).lower()
                 bad_arg = bad_with_arg.group(2).strip()
