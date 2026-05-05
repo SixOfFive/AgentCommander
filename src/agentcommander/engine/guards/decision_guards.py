@@ -343,6 +343,65 @@ def unassigned_role_guard(decision: OrchestratorDecision,
 # ─── Runner ────────────────────────────────────────────────────────────────
 
 
+# Shell-style invocations the model sometimes hands to the `execute` tool
+# while declaring ``language: python`` (or ``js``, etc). When the input
+# starts with one of these tokens it's clearly a shell command, not the
+# language the field claims. Auto-rewriting to ``bash`` lets the call
+# succeed instead of crashing with exit code 49.
+_SHELL_COMMAND_PREFIXES: tuple[str, ...] = (
+    "python", "python3", "py",
+    "node", "npx",
+    "bash", "sh",
+    "pip", "pip3",
+    "npm", "yarn",
+    "git",  # `git status` etc. — but caller has a `git` tool too; the
+            # rewrite still keeps it functional.
+    "ls", "cat", "echo", "cd", "rm", "cp", "mv",
+)
+
+
+def shell_in_wrong_language_guard(
+    decision: OrchestratorDecision,
+    scratchpad: list[ScratchpadEntry], iteration: int,
+) -> GuardVerdict:
+    """Auto-rewrite ``execute(language=python, input='python <file>')``
+    to ``language=bash``.
+
+    Catches the round-29 / devstral failure mode: the model emits a
+    shell command (``python hello.py``) but tags it as Python code,
+    causing the execute tool to feed it to a Python interpreter which
+    exits 49. The model then debugs in circles because the symptom
+    looks unrelated to the language tag.
+
+    Triggers when:
+      - action is ``execute``
+      - language is ``python`` / ``py`` / ``javascript`` / ``js`` /
+        ``node`` (any language that interprets code, not commands)
+      - input's first token is a shell-command prefix from
+        ``_SHELL_COMMAND_PREFIXES``
+
+    Action: rewrite ``language`` to ``bash`` and ``pass`` (no nudge,
+    no extra iteration). Silent fix — the model doesn't need to see
+    this happen, the run just continues correctly.
+    """
+    if decision.action != "execute":
+        return GuardVerdict(action="pass")
+    lang = (decision.language or "").lower().strip()
+    if lang not in ("python", "py", "javascript", "js", "node"):
+        return GuardVerdict(action="pass")
+    inp = (decision.input or "").strip()
+    if not inp:
+        return GuardVerdict(action="pass")
+    first_token = inp.split(None, 1)[0].lower() if inp.split() else ""
+    # Strip any path prefix on the first token (`/usr/bin/python` etc.)
+    if "/" in first_token or "\\" in first_token:
+        first_token = first_token.replace("\\", "/").rsplit("/", 1)[-1]
+    if first_token in _SHELL_COMMAND_PREFIXES:
+        decision.language = "bash"
+        return GuardVerdict(action="pass")
+    return GuardVerdict(action="pass")
+
+
 def run_decision_guards(ctx: dict[str, Any]) -> dict[str, Any]:
     """Run decision guards in sequence. Returns the first non-pass verdict.
 
@@ -362,6 +421,9 @@ def run_decision_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         lambda: unknown_action_guard(decision, scratchpad, iteration),
         lambda: unassigned_role_guard(decision, scratchpad, iteration),
         lambda: field_swap_guard(decision, scratchpad, iteration),
+        # Auto-rewrite shell-as-language BEFORE missing_fields_guard so
+        # the rewritten language is what gets validated.
+        lambda: shell_in_wrong_language_guard(decision, scratchpad, iteration),
         lambda: missing_fields_guard(decision, scratchpad, iteration),
         lambda: malformed_url_guard(decision, scratchpad, iteration),
         lambda: templating_placeholder_guard(decision, scratchpad, iteration),
