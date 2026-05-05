@@ -915,9 +915,9 @@ def record_throughput(model: str | None, completion_tokens: int | None,
     if effective_tokens <= 0 and chars_completed and chars_completed > 0:
         # Lazy import — repos.py is imported very early; keep this cycle-safe.
         from agentcommander.model_stats import estimate_tokens_from_chars
-        effective_tokens = estimate_tokens_from_chars(chars_completed)
+        effective_tokens = estimate_tokens_from_chars(chars_completed, sample_text)
     if effective_tokens <= 0:
-        return get_throughput(model)
+        return get_throughput(model) or 0.0
 
     # Mirror to the side-by-side JSON file. Best-effort.
     try:
@@ -927,6 +927,7 @@ def record_throughput(model: str | None, completion_tokens: int | None,
             completion_tokens=completion_tokens,
             duration_ms=duration_ms,
             chars_completed=chars_completed,
+            sample_text=sample_text,
         )
     except Exception:  # noqa: BLE001
         pass
