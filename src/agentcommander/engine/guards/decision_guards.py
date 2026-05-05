@@ -257,23 +257,11 @@ def unknown_action_guard(decision: OrchestratorDecision,
         return GuardVerdict(action="pass")
     # Whitelist a few common synonyms the model might emit. Cheaper than
     # nudging the model when the verb is obviously equivalent to a known
-    # one — we just rewrite the action and continue.
-    synonyms = {
-        "list_files": "list_dir",
-        "ls": "list_dir",
-        "cat": "read_file",
-        "create_file": "write_file",
-        "save_file": "write_file",
-        "run": "execute",
-        "shell": "execute",
-        "bash": "execute",
-        "curl": "fetch",
-        "get": "fetch",
-        "http": "http_request",
-        "post": "http_request",
-    }
-    if action in synonyms:
-        decision.action = synonyms[action]
+    # one — we just rewrite the action and continue. Shared with the
+    # chat-fallback intent detector so both surfaces accept the same
+    # vocabulary.
+    if action in TOOL_VERB_SYNONYMS:
+        decision.action = TOOL_VERB_SYNONYMS[action]
         return GuardVerdict(action="pass")
     # Truly unknown — nudge the model with the real menu.
     sample = sorted(known - _SPECIAL_ACTIONS)
