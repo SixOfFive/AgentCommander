@@ -2089,6 +2089,38 @@ class PipelineRun:
         "browser", "check_process", "env",
     )
 
+    @staticmethod
+    def _clean_textual_arg(verb: str, raw: str) -> str:
+        """Strip the noise the model wraps around args in chat-style emissions.
+
+        Models routinely produce ``fetch "https://example.com".`` (quoted +
+        period) or ``read_file `./foo.py` `` (backticks). Without cleanup
+        the URL/path the dispatcher sees is malformed and the tool fails.
+
+        Removed:
+          * matched surrounding pairs: ``"..."``, ``'...'``, ``` `...` ```,
+            ``<...>``, ``(...)``, ``[...]``
+          * trailing sentence punctuation: ``.,;:!?)]>``
+        Internal spaces are preserved (a path can contain them).
+        """
+        s = raw.strip()
+        # Strip matched surrounding pairs (apply repeatedly — model may
+        # nest e.g. `<"https://...">`).
+        pairs = (("\"", "\""), ("'", "'"), ("`", "`"),
+                 ("<", ">"), ("(", ")"), ("[", "]"))
+        changed = True
+        while changed:
+            changed = False
+            for opener, closer in pairs:
+                if len(s) >= 2 and s.startswith(opener) and s.endswith(closer):
+                    s = s[len(opener):-len(closer)].strip()
+                    changed = True
+        # Trim trailing sentence punctuation (URL paths end with letters,
+        # digits, slashes, %, &, =, etc.; never with a sentence terminator).
+        while s and s[-1] in ".,;:!?)]>":
+            s = s[:-1].rstrip()
+        return s
+
     def _payload_from_textual_call(self, verb: str, arg: str) -> dict[str, Any] | None:
         """Best-effort: map ``<verb> [<arg>]`` to a real tool payload.
 
@@ -2101,22 +2133,23 @@ class PipelineRun:
         ``list_dir``), missing args fill in sensibly (``list_dir`` →
         current working dir; ``env`` → all env vars).
         """
+        cleaned = self._clean_textual_arg(verb, arg) if arg else ""
         if verb == "fetch":
-            return {"url": arg} if arg else None
+            return {"url": cleaned} if cleaned else None
         if verb == "browser":
-            return {"url": arg} if arg else None
+            return {"url": cleaned} if cleaned else None
         if verb == "http_request":
-            return {"url": arg, "method": "GET"} if arg else None
+            return {"url": cleaned, "method": "GET"} if cleaned else None
         if verb == "read_file":
-            return {"path": arg} if arg else None
+            return {"path": cleaned} if cleaned else None
         if verb == "list_dir":
             # `list_dir` alone → assume the working directory.
-            return {"path": arg or "."}
+            return {"path": cleaned or "."}
         if verb == "check_process":
-            return {"name": arg} if arg else None
+            return {"name": cleaned} if cleaned else None
         if verb == "env":
             # `env` alone → list all env. With an arg, treat it as a key.
-            return {"name": arg} if arg else {}
+            return {"name": cleaned} if cleaned else {}
         return None
 
     def _honor_tool_text_as_intent(
