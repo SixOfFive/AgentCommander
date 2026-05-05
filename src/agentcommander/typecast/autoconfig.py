@@ -301,20 +301,42 @@ class AutoconfigApplied:
 def _gather_installed(providers: list) -> tuple[set[str], dict[str, str]]:
     """Walk active providers and collect installed model IDs.
 
+    Each provider gets one quick retry on the first failure (with a brief
+    pause) — covers the common case where llama-server / Ollama is mid-
+    restart when ac launches. Without this, autoconfig sees an empty
+    list, every role lands unset, and the user has to /quit + retry.
+
     Returns (set of model_ids, dict of model_id → first-provider-id-that-has-it).
     """
+    import time as _time
+
     installed_ids: set[str] = set()
     model_to_provider: dict[str, str] = {}
+
     for p in providers:
-        try:
-            for m in p.list_models():
-                mid = m.get("id")
-                if not mid:
-                    continue
-                installed_ids.add(mid)
-                model_to_provider.setdefault(mid, p.id)
-        except Exception:  # noqa: BLE001 — provider unreachable; just skip
+        models: list = []
+        last_err: Exception | None = None
+        for attempt in range(2):
+            try:
+                models = p.list_models()
+                last_err = None
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                if attempt == 0:
+                    _time.sleep(1.5)
+        if last_err is not None:
+            # Both attempts failed; skip this provider. The startup banner
+            # downstream already surfaces "no installed models found
+            # across active providers" when nothing comes back.
             continue
+        for m in models:
+            mid = m.get("id") if isinstance(m, dict) else None
+            if not mid:
+                continue
+            installed_ids.add(mid)
+            model_to_provider.setdefault(mid, p.id)
+
     return installed_ids, model_to_provider
 
 
