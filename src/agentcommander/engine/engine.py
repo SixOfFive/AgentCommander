@@ -2103,6 +2103,43 @@ class PipelineRun:
     )
 
     @staticmethod
+    def _detect_tool_syntax_intent(text: str) -> tuple[str, str] | None:
+        """Detect ``<verb> [<arg>]`` in the LAST non-empty line of ``text``.
+
+        Shared between chat-fallback's stream output and the orchestrator's
+        ``done.input`` branch — both surfaces leak tool syntax under the
+        same conditions, and both should recover the same way.
+
+        Returns ``(verb, arg)`` (arg may be ``""``) or ``None`` when the
+        last line isn't a recognizable tool invocation. The cap on line
+        length (300 chars) prevents false-positives on legitimate prose
+        that happens to end with a sentence mentioning a tool.
+        """
+        if not text:
+            return None
+        lines = [l for l in (ln.strip() for ln in text.split("\n")) if l]
+        if not lines:
+            return None
+        last = lines[-1]
+        if len(last) > 300:
+            return None
+        verb_re = (
+            r"(read_file|write_file|list_dir|delete_file|execute|fetch|"
+            r"http_request|git|env|browser|start_process|kill_process|"
+            r"check_process)"
+        )
+        m_arg = re.match(
+            r"^" + verb_re + r"\s+(?!\{)([^\s].*?)\s*$",
+            last, re.IGNORECASE,
+        )
+        if m_arg:
+            return m_arg.group(1).lower(), m_arg.group(2).strip()
+        m_only = re.match(r"^" + verb_re + r"\s*$", last, re.IGNORECASE)
+        if m_only:
+            return m_only.group(1).lower(), ""
+        return None
+
+    @staticmethod
     def _clean_textual_arg(verb: str, raw: str) -> str:
         """Strip the noise the model wraps around args in chat-style emissions.
 
