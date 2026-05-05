@@ -384,9 +384,9 @@ def cmd_roles(ctx: CommandContext, args: list[str]) -> None:
             if rr is None:
                 rows.append([role.value, "—", "—", "—", style("warn", "unset")])
             else:
-                tps = get_throughput(rr.model)
+                tps_str = _fmt_tps(get_throughput(rr.model)) or "—"
                 rows.append([role.value, rr.model, rr.provider_id,
-                             _fmt_tps(tps), rr.kind])
+                             tps_str, rr.kind])
         render_table(["role", "model", "provider", "tok/s", "kind"], rows)
 
     def _try_role(role_str: str) -> Role | None:
