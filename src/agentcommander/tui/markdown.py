@@ -40,24 +40,18 @@ from agentcommander.tui.ansi import (
 
 # ─── Inline transforms ─────────────────────────────────────────────────────
 
-# Underscore emphasis must NOT match intraword. CommonMark forbids
-# "intraword" underscore emphasis specifically because filenames and
-# Python identifiers (`__pycache__`, `binary_search_tree.py`,
-# `__init__.py`) routinely contain underscores. Without the lookarounds
-# below, the renderer eats the underscores: `__pycache__` shows as
-# bold "pycache", `binary_search_tree29.py` shows as
-# "binarysearchtree29.py" with `search` italicized.
-#
-# Asterisk emphasis stays intraword-allowed (the user routinely types
-# `*important*` mid-word in chat).
-_BOLD_RX = re.compile(
-    r"(?<!\\)\*\*([^*\n]+?)\*\*"
-    r"|(?<!\\)(?<!\w)__([^_\n]+?)__(?!\w)"
-)
-_ITALIC_RX = re.compile(
-    r"(?<!\\)\*([^*\n]+?)\*"
-    r"|(?<!\\)(?<!\w)_([^_\n]+?)_(?!\w)"
-)
+# Underscore emphasis is intentionally NOT supported. CommonMark allows
+# `_italic_` and `__bold__`, but in a CLI tool where chat output is full
+# of filenames (`__pycache__`, `__init__.py`, `binary_search_tree29.py`,
+# `_private_var`) and Python identifiers, underscore emphasis routinely
+# eats the underscores and renders garbled names. The narrow
+# intraword-aware lookbehind/lookahead approach (CommonMark's spec
+# answer) still mishandles `__pycache__` because the leading `__` has
+# no preceding char to flank against. Killing the underscore variants
+# entirely is the predictable rule: filenames preserved, model still
+# has `**bold**` and `*italic*` which don't collide with identifiers.
+_BOLD_RX = re.compile(r"(?<!\\)\*\*([^*\n]+?)\*\*")
+_ITALIC_RX = re.compile(r"(?<!\\)\*([^*\n]+?)\*")
 _INLINE_CODE_RX = re.compile(r"`([^`\n]+?)`")
 _LINK_RX = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
 _STRIKE_RX = re.compile(r"~~([^~\n]+?)~~")
