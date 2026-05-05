@@ -1285,6 +1285,10 @@ def run_tui() -> int:
                 elif m.role == "assistant":
                     render_assistant_message(m.content, markdown=True)
 
+            # Closing delimiter so the user knows live input picks up here.
+            render_system_line(style("muted",
+                "  ─────── end replay — type your next prompt below ───────"))
+
     # Seed the bar's context cap AFTER autoconfig has run, so we read this
     # session's freshly persisted ceiling (not whatever stale value was in
     # the DB from a previous launch). Precedence matches _on_role_start:
