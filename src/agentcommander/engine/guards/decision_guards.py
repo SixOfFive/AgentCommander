@@ -396,6 +396,11 @@ def shell_in_wrong_language_guard(
     # Strip any path prefix on the first token (`/usr/bin/python` etc.)
     if "/" in first_token or "\\" in first_token:
         first_token = first_token.replace("\\", "/").rsplit("/", 1)[-1]
+    # Strip Windows executable extensions so `python.exe` matches `python`.
+    for ext in (".exe", ".bat", ".cmd", ".ps1"):
+        if first_token.endswith(ext):
+            first_token = first_token[:-len(ext)]
+            break
     if first_token in _SHELL_COMMAND_PREFIXES:
         decision.language = "bash"
         return GuardVerdict(action="pass")
