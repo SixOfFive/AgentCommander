@@ -38,6 +38,8 @@ __all__ = [
     "FilesystemSecurityError",
     "HostCheck",
     "InjectionMatch",
+    "ROLE_LABEL_MIMICRY_LABEL",
+    "defang_role_labels",
     "detect_prompt_injection",
     "is_path_within",
     "is_valid_directory",
