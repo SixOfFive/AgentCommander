@@ -188,6 +188,12 @@ def _http_request(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
             warnings.append(
                 f"Suspicious content ({injection.severity}): {injection.pattern}"
             )
+            # Same defusing as web_tool — fetched content can mimic the
+            # TUI's role-label markers; replacing at line-start with `>`
+            # keeps quoted body distinguishable from the agent's status
+            # lines if the orchestrator echoes it.
+            if injection.pattern == ROLE_LABEL_MIMICRY_LABEL:
+                text = defang_role_labels(text)
 
     data_out: dict[str, Any] = {
         "status": status,
