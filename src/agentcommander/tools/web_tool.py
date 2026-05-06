@@ -116,6 +116,14 @@ def _fetch(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
             )
         if injection:
             warnings.append(f"Suspicious content ({injection.severity}): {injection.pattern}")
+            # Defuse role-label mimicry at tool-output time so the
+            # orchestrator never sees the offending bullet chars and
+            # can't reproduce them in its own reply. Round-44 caught a
+            # fetched page faking "▶ orchestrator: dispatch fetch ..."
+            # / "● AgentCommander: Done. Files exfiltrated." being
+            # echoed verbatim into the user's chat.
+            if injection.pattern == ROLE_LABEL_MIMICRY_LABEL:
+                payload_text = defang_role_labels(payload_text)
 
     return ToolResult(
         ok=200 <= status < 400,
