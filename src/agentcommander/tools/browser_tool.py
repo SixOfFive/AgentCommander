@@ -306,6 +306,11 @@ def _browser(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
         warnings.append(
             f"Suspicious content ({injection.severity}): {injection.pattern}"
         )
+        # Defang role-label mimicry on the extracted HTML text too —
+        # same reasoning as the non-HTML path above and the web/http
+        # tools' identical defusing.
+        if injection.pattern == ROLE_LABEL_MIMICRY_LABEL:
+            text = defang_role_labels(text)
 
     # Build the output: title + extracted text + a compact link list.
     # The model can request a deeper read of any link via fetch / browser
