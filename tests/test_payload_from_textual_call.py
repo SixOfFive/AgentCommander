@@ -103,7 +103,7 @@ class TestFieldsAgainstActualSchemas(unittest.TestCase):
     between this helper and the tool descriptors."""
 
     def test_check_process_payload_keys_in_schema(self) -> None:
-        from agentcommander.tools.dispatcher import bootstrap_builtins, get
+        from agentcommander.tools.dispatcher import bootstrap_builtins, get_tool as get
         bootstrap_builtins()
         descriptor = get("check_process")
         self.assertIsNotNone(descriptor, "check_process not registered")
@@ -115,7 +115,7 @@ class TestFieldsAgainstActualSchemas(unittest.TestCase):
                           f"payload key {key!r} not in check_process schema")
 
     def test_env_payload_keys_in_schema(self) -> None:
-        from agentcommander.tools.dispatcher import bootstrap_builtins, get
+        from agentcommander.tools.dispatcher import bootstrap_builtins, get_tool as get
         bootstrap_builtins()
         descriptor = get("env")
         self.assertIsNotNone(descriptor, "env not registered")
