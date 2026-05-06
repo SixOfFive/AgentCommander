@@ -17,7 +17,12 @@ from agentcommander.safety.host_validator import (
     validate_provider_host,
     validate_user_host,
 )
-from agentcommander.safety.prompt_injection import InjectionMatch, detect_prompt_injection
+from agentcommander.safety.prompt_injection import (
+    InjectionMatch,
+    ROLE_LABEL_MIMICRY_LABEL,
+    defang_role_labels,
+    detect_prompt_injection,
+)
 from agentcommander.safety.sandbox import (
     FilesystemSecurityError,
     is_path_within,
