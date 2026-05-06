@@ -27,7 +27,11 @@ from html.parser import HTMLParser
 from typing import Any
 
 from agentcommander.safety.host_validator import validate_user_host
-from agentcommander.safety.prompt_injection import detect_prompt_injection
+from agentcommander.safety.prompt_injection import (
+    ROLE_LABEL_MIMICRY_LABEL,
+    defang_role_labels,
+    detect_prompt_injection,
+)
 from agentcommander.tools.dispatcher import register
 from agentcommander.tools.types import ToolContext, ToolDescriptor, ToolResult
 
