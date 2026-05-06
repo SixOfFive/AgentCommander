@@ -248,6 +248,9 @@ def _browser(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
                 error=(f"PROMPT INJECTION HALT [{injection.severity}]: "
                        f"{injection.pattern}"),
             )
+        # Defang role-label mimicry on suspicious-severity content too.
+        if injection and injection.pattern == ROLE_LABEL_MIMICRY_LABEL:
+            text = defang_role_labels(text)
         return ToolResult(
             ok=200 <= status < 400,
             output=text,
