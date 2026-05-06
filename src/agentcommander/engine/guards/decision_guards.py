@@ -485,6 +485,9 @@ def run_decision_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         # synonym-rewrite-or-extract logic gets first crack at the verb.
         lambda: unknown_action_guard(decision, scratchpad, iteration),
         lambda: unassigned_role_guard(decision, scratchpad, iteration),
+        # Chat-category-no-delegation: single-fire nudge if the
+        # orchestrator picks a specialist role on a chat turn.
+        lambda: chat_category_no_delegation_guard(decision, scratchpad, iteration),
         lambda: field_swap_guard(decision, scratchpad, iteration),
         # Auto-rewrite shell-as-language BEFORE missing_fields_guard so
         # the rewritten language is what gets validated.
