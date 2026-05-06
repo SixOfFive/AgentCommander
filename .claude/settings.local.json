@@ -43,7 +43,12 @@
       "Bash(timeout 2400 cmd.exe //c \"..\\\\\\\\ac.bat\")",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_build_final_output_priority -v)",
       "Bash(timeout 20 cmd.exe //c \"..\\\\\\\\ac.bat\")",
-      "Bash(grep -n \"require_working\\\\|sandbox\\\\|path traversal\\\\|resolve\\\\|\\\\.\\\\.\\\\\\(/\\\\|\\\\\\\\\\\\\\\\\\\\\\)\" C:/Users/sixoffive/Documents/AgentCommander/src/agentcommander/tools/file_tool.py)"
+      "Bash(grep -n \"require_working\\\\|sandbox\\\\|path traversal\\\\|resolve\\\\|\\\\.\\\\.\\\\\\(/\\\\|\\\\\\\\\\\\\\\\\\\\\\)\" C:/Users/sixoffive/Documents/AgentCommander/src/agentcommander/tools/file_tool.py)",
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_chat_no_delegation -v)",
+      "Bash(mkdir -p /tmp/ac-injection-test)",
+      "Read(//tmp/**)",
+      "Bash(py -3 -m http.server 8765 --bind 0.0.0.0)",
+      "Bash(timeout 1800 cmd.exe //c \"..\\\\\\\\ac.bat\")"
     ]
   }
 }
