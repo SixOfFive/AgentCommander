@@ -2401,10 +2401,20 @@ class PipelineRun:
             # `list_dir` alone → assume the working directory.
             return {"path": cleaned or "."}
         if verb == "check_process":
-            return {"name": cleaned} if cleaned else None
+            # check_process schema requires `id`, not `name`. Round-45
+            # caught this — auto-recovered `check_process <uuid>` was
+            # rejected with "id: required field missing" because the
+            # field-name was wrong.
+            return {"id": cleaned} if cleaned else None
         if verb == "env":
-            # `env` alone → list all env. With an arg, treat it as a key.
-            return {"name": cleaned} if cleaned else {}
+            # `env` alone → list all env names. With an arg, READ that
+            # specific var (the env tool defaults verb=list and ignores
+            # `name` without an explicit verb, so we have to set it
+            # ourselves). Round-45 caught this — `env PATH` was
+            # returning all env names instead of just PATH's value.
+            if cleaned:
+                return {"verb": "read", "name": cleaned}
+            return {"verb": "list"}
         return None
 
     def _honor_tool_text_as_intent(
