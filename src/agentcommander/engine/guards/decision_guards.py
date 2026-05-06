@@ -360,6 +360,66 @@ _SHELL_COMMAND_PREFIXES: tuple[str, ...] = (
 )
 
 
+def chat_category_no_delegation_guard(
+    decision: OrchestratorDecision,
+    scratchpad: list[ScratchpadEntry], iteration: int,
+) -> GuardVerdict:
+    """Discourage role-delegation actions on chat-category turns.
+
+    When the router classifies a turn as ``chat`` (greetings, capability
+    questions, casual conversation), the iteration cap is small (5)
+    because the user expects a short interactive reply. Delegating to a
+    specialist role (``coder``/``tester``/``debugger``/etc.) burns
+    expensive iterations on small-talk and leaves the user staring at
+    "▸ tester" markers for a "hi" or "thanks". Round-43 caught this
+    when a junk input got classified as chat and the orchestrator went
+    `tester → tester → read_file → debug → max iters` producing nothing.
+
+    Policy: nudge ONCE per turn. If the orchestrator insists after the
+    nudge, allow the delegation — the orchestrator may have a reason
+    we can't see. Single-fire avoids fighting the model.
+    """
+    from agentcommander.engine.actions import ROLE_ACTIONS
+
+    if decision.action not in ROLE_ACTIONS:
+        return GuardVerdict(action="pass")
+
+    # Category from the router/classify scratchpad entry.
+    category: str | None = None
+    for e in scratchpad:
+        if e.role == "router" and e.action == "classify":
+            out = (e.output or "").strip().lower()
+            if out:
+                category = out
+                break
+    if category != "chat":
+        return GuardVerdict(action="pass")
+
+    # Single-fire: if we already nudged this turn, let the orchestrator proceed.
+    already_fired = any(
+        e.action == "system_nudge"
+        and isinstance(e.input, str)
+        and e.input == "chat_no_delegation"
+        for e in scratchpad
+    )
+    if already_fired:
+        return GuardVerdict(action="pass")
+
+    push_system_nudge(
+        scratchpad, iteration, "chat_no_delegation",
+        f"WARNING: this is a chat-category turn (casual conversation, "
+        f"capability question, or greeting). Delegating to "
+        f"`{decision.action}` burns iterations on what should be a "
+        f"short interactive reply. Emit `done` with a direct reply "
+        f"instead. If the user is asking something that genuinely "
+        f"needs a specialist, the router would have classified it as "
+        f"`code`/`project`/`research`/`question`. If you genuinely "
+        f"need to delegate, ignore this warning and emit the action "
+        f"again — this guard fires only once per turn."
+    )
+    return GuardVerdict(action="continue")
+
+
 def shell_in_wrong_language_guard(
     decision: OrchestratorDecision,
     scratchpad: list[ScratchpadEntry], iteration: int,
