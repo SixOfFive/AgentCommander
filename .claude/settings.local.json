@@ -48,7 +48,8 @@
       "Bash(mkdir -p /tmp/ac-injection-test)",
       "Read(//tmp/**)",
       "Bash(py -3 -m http.server 8765 --bind 0.0.0.0)",
-      "Bash(timeout 1800 cmd.exe //c \"..\\\\\\\\ac.bat\")"
+      "Bash(timeout 1800 cmd.exe //c \"..\\\\\\\\ac.bat\")",
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_role_label_defang -v)"
     ]
   }
 }

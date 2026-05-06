@@ -94,8 +94,11 @@ ROLE_LABEL_MIMICRY_LABEL = "role-label mimicry in observed text"
 # markdown blockquote indicator) so quoted content stays visually
 # distinct from the agent's actual status lines.
 _TUI_BULLETS = "▸▶▼●"
+# Match the bullet PLUS its trailing whitespace so the replacement can
+# put exactly one space after `>` (otherwise the original space survives
+# and we get `>  orchestrator` with double-space).
 _DEFANG_RX = re.compile(
-    rf"(^|\n)[ \t]*[{_TUI_BULLETS}](?=[ \t]+\w)",
+    rf"(^|\n)[ \t]*[{_TUI_BULLETS}][ \t]+(?=\w)",
 )
 
 
