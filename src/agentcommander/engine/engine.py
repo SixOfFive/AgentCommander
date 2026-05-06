@@ -753,7 +753,11 @@ class PipelineRun:
                                 and len(e.output.strip()) > 30
                             ]
                             current_work = successful_tool_calls + substantial_role_calls
-                            if len(current_work) >= 2:
+                            # Threshold 1 (was 2): even a single role call
+                            # like translator → "Buenos días" is the
+                            # answer the user wants — don't burn chat
+                            # fallback just to restate it.
+                            if len(current_work) >= 1:
                                 final_from_pad = build_final_output(
                                     self.state.scratchpad,
                                     self.state.turn_start_idx,
