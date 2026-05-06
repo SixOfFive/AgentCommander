@@ -720,8 +720,9 @@ class PipelineRun:
                             # multistep3 burned ~5400 prompt tokens on a
                             # chat fallback that produced essentially
                             # what `build_final_output` would have given.
-                            current_work = [
-                                e for e in self.state.scratchpad[self.state.turn_start_idx:]
+                            current_pad = self.state.scratchpad[self.state.turn_start_idx:]
+                            successful_tool_calls = [
+                                e for e in current_pad
                                 if e.role == "tool"
                                 and e.action in ("write_file", "execute",
                                                  "fetch", "http_request",
@@ -731,6 +732,27 @@ class PipelineRun:
                                 and (e.output.startswith("successfully completed:")
                                      or "Successfully" in e.output)
                             ]
+                            # Round-42 (T2 translate trace): a single
+                            # specialist role call (translator → "Buenos
+                            # días …") is real work too. Count substantive
+                            # role outputs alongside tool calls so a
+                            # one-role turn doesn't burn a chat-fallback
+                            # round-trip just to restate what the role
+                            # already said.
+                            substantial_role_calls = [
+                                e for e in current_pad
+                                if e.role in ("translator", "researcher",
+                                              "coder", "planner",
+                                              "architect", "reviewer",
+                                              "summarizer", "data_analyst",
+                                              "vision", "audio",
+                                              "refactorer", "tester",
+                                              "debugger", "critic")
+                                and e.action != "system_nudge"
+                                and isinstance(e.output, str)
+                                and len(e.output.strip()) > 30
+                            ]
+                            current_work = successful_tool_calls + substantial_role_calls
                             if len(current_work) >= 2:
                                 final_from_pad = build_final_output(
                                     self.state.scratchpad,

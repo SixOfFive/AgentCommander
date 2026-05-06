@@ -36,7 +36,11 @@
       "Bash(bash /tmp/test49.sh)",
       "Bash(echo \"python hello.py\")",
       "Bash(py -3 /tmp/wrong.py)",
-      "Bash(tasklist //FI \"IMAGENAME eq python.exe\")"
+      "Bash(tasklist //FI \"IMAGENAME eq python.exe\")",
+      "Bash(timeout 90 cmd.exe //c \"..\\\\\\\\ac.bat\")",
+      "Bash(timeout 30 cmd.exe //c \"..\\\\\\\\ac.bat\")",
+      "Bash(printf '/chat new t1-code-explain\\\\nexplain what this regex does in one sentence: ^\\(?P<verb>\\\\\\\\w+\\)\\\\\\\\s+\\\\\\\\d+$\\\\n/chat new t2-translate\\\\ntranslate \"good morning, how are you today\" to spanish\\\\n/chat new t3-research\\\\ncompare TCP and UDP in 3 short bullet points\\\\n/chat new t4-read-existing\\\\nshow me the contents of calc30.py\\\\n/chat new t5-compound\\\\nlist the files in this directory, count how many end with .py, write that number to count.txt\\\\n/chat new t6-math\\\\na train leaves at 3pm going 60mph east. another leaves at 4pm from the same point going 80mph east. when does the second catch up?\\\\n/quit\\\\n')",
+      "Bash(timeout 2400 cmd.exe //c \"..\\\\\\\\ac.bat\")"
     ]
   }
 }
