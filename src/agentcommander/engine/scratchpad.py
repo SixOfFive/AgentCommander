@@ -289,8 +289,30 @@ def build_final_output(scratchpad: Iterable[ScratchpadEntry],
         and isinstance(e.output, str)
         and len(e.output.strip()) > 80
     ]
+    # Round-42 (T6 math word problem trace): when the coder produced
+    # code AND a successful execute followed in the same turn, the
+    # answer the user wants is the EXECUTE stdout, not the code itself
+    # (the code was the means). Without this, "when does the train
+    # catch up?" shipped the computing script instead of "7 pm".
+    # Demote coder entries to fall through to the execute-stdout branch
+    # below when a successful execute came after them in this turn.
     if content_entries:
-        return _clean_for_user(content_entries[-1].output)
+        coder_followed_by_exec = False
+        last = content_entries[-1]
+        if last.role == "coder":
+            try:
+                last_idx = current_pad.index(last)
+            except ValueError:
+                last_idx = -1
+            if last_idx >= 0:
+                coder_followed_by_exec = any(
+                    e.action == "execute"
+                    and "successfully" in (e.output or "").lower()
+                    and "SyntaxError" not in (e.output or "")
+                    for e in current_pad[last_idx + 1:]
+                )
+        if not coder_followed_by_exec:
+            return _clean_for_user(content_entries[-1].output)
 
     # 3. Execution stdout from success — current turn only (round-26)
     files = [e for e in current_pad
