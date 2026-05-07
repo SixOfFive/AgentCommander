@@ -549,11 +549,21 @@ def cmd_typecast(ctx: CommandContext, args: list[str]) -> None:
         render_system_line(f"unknown sub-command: /typecast {sub}")
 
 
+_MAX_TOKEN_COUNT = 16 * 1024 * 1024  # 16M — beyond any current model's training ctx
+
+
 def _parse_token_count(s: str) -> int | None:
     """Parse strings like '128k', '32K', '4096', '1.5m' into an integer
     token count. Suffix 'k' multiplies by 1024, 'm' by 1024*1024 (binary
     convention — matches the TypeCast catalog's contextLength values).
-    Returns None when the input can't be parsed or is not strictly positive.
+
+    Returns None when:
+      - input can't be parsed
+      - value is not strictly positive
+      - value exceeds ``_MAX_TOKEN_COUNT`` (16M tokens — round-46 caught
+        ``/context 999999999`` being accepted as 953.7M, which would
+        try to send a 953M-token num_ctx to providers, blowing past
+        every model's training window and likely crashing the daemon)
     """
     if not s:
         return None
@@ -569,7 +579,9 @@ def _parse_token_count(s: str) -> int | None:
         n = int(float(raw) * mult)
     except ValueError:
         return None
-    return n if n > 0 else None
+    if n <= 0 or n > _MAX_TOKEN_COUNT:
+        return None
+    return n
 
 
 def _humanize_tokens_short(n: int | None) -> str:
