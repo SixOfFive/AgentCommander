@@ -120,6 +120,8 @@ The bottom three rows are reserved for the live status bar:
 | `/agents` | The 19 agents — category, output contract, prompt availability |
 | `/tools` | Registered tools |
 | `/history` | Recent conversations |
+| `/preflight [on\|off\|rules]` | Toggle the pre-dispatch meta-agent; show operational rules |
+| `/postmortem [on\|off]` | Toggle the post-failure meta-agent that writes operational rules from observed patterns |
 
 Type `/` to open the autocomplete popup; Tab inserts the highlighted match. Up/Down navigates history when the popup is closed, popup matches when it's open. Esc dismisses.
 
