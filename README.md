@@ -207,25 +207,35 @@ Manual recovery: `/db check`, `/db reindex`, `/db vacuum`, `/db backup <path>`, 
 
 ```
 src/agentcommander/
-├── cli.py                  argparse entry — invoked by ac.bat / ac.sh
+├── cli.py                  argparse entry — invoked by ac.bat / ac.sh; refuses to
+│                           run in the source repo root
 ├── types.py                shared dataclasses + Role enum
 ├── registry.py             Protocol-based plugin primitives
-├── safety/                 dangerous_patterns, sandbox, host_validator, prompt_injection
+├── chat_log.py             plain-text chat transcript writer with rotation
+├── model_stats.py          side-by-side model_stats.json with shape-aware token estimation
+├── safety/                 dangerous_patterns, sandbox, host_validator,
+│                           prompt_injection (incl. defang_role_labels)
 ├── agents/                 19-role manifest + prompt loader
 ├── db/                     connection (lock + auto-repair + signals) + schema.sql + repos
-├── providers/              base + ollama + llamacpp (auto-registered on import)
+├── providers/              base + ollama + llamacpp + capability_hints
+│                           (auto-registered on import)
 ├── tools/                  dispatcher + file_tool / code_tool / web_tool / process_tool /
 │                           http_tool / git_tool / env_tool / browser_tool
 ├── engine/
-│   ├── engine.py           PipelineRun (generator yielding PipelineEvents)
-│   ├── role_call.py        invoke a role via its assigned provider
+│   ├── engine.py           PipelineRun (generator yielding PipelineEvents);
+│   │                       _detect_tool_syntax_intent + _honor_tool_text_as_intent
+│   │                       + _infer_live_data_url
+│   ├── role_call.py        invoke a role via its assigned provider; skips tool
+│   │                       registry appendix on router
 │   ├── live_tee.py         tee events + bar state into pipeline_events / config
-│   ├── role_resolver.py    num_ctx precedence: /context → per-role → ceiling → None
+│   ├── role_resolver.py    num_ctx precedence: /context → per-role → ceiling → None;
+│   │                       per-role default caps (router=8k)
 │   ├── actions.py          ROLE_ACTIONS / TOOL_ACTIONS / ACTION_TO_ROLE
-│   ├── scratchpad.py       compaction + final-output assembly
+│   ├── scratchpad.py       compaction + final-output assembly + compact_conversation_db
 │   └── guards/             9 families: output, write, fetch, post_step, decision,
 │                           flow, execute, done + shared types
 ├── typecast/               catalog (conditional-GET), vram detect, autoconfig
+│                           (with no-catalog fallback path)
 └── tui/                    ansi.py + render.py + markdown.py + commands.py + app.py +
                             status_bar.py + autocomplete.py + terminal_input.py +
                             permissions.py + setup.py + mirror.py + popouts.py
