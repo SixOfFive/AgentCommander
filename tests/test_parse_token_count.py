@@ -59,7 +59,7 @@ class TestRejectedValues(unittest.TestCase):
         self.assertIsNone(_parse_token_count("999999999"))
 
     def test_huge_m_rejected(self) -> None:
-        # 100m = 100 * 1024 * 1024 = ~105M > 16M cap
+        # 100m = 100 * 1024 * 1024 = ~105M > 50M cap
         self.assertIsNone(_parse_token_count("100m"))
 
     def test_garbage_rejected(self) -> None:
