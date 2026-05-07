@@ -331,6 +331,9 @@ def parse_events(chunk: str) -> list[InputEvent]:
         if ch == "\x03":
             events.append(InputEvent(EVT_INTERRUPT))
             continue
+        if ch == "\x05":  # Ctrl+E — toggle every popout open/closed
+            events.append(InputEvent(EVT_TOGGLE_POPOUTS))
+            continue
         if ord(ch) < 32:
             continue
         events.append(InputEvent(EVT_CHAR, ch))
