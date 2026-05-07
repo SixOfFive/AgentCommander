@@ -60,7 +60,8 @@
       "Bash(grep -n \"EVT_UP\\\\|EVT_DOWN\\\\|parse_events\\\\|\\\\\\\\\\\\\\\\x1b\\\\\\\\[\\\\\\\\|escape\" C:/Users/sixoffive/Documents/AgentCommander/src/agentcommander/tui/autocomplete.py)",
       "Bash(grep -v \"^$\")",
       "Bash(grep -rn \"f'\\\\\\\\[\\\\\\\\|\\\\\"\\\\\\\\[\" src/agentcommander/providers/ src/agentcommander/db/)",
-      "Bash(xargs -I {} sh -c 'echo \"$\\(grep -c \"def test_\" {}\\) tests in $\\(basename {}\\)\"')"
+      "Bash(xargs -I {} sh -c 'echo \"$\\(grep -c \"def test_\" {}\\) tests in $\\(basename {}\\)\"')",
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_roles_set_url)"
     ]
   }
 }

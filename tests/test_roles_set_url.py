@@ -36,8 +36,17 @@ class TestRolesSetUrlForm(unittest.TestCase):
         import os
         os.chdir(self._cwd)
         from agentcommander.db import connection as _conn
+        try:
+            _conn.close_db()
+        except Exception:  # noqa: BLE001
+            pass
         _conn._db = None  # type: ignore[attr-defined]
-        self._tmp.cleanup()
+        try:
+            self._tmp.cleanup()
+        except (PermissionError, OSError):
+            # Windows occasionally holds the sqlite file briefly; tmp dir is
+            # in %TEMP% and gets reaped automatically. Don't fail the test.
+            pass
 
     def _run_set(self, *args: str) -> list[str]:
         """Invoke cmd_roles with the given argv and capture render_system_line output."""
