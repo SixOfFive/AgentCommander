@@ -13,7 +13,7 @@ the REPL consults. Adding a new command = adding one entry here (modular).
   /providers rm <id>     remove
   /models <provider_id>  list installed models for a provider
   /roles                 list role assignments
-  /roles set <role> <provider_id> <model>        assign one role
+  /roles set <role> <provider_id|url> <model>    assign one role (url auto-creates an ollama provider)
   /roles assign-all <provider_id> <model>        assign every role
   /typecast              show catalog status
   /typecast refresh      force re-fetch
