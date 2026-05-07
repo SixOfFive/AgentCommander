@@ -189,9 +189,19 @@ Manual recovery: `/db check`, `/db reindex`, `/db vacuum`, `/db backup <path>`, 
 - **Cross-turn scratchpad** — model memory persisted in `scratchpad_entries`; auto-compacted via the summarizer role. Cross-turn entries are visible to the orchestrator as context but excluded from the current turn's user-visible answer (turn boundary tracked by `LoopState.turn_start_idx`).
 - **JSON verdict contracts on Reviewer / Tester** — both roles emit `{verdict: PASS|FAIL, blockers/failures, summary}`; done-guards parse the JSON and block done with named blockers when FAIL.
 - **Project-local DB** — `<cwd>/.agentcommander/db.sqlite`. Each project gets its own state; the catalog cache stays global
-- **Auto-resume on startup** — the most recent chat for this project re-renders on launch
-- **Per-model throughput tracking** — running EMA of tok/s shown everywhere a model is named
-- **Session context ceiling** — `min(contextLength)` across picked models becomes the announced cap; resolver falls through `/context override → per-role → ceiling → None`
+- **Auto-resume on startup** — the most recent chat for this project re-renders on launch, bracketed by visual delimiters so replay is distinguishable from live activity
+- **Per-model throughput tracking** — running EMA of tok/s shown everywhere a model is named; mirrored to `model_stats.json`. Char-based fallback when providers don't report usage
+- **Session context ceiling** — `min(contextLength)` across picked models becomes the announced cap; resolver falls through `/context override → per-role → ceiling → None`. `/context` capped at 50M tokens (anything larger crashes providers)
+- **Chat log files** — `<wd>/logs/<conversation-start-time>.log` plain-text transcripts of every user prompt + assistant final, with size-based rotation
+- **Auto-fetch from chat-fallback intent** — when chat fallback emits tool syntax as text (e.g. `fetch <url>` or `list_dir`), the engine recognizes the intent, executes the tool, and re-streams chat with the result in context. Synonyms accepted (`ls`/`cat`/`curl`/`rm`/etc.). Same logic when the orchestrator stuffs tool syntax into `done.input`.
+- **Deterministic forced-fetch** — when the orchestrator declines twice on a live-data question (weather, time, news), the engine pattern-matches the user message to a known endpoint (wttr.in, worldtimeapi.org, Google News RSS) and runs the fetch itself. Closes the "weak orchestrator can't follow JSON contract" gap on local models.
+- **Capability detection** — providers self-report `text` / `vision` / `audio` / `image_gen` capabilities (Ollama via `/api/show`; llama.cpp via name heuristic). Autoconfig's no-catalog fallback uses these to gate which non-text roles a model can fill.
+- **Indirect prompt-injection defense** — fetched content scanned for injection patterns; `definite`/`likely` halts the tool at the dispatcher; `suspicious` role-label-mimicry chars (▸ ▶ ▼ ●) get defanged to `>` so fetched pages can't visually impersonate the agent's own status lines in the user's chat.
+- **Program-folder check** — refuses to launch with `cwd == AgentCommander source repo root` to prevent polluting the source tree with `.agentcommander/`, `logs/`, and tool-created files.
+- **Per-role num_ctx caps** — router defaults to 8 k context (saves KV-cache allocation on local 30B+ models). Overridable via `/context` or `/roles set`.
+- **Smaller-router-model startup hint** — when autoconfig binds the same large model to both router and orchestrator, prints a hint suggesting a 1-3B classifier to drop ~5-15 s/turn.
+- **Provider startup retry** — 1.5 s + 1 retry on `list_models()` failure to forgive transient daemon restarts.
+- **Windows MS-Store-Python-stub workaround** — bash on Windows resolves `python`/`python3` to a stub that exits 49; the engine rewrites those tokens in bash scripts to the real `py -3` interpreter (with backslash → forward-slash conversion).
 
 ## Modular layout
 
