@@ -145,10 +145,11 @@ Only `/exit` and `/quit` are accepted as input. On exit the mirror does NOT call
 
 ## What's persistent across runs
 
-- **Conversations + messages** — auto-resume the most recent chat for the project on launch. `/chat new` starts fresh; `/chat clear` is destructive.
-- **Scratchpad** — the model-facing memory (router decisions, role outputs, tool results) survives across turns and across program restarts. Auto-compacted via the summarizer role when it would exceed `num_ctx × 0.9` — compaction fires near the ceiling so the model keeps as much real history as possible before the summarizer trims it.
+- **Conversations + messages** — auto-resume the most recent chat for the project on launch. The replayed transcript is bracketed by `─── begin replay ───` / `─── end replay — type your next prompt below ───` markers so you can tell scrollback from live activity. `/chat new` starts fresh; `/chat clear` is destructive.
+- **Chat log files** — every user prompt + assistant final also gets appended to `<wd>/logs/<conversation-start-time>.log` as plain text. New chat → new file. Rotates at 10 MB (up to 20 historical parts).
+- **Scratchpad** — the model-facing memory (router decisions, role outputs, tool results) survives across turns and across program restarts. Auto-compacted via the summarizer role when it would exceed `num_ctx × 0.9` — compaction fires near the ceiling so the model keeps as much real history as possible before the summarizer trims it. Manual: `/compact` runs the same routine on demand; `/compact undo` restores the most recent round's originals (compaction marks rows `is_replaced=1` rather than deleting them, so undo is full-fidelity).
 - **Provider configs + role assignments** — endpoints and per-role overrides survive in the DB.
-- **Per-model throughput** — running-average tokens/second per model, displayed everywhere a model is shown. Updated after every call via `new_avg = (old_avg + completion_tokens / duration) / 2`. Default 100 tok/s for never-measured models.
+- **Per-model throughput** — running-average tokens/second per model, displayed everywhere a model is shown. Updated after every call via `new_avg = (old_avg + rate) / 2` (first measurement is the rate directly). When the provider doesn't report `usage` (some llama.cpp builds), AgentCommander estimates from streamed character count with a shape-aware divisor (CJK 1.5, code 3.0, prose 4.0). Self-measured stats also mirror to a side-by-side `<wd>/.agentcommander/model_stats.json` for transparency. Unmeasured models render as `—` in the role table — no fake default value.
 - **Filesystem permissions** — "always allow" decisions for read/write/execute, with subtree scope. `Y once` decisions live in-memory only.
 
 ## DB hardening
