@@ -79,6 +79,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--working-dir", "-C", help="Set the working directory at launch")
     p.add_argument("--debug", action="store_true", help="Print tracebacks on errors")
     p.add_argument(
+        "--verbose", action="store_true",
+        help="Show diagnostic prints normally hidden (connection lifecycle, "
+             "low-level socket addresses, etc.). Use to debug provider "
+             "transport. Off by default to keep the TUI quiet.",
+    )
+    p.add_argument(
         "--mirror",
         action="store_true",
         help="Run as a read-only follower of a primary `ac` in this project. "
