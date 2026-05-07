@@ -30,8 +30,13 @@ class TestNormalValues(unittest.TestCase):
         self.assertEqual(_parse_token_count("1.5m"), int(1.5 * 1024 * 1024))
 
     def test_at_cap_accepted(self) -> None:
-        # Boundary: 16M exactly should pass.
+        # Boundary: 50M exactly should pass.
         self.assertEqual(_parse_token_count(str(_MAX_TOKEN_COUNT)), _MAX_TOKEN_COUNT)
+
+    def test_50m_with_suffix(self) -> None:
+        # The "round-46-followup" value: a real model with 50M context
+        # exists; cap accepts the round number expression.
+        self.assertEqual(_parse_token_count("50m"), 50 * 1024 * 1024)
 
     def test_just_under_cap(self) -> None:
         self.assertEqual(_parse_token_count(str(_MAX_TOKEN_COUNT - 1)),
