@@ -56,16 +56,37 @@ ac
   type /help for commands  ·  /quit to exit
 ```
 
-Add a provider, pick a model, send a prompt:
+Add a provider, then let autoconfig pick per-role best fits, and send a prompt:
 
 ```text
 ❯ /providers add ollama-local ollama "Local Ollama" http://127.0.0.1:11434
-❯ /models ollama-local
-❯ /roles assign-all ollama-local qwen3:8b
+❯ /typecast autoconfigure         # picks the best model per role from what's installed
 ❯ Build me a python script that prints the current weather in NYC
 ```
 
-Or just run `/autoconfig` and let TypeCast pick a per-role best fit from your installed models.
+Per-role picks land like this — different models for different jobs:
+
+```
+role          model                      tok/s   kind
+────────────  ─────────────────────────  ──────  ─────
+router        devstral-small-2:24b       3 t/s   auto
+orchestrator  devstral-small-2:24b       3 t/s   auto
+planner       codestral:22b              5 t/s   auto
+coder         devstral-small-2:24b       3 t/s   auto
+reviewer      gemma4:e2b                 27 t/s  auto
+summarizer    aya:8b                     32 t/s  auto
+critic        cogito:8b                  6 t/s   auto
+tester        cogito:8b                  6 t/s   auto
+debugger      codestral:22b              5 t/s   auto
+researcher    qwen2.5:7b                 —       auto
+refactorer    command-r7b:7b             55 t/s  auto
+translator    gemma4:e2b                 27 t/s  auto
+…
+```
+
+If you'd prefer one model everywhere, `/roles assign-all <provider_id> <model>` overrides every role to that pick. Pin individual roles with `/roles set <role> <provider_id> <model>` (DB-persisted; survives restart).
+
+When no installed model is in the TypeCast catalog (e.g. a single uncatalogued GGUF on llama.cpp), autoconfig falls back to assigning that model to every text-capable role; vision/audio/image_gen roles are left unset unless the model name hints at multimodal capability (`llava`, `qwen-vl`, `gemma-3`, `llama-3.2-vision`, etc.).
 
 The bottom three rows are reserved for the live status bar:
 
