@@ -249,6 +249,7 @@ EVT_TAB = "tab"
 EVT_UP = "up"
 EVT_DOWN = "down"
 EVT_ESCAPE = "escape"
+EVT_TOGGLE_POPOUTS = "toggle_popouts"  # Ctrl+E — bulk popout expand/collapse
 EVT_INTERRUPT = "interrupt"  # Ctrl-C (POSIX cbreak preserves ISIG so this is rarely synthesized; here for completeness)
 
 
