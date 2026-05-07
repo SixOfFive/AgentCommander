@@ -2138,6 +2138,7 @@ def _build_registry() -> dict[str, SlashCommand]:
                 "/roles                              # show all 19 roles",
                 "/roles coder                        # show just the coder binding",
                 "/roles set coder ollama-default qwen3-coder:30b",
+                "/roles set orchestrator http://192.168.15.103:11434 devstral-small-2:24b  # auto-create ollama provider",
                 "/roles unset coder",
                 "/roles auto                         # re-run autoconfig (respects overrides)",
                 "/roles assign-all ollama-default qwen3:8b",
