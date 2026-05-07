@@ -6,9 +6,9 @@ Local multi-agent LLM orchestration CLI. Pure-Python (stdlib only — zero runti
 
 ## Concept
 
-> One computer, one LLM, one army of agents.
+> One computer, your local models, one army of agents.
 
-Pick a model in Ollama. AgentCommander assigns it to all 19 specialized roles (router, orchestrator, planner, coder, reviewer, vision, etc.). The orchestrator runs a guarded serial loop — every iteration emits one JSON action which is dispatched as a role delegation, a tool call, or `done`. Streamed tokens render live, status bar shows role / model / tokens / context / timers / throughput, and a watcher process can attach read-only to follow along.
+Install models in Ollama (or point at a llama.cpp server). On startup, AgentCommander scores your installed models against the TypeCast catalog and picks a per-role best fit — the strongest available model for the orchestrator, a fast small one for translator, a code-tuned model for coder/debugger, and so on across all 19 specialized roles (router, orchestrator, planner, coder, reviewer, summarizer, architect, critic, tester, debugger, researcher, refactorer, translator, data_analyst, vision, audio, image_gen, preflight, postmortem). You can pin any role explicitly with `/roles set`. The orchestrator runs a guarded serial loop — every iteration emits one JSON action which is dispatched as a role delegation, a tool call, or `done`. Streamed tokens render live, status bar shows role / model / tokens / context / timers / throughput, and a watcher process can attach read-only to follow along.
 
 ## Design
 
