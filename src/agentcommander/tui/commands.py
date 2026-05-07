@@ -2122,7 +2122,7 @@ def _build_registry() -> dict[str, SlashCommand]:
             handler=cmd_roles,
             usage="/roles                                           # table of all assignments\n"
                   "/roles <role>                                    # show one role's assignment\n"
-                  "/roles set <role> <provider_id> <model>          # set a per-role override\n"
+                  "/roles set <role> <provider_id|url> <model>      # set a per-role override (url auto-creates ollama provider)\n"
                   "/roles unset <role>                              # remove the override\n"
                   "/roles auto                                      # re-run TypeCast autoconfig\n"
                   "/roles assign-all <provider_id> <model>          # assign all 19 roles flat",
