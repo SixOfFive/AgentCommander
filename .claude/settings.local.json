@@ -53,7 +53,8 @@
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_role_label_defang)",
       "Bash(mkdir -p /tmp/ac-defang-verify)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_payload_from_textual_call -v)",
-      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_payload_from_textual_call)"
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_payload_from_textual_call)",
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_parse_token_count)"
     ]
   }
 }

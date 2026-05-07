@@ -549,7 +549,10 @@ def cmd_typecast(ctx: CommandContext, args: list[str]) -> None:
         render_system_line(f"unknown sub-command: /typecast {sub}")
 
 
-_MAX_TOKEN_COUNT = 16 * 1024 * 1024  # 16M — beyond any current model's training ctx
+_MAX_TOKEN_COUNT = 50 * 1024 * 1024  # 50M — covers the largest current
+# model contexts (recent releases hit ~50M) with no headroom past that.
+# Round-46 set the original cap at 16M; bumped to 50M when a model with
+# that window shipped. Anything beyond is almost certainly a typo.
 
 
 def _parse_token_count(s: str) -> int | None:
@@ -560,7 +563,7 @@ def _parse_token_count(s: str) -> int | None:
     Returns None when:
       - input can't be parsed
       - value is not strictly positive
-      - value exceeds ``_MAX_TOKEN_COUNT`` (16M tokens — round-46 caught
+      - value exceeds ``_MAX_TOKEN_COUNT`` (50M tokens — round-46 caught
         ``/context 999999999`` being accepted as 953.7M, which would
         try to send a 953M-token num_ctx to providers, blowing past
         every model's training window and likely crashing the daemon)
