@@ -93,13 +93,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    # Set the verbose flag VERY early so any module that calls
-    # ``verbose_print()`` during import (provider factories, autoconfig,
-    # etc.) sees the right value. Lazy import — _verbose lives in a
-    # zero-dep module so this is cheap.
-    from agentcommander import _verbose
-    _verbose.set_enabled(bool(args.verbose))
-
     # Refuse to run in the AgentCommander source folder. The DB lives at
     # <cwd>/.agentcommander/ regardless of mode (primary or mirror) and
     # regardless of --working-dir, so running here pollutes the source
