@@ -6,10 +6,10 @@
     "voteIncrement": 1,
     "voteMax": 1000000,
     "voteMin": -1000000,
-    "lastFetchedAt": 1777577956174,
-    "lastVoteAt": 1777587266622,
-    "voteCount": 1407,
-    "modelCount": 29
+    "lastFetchedAt": 1778173778144,
+    "lastVoteAt": 1778173911384,
+    "voteCount": 1410,
+    "modelCount": 30
   },
   "_models": {
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": {
@@ -97,11 +97,11 @@
       "supported_params": [],
       "by_role": {
         "router": {
-          "score": 9,
+          "score": 7,
           "successes": 9,
-          "rate_limits": 0,
-          "runs": 9,
-          "lastBumpAt": 1777586439425
+          "rate_limits": 2,
+          "runs": 11,
+          "lastBumpAt": 1778173851043
         },
         "orchestrator": {
           "score": 35,
@@ -279,11 +279,11 @@
           "lastBumpAt": 1777586439425
         },
         "orchestrator": {
-          "score": 37,
+          "score": 36,
           "successes": 38,
-          "rate_limits": 1,
-          "runs": 39,
-          "lastBumpAt": 1777587119645
+          "rate_limits": 2,
+          "runs": 40,
+          "lastBumpAt": 1778173911384
         }
       }
     },
@@ -736,6 +736,16 @@
           "lastBumpAt": 1777587119645
         }
       }
+    },
+    "baidu/cobuddy:free": {
+      "name": "baidu/cobuddy:free",
+      "contextLength": 131072,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {}
     }
   }
 }

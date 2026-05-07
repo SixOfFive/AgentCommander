@@ -426,13 +426,43 @@ def cmd_roles(ctx: CommandContext, args: list[str]) -> None:
 
     if sub == "set":
         if len(rest) < 3:
-            render_system_line("usage: /roles set <role> <provider_id> <model>")
+            render_system_line("usage: /roles set <role> <provider_id|url> <model>")
+            render_system_line(style("muted",
+                "  url form auto-creates an ollama provider; use /providers add for other types"))
             return
         role = _try_role(rest[0])
         if role is None:
             return
-        pid = rest[1]
+        pid_or_url = rest[1]
         model = " ".join(rest[2:])
+        # URL form: auto-create (or reuse) a provider so users can bind a role
+        # to a server that's not in /providers yet. Default type is ollama —
+        # matches the user's `:11434`-style example. Non-ollama backends still
+        # need an explicit /providers add (we have no reliable wire-protocol
+        # sniff and silently picking the wrong one would be worse than asking).
+        if pid_or_url.startswith(("http://", "https://")):
+            from agentcommander.db.repos import list_providers, upsert_provider
+            from agentcommander.providers.base import rebuild_from_db
+            from agentcommander.types import ProviderConfig
+            url = pid_or_url.rstrip("/")
+            existing = next((p for p in list_providers()
+                             if (p.endpoint or "").rstrip("/") == url), None)
+            if existing is not None:
+                pid = existing.id
+                created_msg = f"reused existing provider {pid} for {url}"
+            else:
+                # Synthesize a stable id from the host:port. Strip scheme and
+                # replace path-unfriendly chars so the id is grep-able.
+                ident = url.split("://", 1)[1].replace("/", "-").replace(":", "-")
+                pid = f"auto-{ident}"
+                upsert_provider(ProviderConfig(
+                    id=pid, type="ollama",  # type: ignore[arg-type]
+                    name=f"auto: {url}", endpoint=url, enabled=True))
+                rebuild_from_db()
+                created_msg = f"created provider {pid} (ollama) → {url}"
+            render_system_line(style("muted", f"  {created_msg}"))
+        else:
+            pid = pid_or_url
         # Every /roles set is persisted as an override.
         set_role_assignment(role, pid, model, is_override=True)
         render_system_line(f"set {role.value} → {pid} / {model}  "

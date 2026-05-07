@@ -1066,57 +1066,57 @@ def read_line_at_bottom(prompt_text: str = "❯ ") -> str | None:
                             popup_height = 0
                         continue
                     if evt.kind == EVT_TOGGLE_POPOUTS:
-                        # Ctrl+E — bulk expand/collapse every popout in
-                        # the current run. If ANY popout is currently
-                        # collapsed, expand all (most useful default —
-                        # "show me what's in there"). Otherwise collapse
-                        # all back. Lazy import — popouts is heavier
-                        # than the bottom-prompt loop should pay every
-                        # call, and this hook fires only on a deliberate
-                        # keystroke.
+                        # Ctrl+E — bulk expand/collapse from the bottom prompt.
+                        # The cursor lives in the input row (outside the scroll
+                        # region) here, so we MUST park into the scroll region
+                        # first or render_expand_inline's writeln() calls land
+                        # below the screen and get clobbered by the next input
+                        # repaint — exactly the "shifts up and back down" the
+                        # user reported. After painting we re-park and redraw
+                        # the input row.
                         try:
                             from agentcommander.tui.popouts import (
                                 get_registry,
-                                render_collapse,
                                 render_expand_inline,
                             )
+                            from agentcommander.tui.render import render_system_line
                             reg = get_registry()
                             with reg.lock:
                                 blocks = [b for b in reg.blocks
                                           if b.status != "running"]
                             if not blocks:
-                                # Nothing to toggle — drop a muted hint
-                                # so the keystroke isn't swallowed silently.
-                                from agentcommander.tui.render import render_system_line
+                                bar.park_cursor()
                                 render_system_line(style("muted",
                                     "  (Ctrl+E: no popouts to toggle yet)"))
                             else:
                                 any_collapsed = any(b.collapsed for b in blocks)
+                                bar.park_cursor()
                                 if any_collapsed:
                                     n = 0
                                     for b in blocks:
                                         if b.collapsed:
+                                            # Expanded blocks are appended fresh
+                                            # below current scroll position —
+                                            # scrolls older content up.
                                             render_expand_inline(b)
                                             n += 1
-                                    from agentcommander.tui.render import render_system_line
                                     render_system_line(style("muted",
                                         f"  ── expanded {n} popout(s) (Ctrl+E to collapse) ──"))
                                 else:
+                                    # Collapse from history is a flag-flip only:
+                                    # the on-screen expansion has scrolled away,
+                                    # there's nothing to walk back over. Future
+                                    # expands will re-print fresh.
                                     n = 0
                                     for b in blocks:
                                         if not b.collapsed:
-                                            render_collapse(b)
+                                            b.collapsed = True
                                             n += 1
-                                    from agentcommander.tui.render import render_system_line
                                     render_system_line(style("muted",
                                         f"  ── collapsed {n} popout(s) (Ctrl+E to expand) ──"))
-                            # Repaint the input row — the popout state
-                            # change can interfere with cursor/scroll
-                            # positioning; force a redraw.
+                            bar.park_cursor()
                             _paint_input_row(prompt_text, buffer, cols, input_row)
                         except Exception:  # noqa: BLE001
-                            # Don't let a popout-render hiccup kill the
-                            # input loop — the user can always retry.
                             pass
                         continue
 
