@@ -878,6 +878,7 @@ def read_line_at_bottom(prompt_text: str = "❯ ") -> str | None:
         EVT_BACKSPACE,
         EVT_CHAR,
         EVT_DOWN,
+        EVT_TOGGLE_POPOUTS,
         EVT_ENTER,
         EVT_ESCAPE,
         EVT_INTERRUPT,
