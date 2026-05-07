@@ -68,7 +68,7 @@ SUB_COMMANDS: dict[str, list[CompletionMatch]] = {
     ],
     "/roles": [
         CompletionMatch(name="set",
-                        summary="pin a role override: <role> <provider_id> <model>"),
+                        summary="pin a role override: <role> <provider_id|url> <model>"),
         CompletionMatch(name="unset",
                         summary="release a per-role override: <role>"),
         CompletionMatch(name="auto",
