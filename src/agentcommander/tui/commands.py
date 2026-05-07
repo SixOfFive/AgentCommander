@@ -676,9 +676,9 @@ def cmd_context(ctx: CommandContext, args: list[str]) -> None:
                 render_system_line(style("warn",
                     f'rejected: "{args[0]}" parses to {raw_n:,} tokens — '
                     f"exceeds the {_MAX_TOKEN_COUNT:,}-token cap "
-                    f"({_MAX_TOKEN_COUNT // (1024*1024)}M). No model "
-                    "has a training window that large; this would "
-                    "either crash the provider or be silently capped."))
+                    f"({_MAX_TOKEN_COUNT // (1024*1024)}M). The largest "
+                    "current model contexts hit ~50M; values past that "
+                    "either crash the provider or get silently capped."))
                 return
         except (ValueError, AttributeError):
             pass

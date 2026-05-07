@@ -4,7 +4,7 @@ Both ``/context <N>`` and ``/autoconfig minctx <N>`` go through this
 parser. Without the cap, ``/context 999999999`` was accepted as 953.7M
 tokens and would have tried to send a 953-million-token num_ctx to
 providers, blowing past every model's training window and likely
-crashing the daemon.
+crashing the daemon. Cap is 50M (recent releases hit that).
 """
 from __future__ import annotations
 
