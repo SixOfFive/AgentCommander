@@ -174,7 +174,7 @@ Manual recovery: `/db check`, `/db reindex`, `/db vacuum`, `/db backup <path>`, 
 | 19 role prompts | copied | `resources/prompts/*.md` |
 | Engine action set | ported | role + tool actions + `done`. **No `parallel`** (serial-only) |
 | Engine main loop | ported | scratchpad, generator-based events, guard hook points |
-| 9 guard families (~120+ guards) | ported + extended | decision, flow, execute, write, output, fetch, post_step, done + shared types. Round 22+ added unknown_action / unassigned_role / prompt_template_leak / reviewer_verdict / tester_verdict |
+| 9 guard families (~140+ guards) | ported + extended | decision, flow, execute, write, output, fetch, post_step, done + shared types. Recent additions: `live_data_question_guard` (forced-fetch on weather/news/time questions), `tool_call_as_chat_guard` (rejects done.input that's tool syntax as plain text), `chat_category_no_delegation_guard` (chat-category turns shouldn't delegate to specialist roles), `shell_in_wrong_language_guard` (auto-rewrites `execute(language=python, input="python file.py")` to `bash`), `next_steps_guard` lenient bypass (passes done when ≥2 successful tool calls completed), plus the original `unknown_action`/`unassigned_role`/`prompt_template_leak`/`reviewer_verdict`/`tester_verdict` set |
 | Tools: file / code / web / process / **http / git / env / browser** | ported + extended | sandbox-gated. `git` is read-only by design; mutating verbs go through `execute`. `git` requires `.git/` in cwd (no climbing to parent repos) |
 | Provider: Ollama | ported | streaming via stdlib `urllib`; `keep_alive=5m`; `/api/ps`; `should_cancel` mid-stream |
 | Provider: llama.cpp | ported | OpenAI-compat SSE via stdlib `urllib` |
