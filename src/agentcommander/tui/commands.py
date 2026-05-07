@@ -662,6 +662,23 @@ def cmd_context(ctx: CommandContext, args: list[str]) -> None:
 
     parsed = _parse_token_count(args[0])
     if parsed is None:
+        # Cap is 16M tokens — flag the over-cap case explicitly so the
+        # user knows it was rejected by policy, not unparseable.
+        try:
+            raw_n = int(float(args[0].rstrip("kKmM")) * (
+                1024 * 1024 if args[0].lower().endswith("m") else
+                1024 if args[0].lower().endswith("k") else 1
+            ))
+            if raw_n > _MAX_TOKEN_COUNT:
+                render_system_line(style("warn",
+                    f'rejected: "{args[0]}" parses to {raw_n:,} tokens — '
+                    f"exceeds the {_MAX_TOKEN_COUNT:,}-token cap "
+                    f"({_MAX_TOKEN_COUNT // (1024*1024)}M). No model "
+                    "has a training window that large; this would "
+                    "either crash the provider or be silently capped."))
+                return
+        except (ValueError, AttributeError):
+            pass
         render_system_line(f'could not parse: "{args[0]}"')
         render_system_line(style("muted",
             "  usage: /context <N>   (32k, 128K, 65536, 1.5m, …)"))
