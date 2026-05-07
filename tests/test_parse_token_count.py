@@ -79,9 +79,9 @@ class TestCapValue(unittest.TestCase):
     """The cap itself should be sensible — higher than any real model
     but not so high that the protection is meaningless."""
 
-    def test_cap_greater_than_largest_known_model(self) -> None:
-        # Llama 4 Scout has 10M context; 16M cap leaves headroom.
-        self.assertGreaterEqual(_MAX_TOKEN_COUNT, 10 * 1024 * 1024)
+    def test_cap_covers_largest_known_model(self) -> None:
+        # Recent releases hit ~50M tokens; cap should accept that.
+        self.assertGreaterEqual(_MAX_TOKEN_COUNT, 50 * 1024 * 1024)
 
     def test_cap_below_absurd_value(self) -> None:
         # 1 billion tokens = ~4 GB of text. Cap is well below.
