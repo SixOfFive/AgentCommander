@@ -111,6 +111,18 @@ def read_chars_blocking() -> str:
         if ch == "\x03":  # Ctrl-C — msvcrt swallows it, we re-raise
             raise KeyboardInterrupt
         out = [ch]
+        # Special-key prefix: arrow keys, F-keys, Ins/Del/Home/End/PgUp/PgDn
+        # come from msvcrt as TWO chars — first \x00 or \xe0, then the
+        # scancode (H=Up, P=Down, K=Left, M=Right, etc.). Always blocking-
+        # read the second char rather than polling kbhit(), which can race
+        # — Windows may enqueue the prefix before the scancode and we'd
+        # return the prefix alone, then deliver the scancode as a stray
+        # literal "H"/"P" the next call. Round-47 user trace caught this.
+        if ch in ("\x00", "\xe0"):
+            try:
+                out.append(msvcrt.getwch())
+            except OSError:
+                pass
         while msvcrt.kbhit():
             try:
                 out.append(msvcrt.getwch())

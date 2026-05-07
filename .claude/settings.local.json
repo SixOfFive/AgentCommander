@@ -54,7 +54,10 @@
       "Bash(mkdir -p /tmp/ac-defang-verify)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_payload_from_textual_call -v)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_payload_from_textual_call)",
-      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_parse_token_count)"
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_parse_token_count)",
+      "Bash(grep -rn \"\\\\\"conn\\\\\\\\b\\\\|'conn\\\\\\\\b\\\\|conn:\\\\|connecting\\\\|connection\" src/agentcommander/tui/)",
+      "Bash(grep -n \"msvcrt\\\\|getwch\\\\|0xe0\\\\|\\\\\\\\\\\\\\\\xe0\\\\|arrow\\\\|H\\\\|P\" C:/Users/sixoffive/Documents/AgentCommander/src/agentcommander/tui/terminal_input.py)",
+      "Bash(grep -n \"EVT_UP\\\\|EVT_DOWN\\\\|parse_events\\\\|\\\\\\\\\\\\\\\\x1b\\\\\\\\[\\\\\\\\|escape\" C:/Users/sixoffive/Documents/AgentCommander/src/agentcommander/tui/autocomplete.py)"
     ]
   }
 }
