@@ -114,6 +114,7 @@ The bottom three rows are reserved for the live status bar:
 | `/vram` | Total + Ollama `/api/ps` live + catalog estimates |
 | `/db [check\|reindex\|vacuum\|backup\|salvage\|reset]` | Inspect + repair the project DB |
 | `/chat [list\|new\|clear\|resume\|title\|export]` | Manage conversations |
+| `/compact [undo]` | Manually compact the active chat's scratchpad via the summarizer; `/compact undo` restores the most recent compaction's originals |
 | `/new [<title>]` | Alias for `/chat new` |
 | `/status` | Stacked-bar of per-model usage for the current chat |
 | `/agents` | The 19 agents — category, output contract, prompt availability |
