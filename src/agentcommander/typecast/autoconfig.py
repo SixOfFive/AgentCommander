@@ -359,6 +359,7 @@ def _best_pick_for_role(
     candidates: list[ModelCandidate],
     *,
     min_context: int = 0,
+    max_memory_gb: float = 0.0,
 ) -> tuple[ModelCandidate | None, float]:
     """Return ``(best_candidate, best_score)`` for this role, or ``(None, 0)``.
 
@@ -368,6 +369,9 @@ def _best_pick_for_role(
       - if ``min_context > 0``, the catalog entry's ``contextLength`` must be
         at least ``min_context`` tokens (drops models trained on a smaller
         window so we don't quietly downgrade the user's chosen context)
+      - if ``max_memory_gb > 0``, the catalog entry's ``estimatedVramGb`` must
+        be ≤ that budget. A model with no estimate is allowed through (we
+        only filter when we can measure) — same convention as ``fits_available_vram``.
 
     The "best" candidate is the one with the highest TypeCast score on this
     role; ties are broken by iteration order (which mirrors the catalog).
@@ -384,6 +388,10 @@ def _best_pick_for_role(
             continue
         if min_context > 0 and _entry_context_length(cand.entry) < min_context:
             continue
+        if max_memory_gb > 0:
+            est = cand.entry.get("estimatedVramGb")
+            if isinstance(est, (int, float)) and float(est) > max_memory_gb:
+                continue
         s = _role_score(cand.entry, tc)
         if s > best_score:
             best_score = s
