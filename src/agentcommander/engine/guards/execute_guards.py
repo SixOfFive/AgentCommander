@@ -667,8 +667,34 @@ def run_execute_guards(ctx: dict[str, Any]) -> dict[str, Any]:
     if verify["verdict"]["action"] == "continue":
         return verify
 
+    # Preventive execute guards (round-49 batch). Wrap the (code, scratchpad,
+    # iter) -> (code, verdict) signature into the _Input adapter the existing
+    # runner uses. Run AFTER markdown_fence_guard so we see the cleaned code,
+    # but BEFORE destructive/secrets blocks so a base64 pipe gets caught with
+    # the more-specific nudge.
+    from agentcommander.engine.guards.preventive_guards import (
+        base64_pipe_shell_guard,
+        homoglyph_guard,
+        shell_history_subst_guard,
+        eval_remote_string_guard,
+    )
+
+    def _wrap_preventive(fn):
+        def adapted(inp: _Input) -> dict[str, Any]:
+            new_code, verdict = fn(inp.code, inp.scratchpad, inp.iteration)
+            inp.code = new_code
+            return {"code": new_code, "language": inp.language,
+                    "verdict": {"action": verdict.action}}
+        return adapted
+
     guards: list[Any] = [
-        markdown_fence_guard, empty_execute_guard, destructive_command_guard,
+        markdown_fence_guard,
+        # Block obfuscated shell payloads before any other guard sees them.
+        _wrap_preventive(base64_pipe_shell_guard),
+        _wrap_preventive(eval_remote_string_guard),
+        _wrap_preventive(homoglyph_guard),
+        _wrap_preventive(shell_history_subst_guard),
+        empty_execute_guard, destructive_command_guard,
         recursive_execution_guard, python_command_guard, mixed_shell_python_guard,
         cross_language_guard, bash_python_guard, python3_replacement_guard,
         python_param_quote_guard, python_unquoted_args_guard, error_pattern_guard,
