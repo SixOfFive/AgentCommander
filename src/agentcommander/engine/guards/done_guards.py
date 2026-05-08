@@ -1315,11 +1315,21 @@ def run_done_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         lambda: ai_disclaimer_guard(scratchpad, iteration, decision),
         lambda: training_cutoff_leak_guard(scratchpad, iteration, decision),
         lambda: unfilled_template_guard(scratchpad, iteration, decision),
+        lambda: turn_marker_leak_guard(scratchpad, iteration, decision),
+        lambda: model_name_leak_guard(scratchpad, iteration, decision),
+        lambda: repeated_paragraph_guard(scratchpad, iteration, decision),
+        lambda: all_caps_shout_guard(scratchpad, iteration, decision),
+        lambda: excessive_emoji_guard(scratchpad, iteration, decision),
         lambda: fake_citation_guard(scratchpad, iteration, decision),
         lambda: stale_year_guard(scratchpad, iteration, decision),
         lambda: hedge_only_guard(scratchpad, iteration, decision),
+        lambda: question_only_done_guard(scratchpad, iteration, decision),
+        lambda: here_is_only_guard(scratchpad, iteration, decision),
         lambda: over_apologetic_guard(scratchpad, iteration, decision),
         lambda: dangling_promise_guard(scratchpad, iteration, decision),
+        # Chatbot-signoff is a silent trim — runs after the blockers but
+        # before the legacy guards so they see the cleaned text.
+        lambda: chatbot_signoff_guard(scratchpad, iteration, decision),
         # Live-data forced-fetch: when the user is asking about weather /
         # current time / today's news / stock price etc., reject `done`
         # until the orchestrator has actually fetched something. Without
