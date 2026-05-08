@@ -1082,9 +1082,13 @@ def cmd_autoconfig(ctx: CommandContext, args: list[str]) -> None:
 
     if not applied.role_picks:
         msg = "autoconfigure picked nothing"
+        reasons = []
         if min_context > 0:
-            msg += (f" — no installed model has contextLength "
-                    f">= {min_context} tokens")
+            reasons.append(f"contextLength >= {min_context} tokens")
+        if max_memory_gb > 0:
+            reasons.append(f"estimatedVramGb <= {max_memory_gb:g} GB")
+        if reasons:
+            msg += " — no installed model satisfies: " + " AND ".join(reasons)
         render_system_line(style("warn", msg))
         if applied.unset_roles:
             render_system_line(style("muted",
@@ -1130,12 +1134,20 @@ def cmd_autoconfig(ctx: CommandContext, args: list[str]) -> None:
     n_pre = len(applied.user_overrides)
 
     if min_context > 0:
+        mem_suffix = f", memory<={max_memory_gb:g}GB" if max_memory_gb > 0 else ""
         render_system_line(
-            f"autoconfigured {n_picks} role(s) at mincontext={min_context} "
+            f"autoconfigured {n_picks} role(s) at mincontext={min_context}{mem_suffix} "
             f'→ primary {style("accent", applied.default_model or "?")} '
             f"on {applied.provider_id}  "
             + style("muted", f"({persisted} persisted; num_ctx={min_context} "
                               "will be passed to every call)")
+        )
+    elif max_memory_gb > 0:
+        render_system_line(
+            f"autoconfigured {n_picks} role(s) at memory<={max_memory_gb:g}GB "
+            f'→ primary {style("accent", applied.default_model or "?")} '
+            f"on {applied.provider_id}  "
+            + style("muted", "(in-memory; not persisted — use minctx with memory to persist)")
         )
     else:
         render_system_line(
