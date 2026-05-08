@@ -110,6 +110,12 @@ def sanitize_output(text: str) -> str:
     text = strip_binary_content(text)
     text = strip_base64(text)
     text = redact_secrets(text)
+    # Round-50 expanded secret patterns (GitHub fine-grained PATs, Stripe
+    # restricted keys, Anthropic / JWT / 40-hex tokens). Lazy import to
+    # avoid pulling the preventive_guards module at startup when this
+    # module is imported for type-only purposes.
+    from agentcommander.engine.guards.preventive_guards import redact_extra_secrets
+    text = redact_extra_secrets(text)
     text = strip_install_progress(text)
     text = strip_warnings(text)
     text = normalize_whitespace(text)
