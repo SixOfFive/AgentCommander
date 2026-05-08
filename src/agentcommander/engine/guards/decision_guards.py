@@ -491,6 +491,12 @@ def run_decision_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         tracking_param_strip_guard,
         placeholder_url_guard,
         empty_role_input_guard,
+        smart_quote_guard,
+        em_dash_in_code_guard,
+        html_entity_decode_guard,
+        url_trailing_punct_guard,
+        url_embedded_whitespace_guard,
+        url_encoded_traversal_guard,
     )
 
     guards = [
