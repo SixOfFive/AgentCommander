@@ -1353,6 +1353,9 @@ def run_done_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         lambda: code_in_done_execute_guard(scratchpad, decision, user_message),
         lambda: code_dump_guard(scratchpad, iteration, decision),
         lambda: verbose_fluff_guard(scratchpad, iteration, decision),
+        # Silent close-up of an odd ``` count runs RIGHT before raw_content_guard
+        # so the rendered output ships clean. Doesn't return continue/break.
+        lambda: unclosed_codefence_guard(scratchpad, iteration, decision),
         lambda: raw_content_guard(scratchpad, decision, user_message, turn_start_idx),
     ]
 
