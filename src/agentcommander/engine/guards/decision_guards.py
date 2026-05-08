@@ -502,11 +502,19 @@ def run_decision_guards(ctx: dict[str, Any]) -> dict[str, Any]:
     guards = [
         # Silent-rewrite layer (pure normalisation; no nudges).
         lambda: zero_width_unicode_guard(decision, scratchpad, iteration),
+        lambda: smart_quote_guard(decision, scratchpad, iteration),
+        lambda: em_dash_in_code_guard(decision, scratchpad, iteration),
+        lambda: html_entity_decode_guard(decision, scratchpad, iteration),
         lambda: code_fence_in_arg_guard(decision, scratchpad, iteration),
         lambda: markdown_link_extract_guard(decision, scratchpad, iteration),
+        lambda: url_trailing_punct_guard(decision, scratchpad, iteration),
         lambda: url_scheme_typo_guard(decision, scratchpad, iteration),
         lambda: protocol_relative_url_guard(decision, scratchpad, iteration),
         lambda: tracking_param_strip_guard(decision, scratchpad, iteration),
+        # URL whitespace / encoded-traversal — these can block, so they sit
+        # in the rewrite-or-block boundary.
+        lambda: url_embedded_whitespace_guard(decision, scratchpad, iteration),
+        lambda: url_encoded_traversal_guard(decision, scratchpad, iteration),
 
         lambda: empty_action_guard(decision, scratchpad, iteration),
         lambda: sentence_as_action_guard(decision, scratchpad, iteration),
