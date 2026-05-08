@@ -81,9 +81,9 @@ class TestCodeFenceInArgGuard(unittest.TestCase):
         from agentcommander.engine.guards.preventive_guards import (
             code_fence_in_arg_guard,
         )
-        d = _mk_decision(action="execute", code="print('hi')")
+        d = _mk_decision(action="execute", input="print('hi')")
         code_fence_in_arg_guard(d, [], 1)
-        self.assertEqual(d.code, "print('hi')")
+        self.assertEqual(d.input, "print('hi')")
 
     def test_skips_non_fenced_action(self) -> None:
         from agentcommander.engine.guards.preventive_guards import (
