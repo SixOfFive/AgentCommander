@@ -62,7 +62,8 @@
       "Bash(grep -rn \"f'\\\\\\\\[\\\\\\\\|\\\\\"\\\\\\\\[\" src/agentcommander/providers/ src/agentcommander/db/)",
       "Bash(xargs -I {} sh -c 'echo \"$\\(grep -c \"def test_\" {}\\) tests in $\\(basename {}\\)\"')",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_roles_set_url)",
-      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_autoconfig_memory)"
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_autoconfig_memory)",
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_preventive_guards)"
     ]
   }
 }

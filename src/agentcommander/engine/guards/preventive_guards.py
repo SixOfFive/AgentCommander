@@ -116,7 +116,7 @@ def zero_width_unicode_guard(
     commands, URL parses, file paths. Stripping them never harms a valid
     payload — they have no semantic meaning in any of the tools we dispatch.
     """
-    fields = ("input", "url", "code", "path", "content", "command",
+    fields = ("input", "url", "path", "content", "command",
               "language", "host", "body", "files")
     for f in fields:
         val = getattr(decision, f, None)
