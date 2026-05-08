@@ -696,9 +696,19 @@ def run_execute_guards(ctx: dict[str, Any]) -> dict[str, Any]:
 
     guards: list[Any] = [
         markdown_fence_guard,
-        # Block obfuscated shell payloads before any other guard sees them.
+        # Strip prompt-style prefixes BEFORE the security guards run — a
+        # `>>> rm -rf /` should still hit destructive_command_guard, not
+        # slip past because the prompt prefix shifted parsing.
+        _wrap_preventive(shebang_mismatch_guard),
+        _wrap_preventive(repl_prompt_in_code_guard),
+        _wrap_preventive(bash_dollar_prompt_guard),
+        _wrap_preventive(powershell_prompt_in_code_guard),
+        # Hard blocks for obfuscated payloads / TLS bypass / sudo.
         _wrap_preventive(base64_pipe_shell_guard),
         _wrap_preventive(eval_remote_string_guard),
+        _wrap_preventive(sudo_in_execute_guard),
+        _wrap_preventive(insecure_tls_flag_guard),
+        _wrap_preventive(windows_backslash_in_python_guard),
         _wrap_preventive(homoglyph_guard),
         _wrap_preventive(shell_history_subst_guard),
         empty_execute_guard, destructive_command_guard,
