@@ -478,7 +478,30 @@ def run_decision_guards(ctx: dict[str, Any]) -> dict[str, Any]:
     iteration: int = ctx["iteration"]
     browser_available: bool = bool(ctx.get("browser_available", False))
 
+    # Preventive silent rewrites run FIRST so subsequent guards see the
+    # cleaned-up decision. Order within: strip invisible chars, then
+    # unwrap markdown wrappers, then fix URL shapes — each layer can
+    # depend on the previous having already normalised its inputs.
+    from agentcommander.engine.guards.preventive_guards import (
+        zero_width_unicode_guard,
+        code_fence_in_arg_guard,
+        markdown_link_extract_guard,
+        url_scheme_typo_guard,
+        protocol_relative_url_guard,
+        tracking_param_strip_guard,
+        placeholder_url_guard,
+        empty_role_input_guard,
+    )
+
     guards = [
+        # Silent-rewrite layer (pure normalisation; no nudges).
+        lambda: zero_width_unicode_guard(decision, scratchpad, iteration),
+        lambda: code_fence_in_arg_guard(decision, scratchpad, iteration),
+        lambda: markdown_link_extract_guard(decision, scratchpad, iteration),
+        lambda: url_scheme_typo_guard(decision, scratchpad, iteration),
+        lambda: protocol_relative_url_guard(decision, scratchpad, iteration),
+        lambda: tracking_param_strip_guard(decision, scratchpad, iteration),
+
         lambda: empty_action_guard(decision, scratchpad, iteration),
         lambda: sentence_as_action_guard(decision, scratchpad, iteration),
         # unknown_action_guard runs AFTER sentence_as_action so the
@@ -488,12 +511,19 @@ def run_decision_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         # Chat-category-no-delegation: single-fire nudge if the
         # orchestrator picks a specialist role on a chat turn.
         lambda: chat_category_no_delegation_guard(decision, scratchpad, iteration),
+        # Empty role-input runs AFTER chat-no-delegation so the user gets
+        # the more-actionable nudge first when both apply.
+        lambda: empty_role_input_guard(decision, scratchpad, iteration),
         lambda: field_swap_guard(decision, scratchpad, iteration),
         # Auto-rewrite shell-as-language BEFORE missing_fields_guard so
         # the rewritten language is what gets validated.
         lambda: shell_in_wrong_language_guard(decision, scratchpad, iteration),
         lambda: missing_fields_guard(decision, scratchpad, iteration),
         lambda: malformed_url_guard(decision, scratchpad, iteration),
+        # Placeholder URL block sits AFTER malformed_url so any obvious
+        # formatting issue is reported first; only well-formed URLs that
+        # happen to be templates land here.
+        lambda: placeholder_url_guard(decision, scratchpad, iteration),
         lambda: templating_placeholder_guard(decision, scratchpad, iteration),
         lambda: disabled_browser_guard(decision, scratchpad, iteration, browser_available),
         lambda: delete_new_file_guard(decision, scratchpad, iteration),
