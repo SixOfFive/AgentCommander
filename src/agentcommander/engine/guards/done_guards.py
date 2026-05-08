@@ -1294,6 +1294,14 @@ def run_done_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         over_apologetic_guard,
         dangling_promise_guard,
         unclosed_codefence_guard,
+        here_is_only_guard,
+        chatbot_signoff_guard,
+        excessive_emoji_guard,
+        model_name_leak_guard,
+        turn_marker_leak_guard,
+        repeated_paragraph_guard,
+        question_only_done_guard,
+        all_caps_shout_guard,
     )
 
     guards: list[Any] = [
