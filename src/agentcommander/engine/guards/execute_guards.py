@@ -677,6 +677,13 @@ def run_execute_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         homoglyph_guard,
         shell_history_subst_guard,
         eval_remote_string_guard,
+        repl_prompt_in_code_guard,
+        bash_dollar_prompt_guard,
+        powershell_prompt_in_code_guard,
+        sudo_in_execute_guard,
+        insecure_tls_flag_guard,
+        windows_backslash_in_python_guard,
+        shebang_mismatch_guard,
     )
 
     def _wrap_preventive(fn):
