@@ -605,6 +605,8 @@ def apply_autoconfigure(
                 "role_picks": {k: m for k, (_, m) in role_picks.items()},
                 "preserved_overrides": list(user_overrides.keys()),
                 "unset_roles": unset_roles,
+                "min_context": min_context,
+                "max_memory_gb": max_memory_gb,
             })
         except Exception:  # noqa: BLE001
             pass
