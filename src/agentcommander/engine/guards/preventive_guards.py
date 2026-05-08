@@ -138,7 +138,9 @@ def code_fence_in_arg_guard(
     rewrite — only fires when the ENTIRE field is a single fenced block.
     """
     # Different actions store the code in different fields; map each.
-    fence_fields = ("code", "input", "content")
+    # OrchestratorDecision does not have a separate `code` field — code
+    # rides on `input` for execute and `content` for write_file.
+    fence_fields = ("input", "content")
     target_actions = {"execute", "write_file", "code"}
     if (decision.action or "").lower() not in target_actions:
         return GuardVerdict(action="pass")
