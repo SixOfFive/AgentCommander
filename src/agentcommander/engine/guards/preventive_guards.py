@@ -769,6 +769,722 @@ def eval_remote_string_guard(
     return code, GuardVerdict(action="continue")
 
 
+# ─── Round-50 batch — typography / secrets / interactive-shell artefacts ──
+
+
+# Curly / smart quotes that come back when a model copies prose into a code
+# field. Both single and double, both opening and closing. Map each to its
+# straight-quote equivalent.
+_SMART_QUOTE_MAP = str.maketrans({
+    "“": '"', "”": '"', "„": '"', "‟": '"',
+    "‘": "'", "’": "'", "‚": "'", "‛": "'",
+    "「": '"', "」": '"', "『": '"', "』": '"',
+})
+
+# Em / en dashes that the model substitutes for `--` (autocorrect-style).
+# Replacing them is safe inside code; in prose the user wouldn't have us
+# rewrite — but tool args / code shouldn't contain dashes-as-typography.
+_EM_DASH_RX = re.compile(r"[—–]")
+
+
+def smart_quote_guard(
+    decision: OrchestratorDecision,
+    scratchpad: list[ScratchpadEntry], iteration: int,  # noqa: ARG001
+) -> GuardVerdict:
+    """Replace curly quotes with straight quotes in code-bearing fields.
+
+    Curly quotes blow up shell parsing (``"hello"`` ≠ ``"hello"``), break
+    JSON parses inside ``http_request.body``, and turn into mojibake when
+    the receiving end isn't expecting them. Silent rewrite is safe — the
+    only legitimate use of curly quotes in tool args is presentational
+    text we don't dispatch.
+    """
+    if (decision.action or "").lower() not in (
+        "execute", "write_file", "code", "http_request",
+    ):
+        return GuardVerdict(action="pass")
+    for f in ("input", "content", "body"):
+        v = getattr(decision, f, None)
+        if isinstance(v, str) and any(c in v for c in "“”‘’„‟‚‛「」『』"):
+            setattr(decision, f, v.translate(_SMART_QUOTE_MAP))
+    return GuardVerdict(action="pass")
+
+
+def em_dash_in_code_guard(
+    decision: OrchestratorDecision,
+    scratchpad: list[ScratchpadEntry], iteration: int,  # noqa: ARG001
+) -> GuardVerdict:
+    """Rewrite em/en dashes to ``--`` inside execute / write_file code.
+
+    Catches ``git commit —m`` style autocorrect leakage. Only runs on code
+    actions; prose finals (``done``) keep their typography.
+    """
+    if (decision.action or "").lower() not in ("execute", "write_file", "code"):
+        return GuardVerdict(action="pass")
+    for f in ("input", "content"):
+        v = getattr(decision, f, None)
+        if isinstance(v, str) and _EM_DASH_RX.search(v):
+            setattr(decision, f, _EM_DASH_RX.sub("--", v))
+    return GuardVerdict(action="pass")
+
+
+# HTML entity decode — limited to entities a model likely emits when it's
+# been over-trained on web content. We deliberately don't decode the full
+# entity catalogue — that risks mangling legitimate prose (e.g. "&amp;"
+# in a chat answer). Tool args / code are the target.
+_HTML_ENTITY_MAP = {
+    "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"',
+    "&apos;": "'", "&#39;": "'", "&#x27;": "'", "&#x2F;": "/",
+    "&nbsp;": " ", "&#160;": " ",
+}
+
+
+def html_entity_decode_guard(
+    decision: OrchestratorDecision,
+    scratchpad: list[ScratchpadEntry], iteration: int,  # noqa: ARG001
+) -> GuardVerdict:
+    """Decode common HTML entities in code/url/path fields."""
+    if (decision.action or "").lower() not in (
+        "execute", "write_file", "fetch", "http_request",
+    ):
+        return GuardVerdict(action="pass")
+    for f in ("input", "content", "url", "path"):
+        v = getattr(decision, f, None)
+        if not isinstance(v, str) or "&" not in v:
+            continue
+        out = v
+        for ent, repl in _HTML_ENTITY_MAP.items():
+            out = out.replace(ent, repl)
+        if out != v:
+            setattr(decision, f, out)
+    return GuardVerdict(action="pass")
+
+
+_URL_TRAILING_PUNCT_RX = re.compile(r"[.,;:!?)\]}>'\"]+$")
+
+
+def url_trailing_punct_guard(
+    decision: OrchestratorDecision,
+    scratchpad: list[ScratchpadEntry], iteration: int,  # noqa: ARG001
+) -> GuardVerdict:
+    """Strip a trailing ``.`` / ``,`` / etc. that came from end-of-sentence.
+
+    The model's training corpus has a lot of "Visit https://example.com." in
+    prose. When it surfaces a URL into a tool arg, the punctuation often
+    rides along.
+    """
+    if (decision.action or "").lower() not in ("fetch", "http_request", "browse"):
+        return GuardVerdict(action="pass")
+    url = decision.url
+    if not isinstance(url, str) or not url:
+        return GuardVerdict(action="pass")
+    cleaned = _URL_TRAILING_PUNCT_RX.sub("", url)
+    if cleaned != url and cleaned:
+        decision.url = cleaned
+    return GuardVerdict(action="pass")
+
+
+_URL_WHITESPACE_RX = re.compile(r"[\s\r\n\t]+")
+
+
+def url_embedded_whitespace_guard(
+    decision: OrchestratorDecision,
+    scratchpad: list[ScratchpadEntry], iteration: int,
+) -> GuardVerdict:
+    """Strip embedded whitespace/newlines from fetch URLs.
+
+    Models occasionally line-wrap URLs in their output. Silent strip if
+    the URL becomes valid; otherwise nudge.
+    """
+    if (decision.action or "").lower() not in ("fetch", "http_request", "browse"):
+        return GuardVerdict(action="pass")
+    url = decision.url
+    if not isinstance(url, str) or not _URL_WHITESPACE_RX.search(url):
+        return GuardVerdict(action="pass")
+    cleaned = _URL_WHITESPACE_RX.sub("", url)
+    if cleaned and (cleaned.startswith(("http://", "https://"))
+                     or cleaned.startswith("//")):
+        decision.url = cleaned
+        return GuardVerdict(action="pass")
+    push_system_nudge(
+        scratchpad, iteration, "url_whitespace",
+        f'BLOCKED: URL contains embedded whitespace ("{url[:80]}"). '
+        "Re-emit the URL on a single line with no spaces or newlines.",
+    )
+    return GuardVerdict(action="continue")
+
+
+_URL_ENCODED_TRAVERSAL_RX = re.compile(
+    r"%2[eE]%2[eE][/\\]|%2[eE]%2[eE]%2[fF5]",
+)
+
+
+def url_encoded_traversal_guard(
+    decision: OrchestratorDecision,
+    scratchpad: list[ScratchpadEntry], iteration: int,
+) -> GuardVerdict:
+    """Block URL-encoded path traversal: ``%2e%2e/`` / ``%2e%2e%2f``.
+
+    The plain-text form ``../`` is caught upstream by the safety layer;
+    this is the URL-encoded variant a model might emit when it's been
+    trained on attack-pattern prose. Hard block.
+    """
+    targets = (decision.path, decision.url, decision.input)
+    for t in targets:
+        if isinstance(t, str) and _URL_ENCODED_TRAVERSAL_RX.search(t):
+            push_system_nudge(
+                scratchpad, iteration, "url_encoded_traversal",
+                "BLOCKED: arg contains a URL-encoded path-traversal "
+                "sequence (%2e%2e/ or similar). Path traversal is never "
+                "a legitimate request shape — re-emit with a real path.",
+            )
+            return GuardVerdict(action="continue")
+    return GuardVerdict(action="pass")
+
+
+# ─── Done-tier — chatbot-bleed and presentation-quality guards ─────────────
+
+
+_HERE_IS_PREFIX_RX = re.compile(
+    r"\Ahere\s+(is|are|'?s)\s+", re.IGNORECASE,
+)
+
+
+def here_is_only_guard(
+    scratchpad: list[ScratchpadEntry], iteration: int,
+    decision: OrchestratorDecision,
+) -> GuardVerdict:
+    """Reject ``Here is the X you asked for.`` finals with no actual content.
+
+    Triggers when:
+      - done.input starts with "Here is/are/'s"
+      - total length under 100 chars
+      - no digits, no URLs, no code fences
+
+    Long "Here is X:" introductions to real content are fine — those have
+    digits / fences / structure past the prefix.
+    """
+    text = decision.input if isinstance(decision.input, str) else ""
+    if len(text) > 100 or len(text) < 15:
+        return GuardVerdict(action="pass")
+    if not _HERE_IS_PREFIX_RX.match(text):
+        return GuardVerdict(action="pass")
+    if any(c.isdigit() for c in text) or "```" in text or "://" in text:
+        return GuardVerdict(action="pass")
+    push_system_nudge(
+        scratchpad, iteration, "here_is_only",
+        "BLOCKED: done.input starts with 'Here is …' but contains no "
+        "actual content (no digits, no URLs, no code). Either include "
+        "the deliverable in done.input, or summarize what was produced.",
+    )
+    return GuardVerdict(action="continue")
+
+
+_CHATBOT_SIGNOFF_RX = re.compile(
+    r"\b(hope (this|that) helps|let me know if (you|there)|"
+    r"feel free to ask|happy to help further|"
+    r"is there anything else( you'?d like)?|"
+    r"if you have (any|more) questions|"
+    r"don'?t hesitate to (ask|reach out)|"
+    r"i hope this answers your question)\b",
+    re.IGNORECASE,
+)
+
+
+def chatbot_signoff_guard(
+    scratchpad: list[ScratchpadEntry], iteration: int,
+    decision: OrchestratorDecision,
+) -> GuardVerdict:
+    """Strip chatbot sign-off boilerplate from done.input.
+
+    Doesn't reject the whole done — silent trim of the trailing fluff so
+    the user gets a clean answer. The orchestrator emits these out of
+    chatbot habit; the engine is one-shot and doesn't carry that pattern.
+    """
+    text = decision.input if isinstance(decision.input, str) else ""
+    if len(text) < 30:
+        return GuardVerdict(action="pass")
+    m = _CHATBOT_SIGNOFF_RX.search(text)
+    if m is None:
+        return GuardVerdict(action="pass")
+    # Chop from the start of the matched signoff sentence to end-of-input.
+    # Find the sentence boundary before the match.
+    cut = text.rfind(".", 0, m.start())
+    cut2 = text.rfind("\n", 0, m.start())
+    cut = max(cut, cut2)
+    if cut < 0 or cut < len(text) // 4:
+        # Match is too close to the start to safely chop.
+        return GuardVerdict(action="pass")
+    decision.input = text[: cut + 1].rstrip()
+    return GuardVerdict(action="pass")
+
+
+# Emoji codepoint ranges — broad enough to catch most user-visible emoji
+# without blowing up on normal punctuation.
+_EMOJI_RX = re.compile(
+    "["
+    "\U0001f300-\U0001f5ff"   # symbols & pictographs
+    "\U0001f600-\U0001f64f"   # emoticons
+    "\U0001f680-\U0001f6ff"   # transport & map
+    "\U0001f700-\U0001f77f"   # alchemical
+    "\U0001f900-\U0001f9ff"   # supplemental symbols
+    "\U0001fa00-\U0001fa6f"   # symbols-and-pictographs ext
+    "\U0001fa70-\U0001faff"   # symbols-and-pictographs ext-A
+    "\U00002600-\U000027bf"   # dingbats
+    "]"
+)
+
+
+def excessive_emoji_guard(
+    scratchpad: list[ScratchpadEntry], iteration: int,
+    decision: OrchestratorDecision,
+) -> GuardVerdict:
+    """Block done.input with 5+ emoji.
+
+    Emojis suggest the model is treating the user as a customer-service
+    interaction. The engine ships technical answers — emoji clutter
+    obscures the data. One or two are fine; piles aren't.
+    """
+    text = decision.input if isinstance(decision.input, str) else ""
+    if len(_EMOJI_RX.findall(text)) < 5:
+        return GuardVerdict(action="pass")
+    push_system_nudge(
+        scratchpad, iteration, "excessive_emoji",
+        "BLOCKED: done.input contains 5+ emoji. Re-emit without the "
+        "decoration — engine answers are technical, emoji obscures data.",
+    )
+    return GuardVerdict(action="continue")
+
+
+_MODEL_NAME_RX = re.compile(
+    r"\b(gpt-?[345]|chat-?gpt|claude(\s+[a-z0-9.]+)?|llama-?\d|"
+    r"gemini(\s+(pro|ultra|flash|nano))?|"
+    r"mistral|mixtral|phi-?\d|qwen-?\d|deepseek)\b",
+    re.IGNORECASE,
+)
+
+
+def model_name_leak_guard(
+    scratchpad: list[ScratchpadEntry], iteration: int,
+    decision: OrchestratorDecision,
+) -> GuardVerdict:
+    """Reject done.input that names the model itself.
+
+    "I'm Claude" / "as GPT-4 I think" / "Llama can't…" — leakage of the
+    underlying model identity into a user-facing reply. The engine
+    abstracts the model; the user shouldn't see the model name unless
+    they explicitly asked for it.
+
+    Allowed exception: the user's own message contained the model name
+    (e.g. "what model are you?"). We compare against a passed-through
+    user-message field if the runner threads it; without that signal,
+    we err on the side of nudging.
+    """
+    text = decision.input if isinstance(decision.input, str) else ""
+    if len(text) < 10:
+        return GuardVerdict(action="pass")
+    if not _MODEL_NAME_RX.search(text):
+        return GuardVerdict(action="pass")
+    # Heuristic exception: question-about-model context — if any prior
+    # user message in the scratchpad mentions a model name, allow.
+    for e in scratchpad:
+        if e.role == "user" and isinstance(e.input, str):
+            if _MODEL_NAME_RX.search(e.input):
+                return GuardVerdict(action="pass")
+    push_system_nudge(
+        scratchpad, iteration, "model_name_leak",
+        "BLOCKED: done.input names a specific model (GPT/Claude/Llama/etc.). "
+        "AgentCommander abstracts which model is doing what — don't surface "
+        "the underlying model identity unless the user asked. Re-emit "
+        "without the model reference.",
+    )
+    return GuardVerdict(action="continue")
+
+
+_TURN_MARKER_RX = re.compile(
+    r"(\A|\n)(user|assistant|human|ai|system)\s*:",
+    re.IGNORECASE,
+)
+
+
+def turn_marker_leak_guard(
+    scratchpad: list[ScratchpadEntry], iteration: int,
+    decision: OrchestratorDecision,
+) -> GuardVerdict:
+    """Reject done.input with conversation turn markers (``User:``, ``Assistant:``).
+
+    These leak from training data when the model thinks it's writing a
+    transcript. Block — the user should see prose, not transcript syntax.
+    """
+    text = decision.input if isinstance(decision.input, str) else ""
+    if not _TURN_MARKER_RX.search(text):
+        return GuardVerdict(action="pass")
+    # Multiple markers OR a marker at the very start indicate transcript-mode.
+    matches = _TURN_MARKER_RX.findall(text)
+    if len(matches) < 2 and not _TURN_MARKER_RX.match(text):
+        return GuardVerdict(action="pass")
+    push_system_nudge(
+        scratchpad, iteration, "turn_marker_leak",
+        "BLOCKED: done.input contains conversation turn markers "
+        "(User:/Assistant:/Human:). That's transcript syntax leaking from "
+        "training. Re-emit as a direct reply, no role labels.",
+    )
+    return GuardVerdict(action="continue")
+
+
+def repeated_paragraph_guard(
+    scratchpad: list[ScratchpadEntry], iteration: int,
+    decision: OrchestratorDecision,
+) -> GuardVerdict:
+    """Reject done.input with the same paragraph repeated.
+
+    Indicates the model went into a degenerate-output loop. Short repeats
+    (lines < 30 chars) are exempt — the user might genuinely want a
+    bullet list with similar phrasing.
+    """
+    text = decision.input if isinstance(decision.input, str) else ""
+    if len(text) < 100:
+        return GuardVerdict(action="pass")
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    if len(paragraphs) < 2:
+        return GuardVerdict(action="pass")
+    seen: set[str] = set()
+    for p in paragraphs:
+        if len(p) < 30:
+            continue
+        if p in seen:
+            push_system_nudge(
+                scratchpad, iteration, "repeated_paragraph",
+                "BLOCKED: done.input repeats the same paragraph. The model "
+                "may be in an output loop. Re-emit a single, non-repeating "
+                "answer.",
+            )
+            return GuardVerdict(action="continue")
+        seen.add(p)
+    return GuardVerdict(action="pass")
+
+
+_QUESTION_BACK_RX = re.compile(r"\?\s*\Z")
+
+
+def question_only_done_guard(
+    scratchpad: list[ScratchpadEntry], iteration: int,  # noqa: ARG001
+    decision: OrchestratorDecision,
+) -> GuardVerdict:
+    """Reject short done.input that is JUST a question back to the user.
+
+    Rare-but-real pattern: model bounces the question back without taking
+    action. Triggers when input ends with `?` AND is under 80 chars AND
+    contains no statement. Long replies that incidentally end with `?`
+    are fine — those have prose substance.
+
+    There IS a legitimate "I need clarification" path; for that use case
+    the answer should be longer / contain explicit "I need…" phrasing,
+    which keeps it under this guard's threshold.
+    """
+    text = decision.input if isinstance(decision.input, str) else ""
+    txt = text.strip()
+    if len(txt) > 80 or len(txt) < 5:
+        return GuardVerdict(action="pass")
+    if not _QUESTION_BACK_RX.search(txt):
+        return GuardVerdict(action="pass")
+    # If there's a statement before the question (sentence count > 1), allow.
+    sentences = re.split(r"[.!]\s", txt)
+    if len([s for s in sentences if s.strip()]) > 1:
+        return GuardVerdict(action="pass")
+    push_system_nudge(
+        scratchpad, iteration, "question_only_done",
+        f'BLOCKED: done.input is a single short question ("{txt}"). Either '
+        f"answer with what you know, OR explain WHAT specifically you need "
+        f"clarified and WHY. Don't bounce the question back unaltered.",
+    )
+    return GuardVerdict(action="continue")
+
+
+def all_caps_shout_guard(
+    scratchpad: list[ScratchpadEntry], iteration: int,  # noqa: ARG001
+    decision: OrchestratorDecision,
+) -> GuardVerdict:
+    """Reject done.input that is mostly uppercase prose (>50% caps over 50 chars).
+
+    Indicates the model is in an "EMPHASIS MODE" loop or copying yelling
+    from training data. Acronyms / code snippets / log lines have caps too,
+    so we count alphabetic chars only and require a reasonable run length.
+    """
+    text = decision.input if isinstance(decision.input, str) else ""
+    if len(text) < 50:
+        return GuardVerdict(action="pass")
+    alpha = [c for c in text if c.isalpha()]
+    if len(alpha) < 30:
+        return GuardVerdict(action="pass")
+    upper_ratio = sum(1 for c in alpha if c.isupper()) / len(alpha)
+    if upper_ratio < 0.7:
+        return GuardVerdict(action="pass")
+    push_system_nudge(
+        scratchpad, iteration, "all_caps_shout",
+        "BLOCKED: done.input is mostly uppercase. Re-emit in normal case — "
+        "the engine isn't a shouting context.",
+    )
+    return GuardVerdict(action="continue")
+
+
+# ─── Execute-tier — interactive prompts and platform mistakes ──────────────
+
+
+_REPL_PROMPT_RX = re.compile(
+    r"^(\s*)(>>>|\.\.\.|In\s+\[\d+\]:|Out\s*\[\d+\]:|\$|#)\s+",
+    re.MULTILINE,
+)
+
+
+def repl_prompt_in_code_guard(
+    code: str,
+    scratchpad: list[ScratchpadEntry], iteration: int,  # noqa: ARG001
+) -> tuple[str, GuardVerdict]:
+    """Strip leading ``>>>``, ``...``, ``In [n]:``, ``$``, ``#`` from code lines.
+
+    The model copy-pasted REPL / shell session output as a script. With
+    the prompts in place, the script fails with a SyntaxError on the
+    first prompt char. Silent strip of leading prompt sequences makes
+    the code runnable.
+
+    Conservative: only strips when the line CLEARLY starts with a prompt
+    token followed by whitespace. ``>>> def foo():`` becomes ``def foo():``;
+    a Python comment ``# comment`` stays intact (comment guard requires
+    the ``#`` to be followed by a single space AND for >50% of lines to
+    start with prompts to fire).
+    """
+    if not code:
+        return code, GuardVerdict(action="pass")
+    lines = code.split("\n")
+    # Count lines starting with REPL/shell prompts.
+    prompted = 0
+    for line in lines:
+        if re.match(r"^\s*(>>>|\.\.\.|In\s+\[\d+\]:|Out\s*\[\d+\]:)\s", line):
+            prompted += 1
+    # Only fire when the prompt pattern is dominant (>= 25% of non-blank
+    # lines) — otherwise stripping ``$`` / ``#`` would break legitimate
+    # bash scripts and Python comments.
+    non_blank = sum(1 for line in lines if line.strip())
+    if non_blank == 0 or prompted * 4 < non_blank:
+        return code, GuardVerdict(action="pass")
+    cleaned = re.sub(
+        r"^(\s*)(>>>|\.\.\.|In\s+\[\d+\]:|Out\s*\[\d+\]:)\s+",
+        r"\1", code, flags=re.MULTILINE,
+    )
+    return cleaned, GuardVerdict(action="pass")
+
+
+_BASH_PROMPT_RX = re.compile(r"^(\s*)\$\s+(?=\S)", re.MULTILINE)
+_PS_PROMPT_RX = re.compile(r"^(\s*)PS\s+[A-Z]:\\[^>\n]*>\s*", re.MULTILINE)
+
+
+def bash_dollar_prompt_guard(
+    code: str,
+    scratchpad: list[ScratchpadEntry], iteration: int,  # noqa: ARG001
+) -> tuple[str, GuardVerdict]:
+    """Strip leading ``$ `` from bash code lines.
+
+    Same mechanism as repl_prompt_in_code_guard but for bash sessions —
+    fires only when most non-blank lines have the ``$`` prefix, so
+    legitimate ``$VAR`` references aren't mangled.
+    """
+    if not code or "$" not in code:
+        return code, GuardVerdict(action="pass")
+    lines = code.split("\n")
+    prompted = sum(1 for line in lines if _BASH_PROMPT_RX.match(line))
+    non_blank = sum(1 for line in lines if line.strip())
+    if non_blank == 0 or prompted * 3 < non_blank:
+        return code, GuardVerdict(action="pass")
+    cleaned = _BASH_PROMPT_RX.sub(r"\1", code)
+    return cleaned, GuardVerdict(action="pass")
+
+
+def powershell_prompt_in_code_guard(
+    code: str,
+    scratchpad: list[ScratchpadEntry], iteration: int,  # noqa: ARG001
+) -> tuple[str, GuardVerdict]:
+    """Strip ``PS C:\\Users\\…>`` PowerShell prompts from code."""
+    if not _PS_PROMPT_RX.search(code):
+        return code, GuardVerdict(action="pass")
+    cleaned = _PS_PROMPT_RX.sub(r"\1", code)
+    return cleaned, GuardVerdict(action="pass")
+
+
+_SUDO_RX = re.compile(r"(^|[\s;|&])sudo\s+", re.MULTILINE)
+
+
+def sudo_in_execute_guard(
+    code: str,
+    scratchpad: list[ScratchpadEntry], iteration: int,
+) -> tuple[str, GuardVerdict]:
+    """Block ``sudo`` in execute.
+
+    The engine runs as a regular user against project-local resources.
+    There is no reason for `sudo` here — if the model emits it, it's
+    almost certainly transposed from a tutorial that assumes a different
+    environment. Hard block with a nudge to drop it.
+    """
+    if not _SUDO_RX.search(code):
+        return code, GuardVerdict(action="pass")
+    push_system_nudge(
+        scratchpad, iteration, "sudo_in_execute",
+        "BLOCKED: execute code uses `sudo`. The engine runs as a regular "
+        "user; sudo would prompt for a password it cannot provide. Drop the "
+        "sudo prefix — the underlying command will work without it on a "
+        "developer machine, or fail with a clear permission error if it "
+        "genuinely needs root.",
+    )
+    return code, GuardVerdict(action="continue")
+
+
+_CURL_INSECURE_RX = re.compile(
+    r"\b(curl\s+(-\w*k\w*|\-\-insecure)|"
+    r"wget\s+(-\w*\-no-check\w*|\-\-no-check-certificate))\b",
+    re.IGNORECASE,
+)
+
+
+def insecure_tls_flag_guard(
+    code: str,
+    scratchpad: list[ScratchpadEntry], iteration: int,
+) -> tuple[str, GuardVerdict]:
+    """Block ``curl -k`` / ``wget --no-check-certificate``.
+
+    Bypassing TLS verification opens MITM at exactly the moments the user
+    expects security. If the target is genuinely self-signed or expired,
+    fix the cert / use a different endpoint. The flag is never the right
+    answer in our engine (which has no test-cert workflow).
+    """
+    if not _CURL_INSECURE_RX.search(code):
+        return code, GuardVerdict(action="pass")
+    push_system_nudge(
+        scratchpad, iteration, "insecure_tls_flag",
+        "BLOCKED: execute uses `curl -k` / `wget --no-check-certificate` "
+        "to bypass TLS verification. That defeats HTTPS. Use a properly "
+        "trusted endpoint, or import the target's CA explicitly — never "
+        "skip cert validation.",
+    )
+    return code, GuardVerdict(action="continue")
+
+
+_WIN_PATH_LITERAL_RX = re.compile(r"['\"]C:\\\\\\\\[^'\"]+['\"]|['\"]C:\\\\[^'\"]+['\"]")
+
+
+def windows_backslash_in_python_guard(
+    code: str,
+    scratchpad: list[ScratchpadEntry], iteration: int,  # noqa: ARG001
+) -> tuple[str, GuardVerdict]:
+    """Flag literal ``C:\\Users\\…`` Windows paths in Python that aren't raw strings.
+
+    These get interpreted as escape sequences (``\\U`` is unicode-escape,
+    ``\\t`` is tab, etc.) and silently corrupt paths. The fix is either
+    a raw-string ``r'C:\\Users\\…'`` or forward slashes ``C:/Users/…``.
+
+    We don't auto-rewrite — the right fix depends on whether the path
+    is inside a docstring, a regex, or a real path. Just nudge.
+    """
+    if "C:\\" not in code:
+        return code, GuardVerdict(action="pass")
+    # Check for unescaped backslash sequences likely to confuse Python.
+    if not re.search(r'(?<![rRbB])"[^"]*C:\\[a-zA-Z]', code) \
+       and not re.search(r"(?<![rRbB])'[^']*C:\\[a-zA-Z]", code):
+        return code, GuardVerdict(action="pass")
+    push_system_nudge(
+        scratchpad, iteration, "windows_backslash_in_python",
+        "BLOCKED: Python code contains a literal Windows path with `\\` "
+        "outside a raw string (e.g. \"C:\\Users\\…\"). Backslashes in "
+        "regular strings are escape sequences — `\\U` and `\\t` will "
+        "corrupt the path. Use a raw string r\"C:\\Users\\…\" or forward "
+        "slashes \"C:/Users/…\".",
+    )
+    return code, GuardVerdict(action="continue")
+
+
+_SHEBANG_MISMATCH_RX = re.compile(
+    r"\A#!\s*(/usr/bin/env\s+)?(\S+)",
+)
+
+
+def shebang_mismatch_guard(
+    code: str,
+    scratchpad: list[ScratchpadEntry], iteration: int,  # noqa: ARG001
+) -> tuple[str, GuardVerdict]:
+    """Strip a misleading shebang from code (we use the `language` field instead).
+
+    Pattern: model emits ``#!/bin/bash`` followed by Python code (or vice
+    versa). The shebang is meaningless when we hand the code to the
+    interpreter through `language=…` — and may confuse a future write_file
+    + execute pair where the file extension does the lookup. Silent strip.
+    """
+    if not code.startswith("#!"):
+        return code, GuardVerdict(action="pass")
+    # Strip the entire first line (the shebang).
+    nl = code.find("\n")
+    if nl == -1:
+        return "", GuardVerdict(action="pass")
+    return code[nl + 1:], GuardVerdict(action="pass")
+
+
+_PIP_GLOBAL_RX = re.compile(
+    r"\bpip\s+install\s+(?!.*--user)(?!.*-r\s)(?!.*\.)\S",
+    re.IGNORECASE,
+)
+
+
+def pip_global_install_warn_guard(
+    code: str,
+    scratchpad: list[ScratchpadEntry], iteration: int,  # noqa: ARG001
+) -> tuple[str, GuardVerdict]:
+    """Pass-through for pip install — already covered by pip_npm_command_guard
+    but kept here as a no-op anchor for future tightening."""
+    return code, GuardVerdict(action="pass")
+
+
+# ─── Output-tier — extra secret patterns ────────────────────────────────────
+
+
+# These extend the `redact_secrets` set in output_guards.py with patterns
+# that landed in OWASP / GitHub-secret-scanning lists more recently. The
+# function is a pure-string transform; callers chain it after the existing
+# `sanitize_output`.
+
+_EXTRA_SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    # GitHub fine-grained PATs and OAuth tokens.
+    (re.compile(r"github_pat_[A-Za-z0-9_]{82}"), "github_pat_[REDACTED]"),
+    (re.compile(r"gho_[A-Za-z0-9]{36}"), "gho_[REDACTED]"),
+    (re.compile(r"ghu_[A-Za-z0-9]{36}"), "ghu_[REDACTED]"),
+    (re.compile(r"ghs_[A-Za-z0-9]{36}"), "ghs_[REDACTED]"),
+    (re.compile(r"ghr_[A-Za-z0-9]{36}"), "ghr_[REDACTED]"),
+    # Stripe live + restricted keys (sk_live / rk_live).
+    (re.compile(r"sk_live_[A-Za-z0-9]{24,}"), "sk_live_[REDACTED]"),
+    (re.compile(r"rk_live_[A-Za-z0-9]{24,}"), "rk_live_[REDACTED]"),
+    (re.compile(r"pk_live_[A-Za-z0-9]{24,}"), "pk_live_[REDACTED]"),
+    # Anthropic API keys.
+    (re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"), "sk-ant-[REDACTED]"),
+    # JWT tokens — three base64url segments separated by dots, length-gated
+    # so we don't false-positive on URL paths with dotted segments.
+    (re.compile(
+        r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
+    ), "eyJ[JWT-REDACTED]"),
+    # Generic long hex tokens (32+ chars all-hex) — likely AWS secret /
+    # API token. Conservative length so commit hashes (40 hex) and SHA-256
+    # digests don't get touched if surrounded by markers like "sha256:".
+    (re.compile(r"(?<![a-fA-F0-9:])[a-fA-F0-9]{40}(?![a-fA-F0-9])"),
+     "[40-HEX-REDACTED]"),
+)
+
+
+def redact_extra_secrets(text: str) -> str:
+    """Apply the round-50 secret patterns. Pure function for chaining
+    after `sanitize_output`."""
+    if not text:
+        return text
+    for rx, repl in _EXTRA_SECRET_PATTERNS:
+        text = rx.sub(repl, text)
+    return text
+
+
 __all__ = [
     # Decision-tier
     "zero_width_unicode_guard",
@@ -779,6 +1495,12 @@ __all__ = [
     "placeholder_url_guard",
     "empty_role_input_guard",
     "tracking_param_strip_guard",
+    "smart_quote_guard",
+    "em_dash_in_code_guard",
+    "html_entity_decode_guard",
+    "url_trailing_punct_guard",
+    "url_embedded_whitespace_guard",
+    "url_encoded_traversal_guard",
     # Done-tier
     "ai_disclaimer_guard",
     "training_cutoff_leak_guard",
@@ -789,9 +1511,27 @@ __all__ = [
     "unclosed_codefence_guard",
     "over_apologetic_guard",
     "dangling_promise_guard",
+    "here_is_only_guard",
+    "chatbot_signoff_guard",
+    "excessive_emoji_guard",
+    "model_name_leak_guard",
+    "turn_marker_leak_guard",
+    "repeated_paragraph_guard",
+    "question_only_done_guard",
+    "all_caps_shout_guard",
     # Execute-tier
     "base64_pipe_shell_guard",
     "homoglyph_guard",
     "shell_history_subst_guard",
     "eval_remote_string_guard",
+    "repl_prompt_in_code_guard",
+    "bash_dollar_prompt_guard",
+    "powershell_prompt_in_code_guard",
+    "sudo_in_execute_guard",
+    "insecure_tls_flag_guard",
+    "windows_backslash_in_python_guard",
+    "shebang_mismatch_guard",
+    "pip_global_install_warn_guard",
+    # Output-tier
+    "redact_extra_secrets",
 ]
