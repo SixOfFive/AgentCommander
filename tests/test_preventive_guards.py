@@ -59,14 +59,14 @@ class TestZeroWidthUnicodeGuard(unittest.TestCase):
 
 class TestCodeFenceInArgGuard(unittest.TestCase):
 
-    def test_unwraps_python_fence_from_code(self) -> None:
+    def test_unwraps_python_fence_from_input(self) -> None:
         from agentcommander.engine.guards.preventive_guards import (
             code_fence_in_arg_guard,
         )
         d = _mk_decision(action="execute", language="python",
-                          code="```python\nprint('hi')\n```")
+                          input="```python\nprint('hi')\n```")
         code_fence_in_arg_guard(d, [], 1)
-        self.assertEqual(d.code, "print('hi')")
+        self.assertEqual(d.input, "print('hi')")
 
     def test_unwraps_bare_fence_from_input(self) -> None:
         from agentcommander.engine.guards.preventive_guards import (
