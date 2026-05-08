@@ -1072,6 +1072,7 @@ def cmd_autoconfig(ctx: CommandContext, args: list[str]) -> None:
         get_role_assignment_fn=get_role_assignment,
         audit_fn=audit,
         min_context=min_context,
+        max_memory_gb=max_memory_gb,
     )
 
     if applied.skipped_reason:
