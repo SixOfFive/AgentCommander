@@ -617,6 +617,42 @@ def _parse_token_count(s: str) -> int | None:
     return n
 
 
+_MAX_MEMORY_GB = 4096.0  # 4 TB — anything beyond is almost certainly a typo;
+# the largest single-model VRAM budgets today (multi-H200 boxes) sit around
+# 1-2 TB, so 4 TB gives generous headroom while still rejecting "12000gb"-style
+# fat-finger entries.
+
+
+def _parse_memory_gb(s: str) -> float | None:
+    """Parse strings like '12gb', '16GB', '6.5g', '8' into a float GB budget.
+
+    Suffixes ``gb`` / ``g`` are accepted (case-insensitive); a bare number is
+    interpreted as gigabytes too. ``tb`` / ``t`` multiplies by 1024 (binary
+    convention — matches how the catalog reports ``estimatedVramGb``).
+
+    Returns None when:
+      - input can't be parsed
+      - value is not strictly positive
+      - value exceeds ``_MAX_MEMORY_GB``
+    """
+    if not s:
+        return None
+    raw = s.strip().lower()
+    mult = 1.0
+    for suffix, m in (("tb", 1024.0), ("gb", 1.0), ("t", 1024.0), ("g", 1.0)):
+        if raw.endswith(suffix):
+            mult = m
+            raw = raw[:-len(suffix)]
+            break
+    try:
+        n = float(raw) * mult
+    except ValueError:
+        return None
+    if n <= 0 or n > _MAX_MEMORY_GB:
+        return None
+    return n
+
+
 def _humanize_tokens_short(n: int | None) -> str:
     """Compact display: 4096 → '4096', 32768 → '32k', 131072 → '128k'."""
     if n is None or n <= 0:
