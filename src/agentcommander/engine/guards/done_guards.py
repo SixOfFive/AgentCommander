@@ -1278,11 +1278,40 @@ def run_done_guards(ctx: dict[str, Any]) -> dict[str, Any]:
     decision: OrchestratorDecision = ctx["decision"]
     max_iter = max_iter_ref[0]
 
+    # Preventive done-guards (round-49 batch). Most run BEFORE the legacy
+    # guards because they catch generic-shape problems (AI disclaimer,
+    # template placeholders, fake citations). Silent rewrites
+    # (unclosed_codefence) run last so the legacy guards see the unfixed
+    # text first and can detect content-quality issues; the rewrite then
+    # cleans up rendering before the final ship.
+    from agentcommander.engine.guards.preventive_guards import (
+        ai_disclaimer_guard,
+        training_cutoff_leak_guard,
+        unfilled_template_guard,
+        fake_citation_guard,
+        stale_year_guard,
+        hedge_only_guard,
+        over_apologetic_guard,
+        dangling_promise_guard,
+        unclosed_codefence_guard,
+    )
+
     guards: list[Any] = [
         # prompt_template_leak runs first because if the done.input is
         # obviously leaked scaffolding, none of the downstream guards
         # need to look at it — they'd just rubber-stamp meaningless text.
         lambda: prompt_template_leak_guard(decision, scratchpad, iteration, max_iter),
+        # Generic AI-incapacity disclaimers — block before the more-specific
+        # apology/refuse guards run, since they share text and the named
+        # nudge is more actionable.
+        lambda: ai_disclaimer_guard(scratchpad, iteration, decision),
+        lambda: training_cutoff_leak_guard(scratchpad, iteration, decision),
+        lambda: unfilled_template_guard(scratchpad, iteration, decision),
+        lambda: fake_citation_guard(scratchpad, iteration, decision),
+        lambda: stale_year_guard(scratchpad, iteration, decision),
+        lambda: hedge_only_guard(scratchpad, iteration, decision),
+        lambda: over_apologetic_guard(scratchpad, iteration, decision),
+        lambda: dangling_promise_guard(scratchpad, iteration, decision),
         # Live-data forced-fetch: when the user is asking about weather /
         # current time / today's news / stock price etc., reject `done`
         # until the orchestrator has actually fetched something. Without
