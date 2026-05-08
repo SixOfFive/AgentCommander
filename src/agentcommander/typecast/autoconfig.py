@@ -489,6 +489,7 @@ def apply_autoconfigure(
     get_role_assignment_fn,
     audit_fn=None,
     min_context: int = 0,
+    max_memory_gb: float = 0.0,
 ) -> AutoconfigApplied:
     """Run TypeCast best-fit per role and return an in-memory map. Does NOT write the DB.
 
