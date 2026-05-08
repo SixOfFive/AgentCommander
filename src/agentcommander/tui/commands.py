@@ -2270,6 +2270,7 @@ def _build_registry() -> dict[str, SlashCommand]:
             handler=cmd_autoconfig,
             usage="/autoconfig                            # default in-memory autoconfig\n"
                   "/autoconfig minctx <N>                 # filter by ctx + persist picks\n"
+                  "/autoconfig memory <budget>            # filter by VRAM (e.g. memory 12gb)\n"
                   "/autoconfig ban <model_id>             # exclude a model + re-run\n"
                   "/autoconfig unban <model_id>           # re-allow a model + re-run\n"
                   "/autoconfig bans                       # list banned models\n"
