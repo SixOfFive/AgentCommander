@@ -558,7 +558,9 @@ def apply_autoconfigure(
             user_overrides[role.value] = existing["model"]
             continue
         best, best_score = _best_pick_for_role(
-            role, candidates, min_context=min_context,
+            role, candidates,
+            min_context=min_context,
+            max_memory_gb=max_memory_gb,
         )
         assigned = False
         if best is not None:
