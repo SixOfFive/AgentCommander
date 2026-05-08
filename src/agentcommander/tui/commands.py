@@ -992,7 +992,12 @@ def cmd_autoconfig(ctx: CommandContext, args: list[str]) -> None:
         args = args[1:]
 
     # Parse minctx N (legacy: --mincontext / --min-context still accepted)
+    # and memory <budget>. Both are filters layered on top of the catalog
+    # threshold cascade — they prune candidates BEFORE scoring, so the
+    # picker still chooses the best fit among models that satisfy the
+    # constraints. Both are independent and may be combined.
     min_context = 0
+    max_memory_gb = 0.0
     i = 0
     while i < len(args):
         a = args[i]
@@ -1013,9 +1018,26 @@ def cmd_autoconfig(ctx: CommandContext, args: list[str]) -> None:
             min_context = parsed
             i += 2
             continue
+        if a in ("memory", "--memory", "mem", "--mem"):
+            if i + 1 >= len(args):
+                render_system_line(
+                    "usage: /autoconfig memory <budget>   "
+                    "(e.g. 12gb, 16GB, 6.5g — bare number is interpreted as GB)"
+                )
+                return
+            parsed_mem = _parse_memory_gb(args[i + 1])
+            if parsed_mem is None:
+                render_system_line(
+                    f'could not parse memory budget: "{args[i + 1]}"  '
+                    "(try 12gb, 16GB, 6.5g)"
+                )
+                return
+            max_memory_gb = parsed_mem
+            i += 2
+            continue
         render_system_line(f"unknown argument to /autoconfig: {a}")
         render_system_line(
-            "usage: /autoconfig [minctx <N>]   |   /autoconfig clear"
+            "usage: /autoconfig [minctx <N>] [memory <budget>]   |   /autoconfig clear"
         )
         return
 
