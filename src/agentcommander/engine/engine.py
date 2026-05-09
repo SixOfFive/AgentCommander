@@ -400,9 +400,38 @@ class PipelineRun:
             audit_fn=audit,
         )
         if result is None:
+            # Sliding-window fallback: when the summarizer is unassigned
+            # or errors, falling back to "keep originals" leaves us above
+            # the budget — the next role call will hit the provider's
+            # truncation or blow num_ctx outright. Drop the oldest
+            # entries from the in-memory scratchpad until we fit within
+            # budget, keeping the last COMPACTION_KEEP_TAIL verbatim.
+            # The DB is untouched (full fidelity preserved for /history
+            # and audit), only the prompt-side view shrinks.
+            keep_n = self.COMPACTION_KEEP_TAIL
+            tail = self.state.scratchpad[-keep_n:]
+            head = self.state.scratchpad[:-keep_n]
+            dropped = 0
+            while head:
+                trial = head + tail
+                trial_text = compact_scratchpad(trial, tail=len(trial))
+                if len(trial_text) <= budget:
+                    break
+                head.pop(0)
+                dropped += 1
+            self.state.scratchpad = head + tail
+            audit("compaction.sliding_window_fallback", {
+                "dropped_oldest": dropped,
+                "kept_total": len(self.state.scratchpad),
+                "budget_chars": budget,
+            })
             yield PipelineEvent(
                 type="guard", family="compaction",
-                reason="summarizer unavailable / failed — keeping originals",
+                reason=(
+                    f"summarizer unavailable — dropped {dropped} oldest "
+                    f"scratchpad entr{'y' if dropped == 1 else 'ies'} from "
+                    f"the prompt (DB unchanged; /chat export still has full history)"
+                ),
             )
             return
 
