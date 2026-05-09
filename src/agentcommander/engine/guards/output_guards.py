@@ -144,9 +144,16 @@ def strip_warnings(text: str) -> str:
     return _BLANK_3PLUS_RX.sub("\n\n", text)
 
 
-def sanitize_output(text: str) -> str:
+def sanitize_output(text: str, tool_name: str | None = None) -> str:
     """Run all output sanitization in sequence. The engine calls this on
     every tool result before scratchpad insertion.
+
+    ``tool_name`` is optional; when provided, the truncation budget is
+    looked up in ``_TOOL_OUTPUT_BUDGETS`` so tools whose output is
+    legitimately long (fetch, read_file) get more headroom and tools
+    whose output is short (write_file, kill_process) don't waste tokens
+    on a 15k cap they'll never approach. Backward-compatible — calls
+    without the kwarg use the global ``MAX_OUTPUT_LENGTH``.
     """
     if not text:
         return text
@@ -163,5 +170,5 @@ def sanitize_output(text: str) -> str:
     text = strip_install_progress(text)
     text = strip_warnings(text)
     text = normalize_whitespace(text)
-    text = truncate_output(text)
+    text = truncate_output(text, budget=_budget_for_tool(tool_name))
     return text
