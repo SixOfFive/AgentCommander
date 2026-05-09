@@ -296,6 +296,11 @@ AGENTS: tuple[AgentDef, ...] = (
         default_max_tokens=1000,
         optional=True,
         recommended_model_size="≥4B with reliable JSON",
+        # Preflight is fed the proposed-action JSON via input. The
+        # scratchpad context is built into the input wrapper by
+        # meta_agents._build_preflight_input — no need for it again here.
+        needs_scratchpad=False,
+        needs_tool_appendix=False,
     ),
     AgentDef(
         role=Role.POSTMORTEM,
@@ -306,6 +311,9 @@ AGENTS: tuple[AgentDef, ...] = (
         default_temperature=0.3,
         default_max_tokens=2000,
         optional=True,
+        # Same shape as preflight — failure context is in the input wrapper.
+        needs_scratchpad=False,
+        needs_tool_appendix=False,
     ),
 )
 
