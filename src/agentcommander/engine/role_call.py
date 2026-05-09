@@ -140,7 +140,15 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
     # question — and routinely answered the wrong one (round-22 caught
     # this: simple questions came back with verbatim copies of the most
     # recent scratchpad entry instead of an answer).
-    if scratchpad_text:
+    #
+    # Direct-input roles (translator / summarizer / refactorer / critic /
+    # tester / vision / audio / image_gen / preflight / postmortem /
+    # router) operate on the `input` field exclusively — the scratchpad
+    # is just bloat that shifts their attention away from the actual
+    # payload. AgentDef.needs_scratchpad gates this: False = ignore
+    # scratchpad_text even if the caller passes one in. Saves 30-60% of
+    # prompt tokens on every direct-input call.
+    if scratchpad_text and agent.needs_scratchpad:
         wrapped = (
             "## Prior conversation context (read-only — do not copy verbatim)\n\n"
             f"{scratchpad_text}\n\n"
