@@ -2023,6 +2023,80 @@ def _distribute_cells(weights: list[int], total_width: int) -> list[int]:
     return cells
 
 
+def cmd_usage(ctx: CommandContext, args: list[str]) -> None:
+    """Show per-role prompt-token usage for the current chat (or globally).
+
+    Different lens than ``/status`` — that one slices by MODEL (which
+    model is burning tokens?). This one slices by ROLE (which role's
+    prompt is too big? is the orchestrator dragging huge scratchpads?
+    is preflight running on every action?).
+
+    Default scope: current chat. Pass ``global`` (or ``all``) for the
+    cross-chat aggregate. Useful after a noticeable slowdown to spot a
+    runaway role before tweaking ``/context`` or running ``/compact``.
+
+    The breakdown helps decide whether to:
+      * lower a role's persisted ``num_ctx`` via ``/autoconfig minctx``
+      * disable ``/preflight`` if it's dominating the call count
+      * run ``/compact`` if orchestrator avg-prompt is climbing
+      * mark a role ``needs_scratchpad=False`` in the manifest if it's
+        clearly not using that context (manual code change for now)
+    """
+    from agentcommander.db.repos import aggregate_token_usage
+
+    scope_global = bool(args) and args[0].lower() in ("global", "all", "*")
+    cid = None if scope_global else ctx.state.get("conversation_id")
+    if not scope_global and not cid:
+        render_system_line(
+            "no active chat — start one with a prompt or run "
+            "`/usage global` for the cross-chat aggregate"
+        )
+        return
+
+    rows = aggregate_token_usage(conversation_id=cid)
+    if not rows:
+        scope_label = "globally" if scope_global else "for this chat"
+        render_system_line(style("muted",
+            f"  no role activity recorded {scope_label} yet"))
+        return
+
+    scope_label = "all chats" if scope_global else f"chat {style('accent', cid[:8])}"
+    total_calls = sum(r["calls"] for r in rows)
+    total_in = sum(r["prompt_total"] for r in rows)
+    total_out = sum(r["completion_total"] for r in rows)
+    render_system_line(
+        f"Role token usage — {scope_label} — "
+        f"{total_calls} call(s) · in {total_in:,} · out {total_out:,}"
+    )
+
+    role_w = max((len(r["role"]) for r in rows), default=12)
+    role_w = max(role_w, 12)
+    render_system_line(
+        f"  {'role':<{role_w}}  {'calls':>5}  {'in tot':>8}  {'in avg':>7}  "
+        f"{'out tot':>8}  {'avg ms':>7}  share"
+    )
+    render_system_line("  " + "─" * (role_w + 50))
+    for r in rows:
+        share = (r["prompt_total"] / total_in * 100.0) if total_in > 0 else 0.0
+        bar_cells = int(round(share / 5))   # 5%-per-cell, max 20 cells
+        bar = "█" * bar_cells
+        render_system_line(
+            f"  {r['role']:<{role_w}}  "
+            f"{r['calls']:>5d}  "
+            f"{r['prompt_total']:>8,}  "
+            f"{r['avg_prompt']:>7,}  "
+            f"{r['completion_total']:>8,}  "
+            f"{r['avg_dur_ms']:>7,}  "
+            f"{share:5.1f}% {style('muted', bar)}"
+        )
+
+    # Tail hint pointing to the fix knobs — keeps the user from having to
+    # remember which slash command does what.
+    render_system_line(style("muted",
+        "  knobs: /context <N>  ·  /autoconfig minctx <N>  ·  /compact  "
+        "·  /preflight off  ·  /usage global"))
+
+
 def cmd_status(ctx: CommandContext, _args: list[str]) -> None:
     """Show a horizontal stacked bar of per-model usage for the active chat.
 
