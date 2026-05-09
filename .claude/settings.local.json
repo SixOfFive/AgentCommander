@@ -64,7 +64,8 @@
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_roles_set_url)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_autoconfig_memory)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_preventive_guards)",
-      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_preventive_guards_round50)"
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_preventive_guards_round50)",
+      "Bash(bash run25.sh)"
     ]
   }
 }

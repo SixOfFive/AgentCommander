@@ -47,6 +47,13 @@ class AgentDef:
     optional: bool                            # can the pipeline run without this role?
     guards: tuple[str, ...] = ()              # guard families that inspect this role's output
     recommended_model_size: str = ""          # human-readable hint
+    # Context-optimization flags. Direct-input roles operate on the
+    # explicit `input` field and don't need the conversation scratchpad
+    # threaded into their prompt — saving 30-60% of prompt tokens on
+    # every call. Non-tool roles never dispatch a tool, so they don't
+    # need the live tool-registry appendix either.
+    needs_scratchpad: bool = True
+    needs_tool_appendix: bool = True
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -60,6 +67,8 @@ class AgentDef:
             "optional": self.optional,
             "guards": list(self.guards),
             "recommended_model_size": self.recommended_model_size,
+            "needs_scratchpad": self.needs_scratchpad,
+            "needs_tool_appendix": self.needs_tool_appendix,
         }
 
 
