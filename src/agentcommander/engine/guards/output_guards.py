@@ -82,11 +82,20 @@ def strip_binary_content(text: str) -> str:
     return _BIN_RUN_RX.sub("[binary data]", text)
 
 
-def truncate_output(text: str) -> str:
-    if len(text) <= MAX_OUTPUT_LENGTH:
+def truncate_output(text: str, budget: int | None = None) -> str:
+    """Head-and-tail truncate ``text`` to ``budget`` chars.
+
+    ``budget`` defaults to ``MAX_OUTPUT_LENGTH``. Per-tool budgets pass
+    a custom value via ``sanitize_output(text, tool_name=...)``. Pattern:
+    keep the first 70% and last 25% of the budget, drop the middle —
+    preserves the start (where most tools put their summary line) and
+    the end (where errors / final results land).
+    """
+    cap = budget if budget and budget > 0 else MAX_OUTPUT_LENGTH
+    if len(text) <= cap:
         return text
-    head_size = int(MAX_OUTPUT_LENGTH * 0.7)
-    tail_size = int(MAX_OUTPUT_LENGTH * 0.25)
+    head_size = int(cap * 0.7)
+    tail_size = int(cap * 0.25)
     head = text[:head_size]
     tail = text[-tail_size:]
     skipped = len(text) - head_size - tail_size
