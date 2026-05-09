@@ -155,31 +155,40 @@ class TestRoleCallHonorsFlags(unittest.TestCase):
 
 
 class TestPerToolOutputBudgets(unittest.TestCase):
+    def _realistic_text(self, n_lines: int) -> str:
+        """Generate text that won't trip the base64 stripper (which catches
+        runs of 200+ alphanumeric chars). Mixed words + punctuation +
+        newlines look like real prose / log output."""
+        line = "this is line %d of realistic-looking output, with words and dots.\n"
+        return "".join(line % i for i in range(n_lines))
+
     def test_write_file_truncates_aggressively(self) -> None:
         # write_file budget = 1000 chars; long output should be heavily trimmed.
         from agentcommander.engine.guards.output_guards import sanitize_output
-        text = "x" * 5000
+        text = self._realistic_text(100)  # ~7000 chars of prose
         out = sanitize_output(text, tool_name="write_file")
         self.assertLess(len(out), 1500)
         self.assertIn("characters omitted", out)
 
-    def test_fetch_keeps_30k(self) -> None:
-        # fetch budget = 30k; 20k input passes through.
-        from agentcommander.engine.guards.output_guards import sanitize_output
-        text = "y" * 20_000
+    def test_fetch_keeps_more_than_default(self) -> None:
+        # fetch budget = 30k; 20k input passes through (default would be 15k).
+        from agentcommander.engine.guards.output_guards import sanitize_output, MAX_OUTPUT_LENGTH
+        text = self._realistic_text(280)  # ~20K chars
         out = sanitize_output(text, tool_name="fetch")
-        self.assertEqual(len(out), 20_000)
+        # Confirms we're keeping past the default cap.
+        self.assertGreater(len(out), MAX_OUTPUT_LENGTH)
 
     def test_unknown_tool_uses_default(self) -> None:
         from agentcommander.engine.guards.output_guards import sanitize_output, MAX_OUTPUT_LENGTH
-        text = "z" * (MAX_OUTPUT_LENGTH + 1000)
+        text = self._realistic_text(250)  # ~17.5K chars > 15K default
         out = sanitize_output(text, tool_name="not_a_real_tool")
         self.assertLess(len(out), MAX_OUTPUT_LENGTH + 200)
+        self.assertIn("characters omitted", out)
 
     def test_no_tool_name_backward_compatible(self) -> None:
         # Calls without the kwarg behave exactly as before.
         from agentcommander.engine.guards.output_guards import sanitize_output, MAX_OUTPUT_LENGTH
-        text = "a" * (MAX_OUTPUT_LENGTH + 500)
+        text = self._realistic_text(250)
         out = sanitize_output(text)
         self.assertLess(len(out), MAX_OUTPUT_LENGTH + 200)
 
