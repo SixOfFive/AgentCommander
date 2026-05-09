@@ -85,6 +85,10 @@ AGENTS: tuple[AgentDef, ...] = (
         default_max_tokens=256,
         optional=False,
         recommended_model_size="3B-8B instruct (larger is overkill)",
+        # Router only classifies the CURRENT message. Scratchpad and tool
+        # registry are noise; both stripped to keep prompt-eval fast.
+        needs_scratchpad=False,
+        needs_tool_appendix=False,
     ),
     AgentDef(
         role=Role.ORCHESTRATOR,
