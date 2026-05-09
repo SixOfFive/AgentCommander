@@ -161,6 +161,10 @@ AGENTS: tuple[AgentDef, ...] = (
         default_max_tokens=4000,
         optional=True,
         recommended_model_size="multimodal model required",
+        # Modality specialist — receives image bytes/URL via input. No
+        # scratchpad / tool appendix needed.
+        needs_scratchpad=False,
+        needs_tool_appendix=False,
     ),
     AgentDef(
         role=Role.AUDIO,
@@ -171,6 +175,8 @@ AGENTS: tuple[AgentDef, ...] = (
         default_temperature=0.3,
         default_max_tokens=4000,
         optional=True,
+        needs_scratchpad=False,
+        needs_tool_appendix=False,
     ),
     AgentDef(
         role=Role.IMAGE_GEN,
@@ -181,6 +187,8 @@ AGENTS: tuple[AgentDef, ...] = (
         default_temperature=0.7,
         default_max_tokens=1000,
         optional=True,
+        needs_scratchpad=False,
+        needs_tool_appendix=False,
     ),
     AgentDef(
         role=Role.ARCHITECT,
