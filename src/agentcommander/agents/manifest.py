@@ -259,6 +259,9 @@ AGENTS: tuple[AgentDef, ...] = (
         default_temperature=0.2,
         default_max_tokens=8000,
         optional=True,
+        # Refactorer gets the source code via input; rewrite is local.
+        needs_scratchpad=False,
+        needs_tool_appendix=False,
     ),
     AgentDef(
         role=Role.TRANSLATOR,
@@ -269,6 +272,9 @@ AGENTS: tuple[AgentDef, ...] = (
         default_temperature=0.1,
         default_max_tokens=4000,
         optional=True,
+        # Translator only needs the source text via input.
+        needs_scratchpad=False,
+        needs_tool_appendix=False,
     ),
     AgentDef(
         role=Role.DATA_ANALYST,
