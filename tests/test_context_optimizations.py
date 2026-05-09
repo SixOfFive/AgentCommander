@@ -87,7 +87,8 @@ class TestRoleCallHonorsFlags(unittest.TestCase):
                                 return_value=mock.Mock(chat=fake_chat.__get__(object()))), \
              mock.patch.object(role_call, "audit"), \
              mock.patch.object(role_call, "insert_token_usage"), \
-             mock.patch.object(role_call, "record_throughput"):
+             mock.patch("agentcommander.db.repos.record_throughput",
+                         create=True):
             role_call.call_role(
                 "translator",
                 user_input="bonjour",
@@ -115,7 +116,8 @@ class TestRoleCallHonorsFlags(unittest.TestCase):
                                 return_value="### TOOLS APPENDIX MARKER ###"), \
              mock.patch.object(role_call, "audit"), \
              mock.patch.object(role_call, "insert_token_usage"), \
-             mock.patch.object(role_call, "record_throughput"):
+             mock.patch("agentcommander.db.repos.record_throughput",
+                         create=True):
             role_call.call_role("translator", user_input="hi", scratchpad_text="")
         sys_msg = next(m for m in captured[0] if m.role == "system")
         self.assertNotIn("TOOLS APPENDIX MARKER", sys_msg.content)
@@ -135,7 +137,8 @@ class TestRoleCallHonorsFlags(unittest.TestCase):
                                 return_value="### TOOLS APPENDIX MARKER ###"), \
              mock.patch.object(role_call, "audit"), \
              mock.patch.object(role_call, "insert_token_usage"), \
-             mock.patch.object(role_call, "record_throughput"):
+             mock.patch("agentcommander.db.repos.record_throughput",
+                         create=True):
             role_call.call_role(
                 "orchestrator",
                 user_input="next step",
