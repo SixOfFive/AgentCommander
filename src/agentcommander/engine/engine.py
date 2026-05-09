@@ -1815,10 +1815,13 @@ class PipelineRun:
                              working_directory=opts.working_directory,
                              conversation_id=opts.conversation_id)
 
-        # Sanitize output
+        # Sanitize output. Per-tool budget: pass decision.action so
+        # `sanitize_output` can pick the right truncation cap (read_file
+        # gets 30K, list_dir gets 5K, write_file gets 1K, etc.).
         output_text = result.output or ""
         if self._guards["output"] and output_text:
-            output_text = self._guards["output"](output_text)
+            output_text = self._guards["output"](output_text,
+                                                  tool_name=decision.action)
 
         # Fetch hint analysis
         if decision.action == "fetch" and self._guards["fetch"] and output_text:
