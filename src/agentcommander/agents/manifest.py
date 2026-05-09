@@ -146,6 +146,10 @@ AGENTS: tuple[AgentDef, ...] = (
         default_temperature=0.3,
         default_max_tokens=4000,
         optional=True,
+        # Summarizer is fed the explicit content to summarize via `input`.
+        # Doesn't need the scratchpad or tool list.
+        needs_scratchpad=False,
+        needs_tool_appendix=False,
     ),
     AgentDef(
         role=Role.VISION,
