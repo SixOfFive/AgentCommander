@@ -10,6 +10,41 @@ import re
 
 MAX_OUTPUT_LENGTH = 15_000
 
+# Per-tool truncation budgets. Tools whose output is small or whose
+# information density is high get tighter budgets so the scratchpad
+# stays compact; tools that legitimately produce long output (fetch,
+# read_file) get more headroom. Lookup is case-insensitive on the tool
+# name; tools not listed fall back to MAX_OUTPUT_LENGTH.
+_TOOL_OUTPUT_BUDGETS: dict[str, int] = {
+    # Filesystem
+    "list_dir": 5_000,         # one entry per line; 5k = ~200 entries
+    "read_file": 30_000,       # source files, configs, logs — the big legitimate consumer
+    "write_file": 1_000,       # response is "Successfully wrote N bytes"; never long
+    "delete_file": 500,        # response is "Deleted X" or an error
+    # Network
+    "fetch": 30_000,           # webpages, API responses
+    "http_request": 30_000,    # same shape as fetch
+    "browser": 20_000,         # rendered text — slightly less because already extracted
+    "screenshot": 1_000,       # response is metadata about the saved file
+    "extract_text": 20_000,
+    # Git / env / process
+    "git": 10_000,             # log/diff/status all reasonable at 10k
+    "env": 5_000,              # env var listings
+    "start_process": 1_000,
+    "kill_process": 500,
+    "check_process": 2_000,
+    # Execute (catch-all for code)
+    "execute": 15_000,         # explicit so the default doesn't drift
+}
+
+
+def _budget_for_tool(tool_name: str | None) -> int:
+    """Return the truncation budget for ``tool_name``, falling back to the
+    global default when unknown. Case-insensitive."""
+    if not tool_name:
+        return MAX_OUTPUT_LENGTH
+    return _TOOL_OUTPUT_BUDGETS.get(tool_name.lower(), MAX_OUTPUT_LENGTH)
+
 _ANSI_CSI_RX = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 _ANSI_OSC_RX = re.compile(r"\x1b\][^\x07]*\x07")
 _ANSI_CHARSET_RX = re.compile(r"\x1b[()][AB012]")
