@@ -2583,6 +2583,28 @@ def _build_registry() -> dict[str, SlashCommand]:
             examples=("/status",),
         ),
         SlashCommand(
+            name="/usage", aliases=(),
+            summary="per-role token usage breakdown (current chat or global)",
+            handler=cmd_usage,
+            usage="/usage              # current chat\n"
+                  "/usage global       # cross-chat aggregate",
+            details=(
+                "Per-role view of where context is going. Sibling to /status\n"
+                "(which slices by model). Use this to identify a runaway\n"
+                "role — e.g. orchestrator avg-prompt climbing into the\n"
+                "context-window means time to /compact; preflight\n"
+                "dominating call count means consider /preflight off; a\n"
+                "specialty role with huge avg-prompt suggests its\n"
+                "manifest entry should set needs_scratchpad=False.\n"
+                "\n"
+                "Columns: calls, in tot (sum prompt tokens), in avg (mean\n"
+                "prompt tokens per call), out tot (sum completion), avg ms\n"
+                "(mean wall-time per call), share (% of total prompt tokens).\n"
+                "Sorted by prompt-token total descending — heaviest first."
+            ),
+            examples=("/usage", "/usage global"),
+        ),
+        SlashCommand(
             name="/new", aliases=(),
             summary="start a new conversation",
             handler=cmd_new,
