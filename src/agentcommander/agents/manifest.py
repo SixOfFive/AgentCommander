@@ -209,6 +209,10 @@ AGENTS: tuple[AgentDef, ...] = (
         default_temperature=0.5,
         default_max_tokens=4000,
         optional=True,
+        # Critic gets the plan / target text directly via input. Doesn't
+        # dispatch tools.
+        needs_scratchpad=False,
+        needs_tool_appendix=False,
     ),
     AgentDef(
         role=Role.TESTER,
@@ -221,6 +225,10 @@ AGENTS: tuple[AgentDef, ...] = (
         default_temperature=0.2,
         default_max_tokens=8000,
         optional=True,
+        # Tester receives the code under test via input; doesn't dispatch
+        # tools (the engine runs the resulting test command separately).
+        needs_scratchpad=False,
+        needs_tool_appendix=False,
     ),
     AgentDef(
         role=Role.DEBUGGER,
