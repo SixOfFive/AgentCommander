@@ -480,6 +480,43 @@ def insert_token_usage(*, conversation_id: str | None, role: str,
     )
 
 
+def aggregate_token_usage(
+    *,
+    conversation_id: str | None = None,
+    limit_rows: int = 1000,
+) -> list[dict[str, object]]:
+    """Per-role rollup of token_usage rows. Used by ``/usage``.
+
+    Returns one dict per role with: role, calls, prompt_tokens (sum),
+    completion_tokens (sum), avg_prompt_tokens, avg_duration_ms. When
+    ``conversation_id`` is given, restricts to that chat. The limit
+    bounds the rows pulled into the aggregation so a long-lived DB
+    doesn't pin the TUI; default 1000 is plenty for an interactive view.
+    """
+    where = "WHERE conversation_id = ? " if conversation_id else ""
+    params: tuple = (conversation_id, limit_rows) if conversation_id else (limit_rows,)
+    rows = get_db().execute(
+        "SELECT role, "
+        "       COUNT(*) AS calls, "
+        "       SUM(COALESCE(prompt_tokens, 0)) AS prompt_total, "
+        "       SUM(COALESCE(completion_tokens, 0)) AS completion_total, "
+        "       AVG(COALESCE(prompt_tokens, 0)) AS avg_prompt, "
+        "       AVG(COALESCE(duration_ms, 0)) AS avg_dur "
+        f"FROM (SELECT * FROM token_usage {where}ORDER BY created_at DESC LIMIT ?) "
+        "GROUP BY role "
+        "ORDER BY prompt_total DESC, calls DESC",
+        params,
+    ).fetchall()
+    return [{
+        "role": r["role"],
+        "calls": int(r["calls"] or 0),
+        "prompt_total": int(r["prompt_total"] or 0),
+        "completion_total": int(r["completion_total"] or 0),
+        "avg_prompt": int(round(float(r["avg_prompt"] or 0))),
+        "avg_dur_ms": int(round(float(r["avg_dur"] or 0))),
+    } for r in rows]
+
+
 # ─── Scratchpad (model-facing memory) ──────────────────────────────────────
 #
 # These wrap `scratchpad_entries` — the persisted, cross-turn equivalent of
