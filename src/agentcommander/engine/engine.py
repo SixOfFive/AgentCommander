@@ -2529,7 +2529,10 @@ class PipelineRun:
 
         output_text = result.output or ""
         if self._guards["output"] and output_text:
-            output_text = self._guards["output"](output_text)
+            # Auto-recovery path: ``verb`` is the tool name we
+            # synthesized from the model's plain-text emission, so use it
+            # for the per-tool budget lookup.
+            output_text = self._guards["output"](output_text, tool_name=verb)
 
         if not result.ok:
             err = result.error or "tool returned no output"
