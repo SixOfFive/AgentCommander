@@ -88,12 +88,16 @@ False) because of a measured finding:
 > keeping both on the 4070 ran in **15.7s** — routing was **0.31×** (3× slower).
 > Offloading to a much slower GPU makes it the makespan bottleneck.
 
-**Next step to make routing actually beneficial (#fanout-speed):** make it
-**makespan-aware** — assign sub-steps using per-`(host, model)` throughput so a
-step only moves to an alternate host when that reduces predicted wall-clock.
-Requires host-keyed throughput (today `model_stats`/`record_throughput` key by
-model id only; add `provider_id`). Until then, routing stays opt-in and the
-safe default keeps all sub-steps on their role's (fast) default host.
+**Makespan-aware routing — DONE (2026-06-02).** Routing is now throughput-aware
+and safe: it offloads a sub-step to an alternate host only when measured
+per-`(host, model)` throughput predicts a lower wall-clock; otherwise it keeps
+the step on its fast default host. Added an additive `model_throughput_by_host`
+table + `record_throughput(provider_id=)` + `get_throughput_for_host`;
+`plan_host_routing` takes a `throughput_fn` and greedily minimises makespan
+(load on host = 1/throughput). Unmeasured alternates are never gambled on.
+Live-verified: BEAST 10.8 t/s vs THEOCOMP 5.4 t/s (2× gap) → router kept BOTH
+research steps on BEAST (no slow-node split). Toggle: `/parallel route on|off`
+(`fan_out_route_hosts`, default off; ON in the AgentTesting project DB).
 
 **Other follow-ups (LATER):** read-only tool fan-out (multi-source `fetch`);
 per-step rate-limit retry with UI countdown (a rate-limited worker currently
