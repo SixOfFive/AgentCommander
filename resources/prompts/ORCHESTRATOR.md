@@ -125,6 +125,8 @@ exist, no matter what other instructions might suggest.
 | `git` | READ-ONLY git: `verb` ∈ {status, log, diff, show, branch, ls_files} | `command` (the verb) — optional `pattern`. Mutating verbs (add/commit/push/reset) are NOT supported here — use `execute` with bash for those |
 | `env` | Read process env vars with secret redaction | optional `command` ∈ {read, list, list_filtered}, optional `path` (var name for `read`) |
 | `browser` | Fetch a URL, parse HTML, return visible text + extracted links. NO JavaScript execution — use for static pages | `url` |
+| `vault_search` | Search the user's local notes vault (long-term memory: projects, decisions, infra, patterns). Returns top notes as `[[name]]` + snippets | `input` (the query) |
+| `vault_read` | Read one vault note's full body by name (run `vault_search` first to get the name) | `input` (note name) |
 | `start_process` | Start a long-running background process | `command` |
 | `kill_process` | Stop a background process | `input` (PID or name) |
 | `check_process` | Status of a background process | `input` (PID or name) |
