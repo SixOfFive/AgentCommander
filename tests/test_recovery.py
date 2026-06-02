@@ -48,8 +48,12 @@ class TestDetectToolSyntax(unittest.TestCase):
 
 
 class TestCleanTextualArg(unittest.TestCase):
-    def test_strips_quotes_and_punct(self):
-        self.assertEqual(recovery.clean_textual_arg("fetch", '"https://example.com".'),
+    def test_strips_surrounding_quotes(self):
+        self.assertEqual(recovery.clean_textual_arg("fetch", '"https://example.com"'),
+                         "https://example.com")
+
+    def test_strips_trailing_punct(self):
+        self.assertEqual(recovery.clean_textual_arg("fetch", "https://example.com."),
                          "https://example.com")
 
     def test_strips_backticks_and_brackets(self):
