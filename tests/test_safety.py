@@ -743,7 +743,9 @@ class TestEngineImports(unittest.TestCase):
             RunOptions,
             TOOL_ACTIONS,
         )
-        self.assertEqual(len(ROLE_ACTIONS) + len(TOOL_ACTIONS) + 1, len(ALL_ACTIONS))
+        # +2 terminal/meta actions on top of the role + tool verbs:
+        # "done" and "fan_out" (parallel fan-out, prototype).
+        self.assertEqual(len(ROLE_ACTIONS) + len(TOOL_ACTIONS) + 2, len(ALL_ACTIONS))
 
     def test_all_19_agents_present(self) -> None:
         from agentcommander.agents import AGENTS
