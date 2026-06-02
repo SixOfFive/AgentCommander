@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import unittest
 
-from agentcommander.engine.engine import PipelineRun
+from agentcommander.engine import recovery
 
 
 def _infer(msg: str) -> str | None:
-    return PipelineRun._infer_live_data_url(PipelineRun, msg)  # type: ignore[arg-type]
+    return recovery.infer_live_data_url(msg)
 
 
 class TestLiveDataInference(unittest.TestCase):
