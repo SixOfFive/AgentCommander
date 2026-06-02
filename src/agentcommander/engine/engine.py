@@ -608,8 +608,26 @@ class PipelineRun:
                         "browser_available": False,
                     })
                     if result["verdict"]["action"] == "continue":
+                        # A decision-guard nudge is a non-productive iteration.
+                        # `continue` here jumps to the top of the loop, skipping
+                        # the flow-guard block below — which is the ONLY place
+                        # consecutive_nudge_guard runs and increments the give-up
+                        # budget. So a decision-level standoff used to loop until
+                        # the hard iteration cap. Count it toward the same budget
+                        # and break out cleanly once a run is clearly stuck.
+                        self.state.consecutive_nudges += 1
                         yield PipelineEvent(type="guard", family="decision",
                                             reason="rewriting orchestrator decision")
+                        if self.state.consecutive_nudges >= DECISION_NUDGE_BREAK:
+                            final = (build_final_output(self.state.scratchpad,
+                                                        self.state.turn_start_idx)
+                                     or "The pipeline could not complete this "
+                                        "task. Please try rephrasing your request.")
+                            yield PipelineEvent(type="done", final=final)
+                            update_pipeline_run(self.run_id, status="done",
+                                                iterations=iteration,
+                                                category=category)
+                            return
                         continue
                     decision = result["decision"]
 
