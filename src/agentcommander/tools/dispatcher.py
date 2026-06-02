@@ -168,6 +168,7 @@ def bootstrap_builtins() -> list[str]:
         git_tool,
         http_tool,
         process_tool,
+        vault_tool,
         web_tool,
     )
     return sorted(_REGISTRY.keys())
