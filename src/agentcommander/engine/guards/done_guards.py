@@ -1381,6 +1381,7 @@ def run_done_guards(ctx: dict[str, Any]) -> dict[str, Any]:
     for guard in guards:
         verdict = guard()
         if verdict.action != "pass":
+            record_fire("done", guard, verdict.action)
             return {"action": verdict.action, "final_output": verdict.final_output}
 
     return {"action": "break",
