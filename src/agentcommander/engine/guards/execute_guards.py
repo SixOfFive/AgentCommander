@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from agentcommander.engine.guards.types import GuardVerdict, push_system_nudge
+from agentcommander.engine.guards.types import GuardVerdict, push_system_nudge, record_fire
 from agentcommander.types import ScratchpadEntry
 
 PYTHON_LANGS = {"python", "py"}
