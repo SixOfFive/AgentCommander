@@ -41,6 +41,17 @@ credentials.json
 .vscode/
 *.log
 
+# Private working notes — NEVER commit (standing rule; see ~/.claude/CLAUDE.md).
+# The global excludesFile also lists these, but it doesn't help once a file is
+# already tracked — so they're repeated here as belt-and-suspenders for clones.
+braindump.md
+BRAINDUMP.md
+Braindump.md
+brain_dump.md
+**/braindump.md
+**/BRAINDUMP.md
+**/Braindump.md
+
 # Local sandbox the user runs the agent against — never commit anything
 # the program wrote into its working directory.
 AgentTesting/
