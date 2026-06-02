@@ -128,6 +128,7 @@ exist, no matter what other instructions might suggest.
 | `start_process` | Start a long-running background process | `command` |
 | `kill_process` | Stop a background process | `input` (PID or name) |
 | `check_process` | Status of a background process | `input` (PID or name) |
+| `fan_out` | Run 2+ INDEPENDENT role delegations concurrently (see "Parallel fan-out" below) | `steps` (array of role sub-decisions) |
 | `done` | Task complete — `input` field is the user-visible answer | `input` |
 
 ## JSON Decision Format
