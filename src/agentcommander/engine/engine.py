@@ -1886,10 +1886,12 @@ class PipelineRun:
         planned = runnable
         route = enabled and bool(get_config("fan_out_route_hosts", False))
         if route:
+            from agentcommander.db.repos import get_throughput_for_host
             installed = self._gather_installed_models()
             planned = plan_host_routing(
                 runnable, resolve_fn=resolve_role,
-                installed_by_provider=installed)
+                installed_by_provider=installed,
+                throughput_fn=get_throughput_for_host)
             routes = []
             for p in planned:
                 pid = (p.get("provider_id") or "?").replace("auto-", "")
