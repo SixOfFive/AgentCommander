@@ -728,6 +728,7 @@ def run_execute_guards(ctx: dict[str, Any]) -> dict[str, Any]:
     for guard in guards:
         result = guard(input_)
         if result["verdict"]["action"] == "continue":
+            record_fire("execute", guard, "continue")
             return result
         input_.code = result["code"]
         input_.language = result["language"]
