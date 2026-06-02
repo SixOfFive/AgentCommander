@@ -71,6 +71,8 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
               json_mode: bool | None = None,
               json_schema: dict | None = None,
               num_ctx: int | None = None,
+              provider_id: str | None = None,
+              model: str | None = None,
               on_delta: Callable[[str], None] | None = None,
               on_finish: Callable[[int | None, int | None], None] | None = None,
               should_cancel: Optional[Callable[[], bool]] = None) -> str:
@@ -78,6 +80,12 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
 
     Returns the full assistant-content string. Streams deltas through
     `on_delta` if supplied (for live UI rendering).
+
+    ``provider_id`` + ``model`` override the role's normal resolution — used
+    by parallel fan-out's host-aware router to run a role on an *alternate*
+    host that has the same model (so concurrent sub-steps land on different
+    GPUs). Both must be supplied together; otherwise the role resolves
+    normally. Serial calls never pass these, so per-role quality is untouched.
 
     Raises:
         RoleNotAssigned: if the role has no provider/model in the DB.
@@ -87,14 +95,26 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
     agent = get_agent(role_enum)
 
     resolved = resolve_role(role_enum)
-    if resolved is None:
-        raise RoleNotAssigned(
-            f'Role "{role_enum.value}" is not assigned to a provider/model. '
-            f"Configure via the CLI: /providers add ... && /roles set {role_enum.value} ..."
-        )
+    if provider_id and model:
+        # Explicit host/model override (fan-out routing). resolve() still gives
+        # us a num_ctx fallback when the caller didn't pin one.
+        eff_provider_id = provider_id
+        eff_model = model
+        eff_kind = "fanout-route"
+        if num_ctx is None and resolved is not None:
+            num_ctx = resolved.context_window_tokens
+    else:
+        if resolved is None:
+            raise RoleNotAssigned(
+                f'Role "{role_enum.value}" is not assigned to a provider/model. '
+                f"Configure via the CLI: /providers add ... && /roles set {role_enum.value} ..."
+            )
+        eff_provider_id = resolved.provider_id
+        eff_model = resolved.model
+        eff_kind = resolved.kind
 
-    provider = resolve(resolved.provider_id)
-    model = resolved.model
+    provider = resolve(eff_provider_id)
+    model = eff_model
     system_prompt = get_role_prompt(role_enum)
 
     # Self-introspection: append the live tool registry to roles whose
