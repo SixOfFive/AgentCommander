@@ -32,6 +32,28 @@ class TestGuardName(unittest.TestCase):
     def test_fallback(self):
         self.assertEqual(guard_name(object()), "<guard>")
 
+    def test_locally_imported_guard_via_freevars(self):
+        # Regression: run_done_guards imports the preventive guards LOCALLY,
+        # so the guard name is a closure free-var, not a global (co_names is
+        # empty). guard_name must inspect co_freevars too, else all 17
+        # preventive guards record as the anonymous "<guard>" and become
+        # invisible to telemetry. Replicate that closure shape exactly.
+        def runner():
+            local_guard = sample_guard  # local binding == the local-import case
+            scratchpad, iteration, decision = [], 0, None
+            return lambda: local_guard(scratchpad, iteration, decision)
+
+        thunk = runner()
+        self.assertEqual(thunk.__code__.co_names, ())          # nothing global
+        self.assertIn("local_guard", thunk.__code__.co_freevars)
+        # local_guard isn't *_guard-suffixed, so it falls to names[0]; use a
+        # suffixed local to prove the *_guard isolation path works on freevars.
+        def runner2():
+            preventive_guard = another_guard
+            x = 1
+            return lambda: preventive_guard(x)
+        self.assertEqual(guard_name(runner2()), "preventive_guard")
+
 
 class TestFireCounters(unittest.TestCase):
     def setUp(self):
