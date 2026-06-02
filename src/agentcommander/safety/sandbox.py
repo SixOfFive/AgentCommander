@@ -154,6 +154,14 @@ def validate_file_access(
         raise FilesystemSecurityError(
             f'BLOCKED: {operation} access to "{file_path}" — path is outside the working directory "{base}"'
         )
+    # Read-only zones (e.g. the notes vault): reads/lists pass, but writes and
+    # deletes are refused even when the path is inside the working directory.
+    if operation in ("write", "delete") and is_in_readonly_zone(resolved):
+        raise FilesystemSecurityError(
+            f'BLOCKED: {operation} to "{file_path}" — it is inside a read-only '
+            f"zone (the notes vault). AgentCommander can read the vault but "
+            f"never modify it."
+        )
     return resolved
 
 
