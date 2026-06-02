@@ -60,11 +60,26 @@ puts multiple GPUs to work at once.
   error isolation). Live: ran a reviewer/critic/tester panel across BEAST +
   THEOCOMP — 2.4× step overlap; correct ordered results.
 
-**Follow-ups (LATER):** read-only tool fan-out (multi-source `fetch`);
-per-step rate-limit retry with UI countdown (currently a worker that hits a
-rate limit records a failed sub-step); live streaming of concurrent steps into
-separate popout blocks; an orchestrator-prompt section teaching when to emit
-`fan_out`. **Fleet caveat:** speedup ≈ sum/slowest-step — large only when
+Wired end-to-end and live-verified (2026-06-02): orchestrator emits `fan_out`,
+panel runs concurrently across BEAST+THEOCOMP (~1.8–2.5× overlap), engine
+converges (panel → forced `summarize` → `done`) in ~54s. Fixes made while
+making it work:
+- ORCHESTRATOR.md gained an accurate `fan_out` section; **three phantom
+  sections removed** (`Batch Actions`, `Parallel Batch Execution`, `Parallel
+  role execution`) — none was ever wired in the engine.
+- `unknown_action_guard` now recognizes `fan_out` (added to `_SPECIAL_ACTIONS`)
+  — it was rejecting every fan_out, causing an infinite re-orchestrate loop.
+- Bounded convergence in `events()`: 2nd fan_out in a turn → forced summarize;
+  3rd → done. Stops the orchestrator re-emitting the same panel forever.
+- **#1 schema perf fix (important):** dropped `additionalProperties:false` from
+  the decision schema — on qwen2.5:14b it cut a constrained orchestrator call
+  from **134s → 12s** (the closed-set grammar was pathological). No correctness
+  loss (`from_dict` drops unknown keys).
+
+**Follow-ups (LATER):** read-only tool fan-out (multi-source `fetch`); per-step
+rate-limit retry with UI countdown (a worker that hits a rate limit currently
+records a failed sub-step); live streaming of concurrent steps into separate
+popout blocks. **Fleet caveat:** speedup ≈ sum/slowest-step — large only when
 sub-steps land on *distinct* hosts (same-host Ollama calls contend for one GPU).
 
 ### #6 — TypeCast hint accumulator (was "deferred" in braindump)
