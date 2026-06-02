@@ -1875,12 +1875,17 @@ class PipelineRun:
                     f"[{', '.join(s.get('action') for s in runnable)}] {mode}{skip_note}"),
         )
 
-        # Host-aware routing: when running in parallel, spread the sub-steps
-        # across distinct hosts that have the role's model (same model,
-        # different GPU) so they don't contend on one card. Serial degrade
-        # keeps the default bindings (no point probing hosts).
+        # Host-aware routing: when running in parallel AND the operator opted
+        # in (`fan_out_route_hosts`), spread the sub-steps across distinct
+        # hosts that have the role's model (same model, different GPU). This is
+        # OFF by default because naive spreading HURTS on a heterogeneous-speed
+        # fleet — offloading to a much slower GPU makes it the bottleneck
+        # (measured: a 3060 ran a 14B ~5x slower than a 4070, so a 2-way split
+        # was 3x slower than keeping both on the fast card). Beneficial routing
+        # needs speed-awareness (per-host throughput) — see ROADMAP #fanout.
         planned = runnable
-        if enabled:
+        route = enabled and bool(get_config("fan_out_route_hosts", False))
+        if route:
             installed = self._gather_installed_models()
             planned = plan_host_routing(
                 runnable, resolve_fn=resolve_role,
