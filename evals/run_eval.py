@@ -284,8 +284,32 @@ def main() -> int:
           f"total {_fmt_ms(suite_ms)}   schema={schema_mode}")
     print("=" * 72)
 
+    _print_guard_summary(run_records)
     _write_results(env, args, selected, run_records, n_pass, suite_ms)
     return 0 if n_pass == len(selected) else 1
+
+
+def _print_guard_summary(run_records: list[dict]) -> None:
+    """Aggregate per-case guard fires across the suite + flag never-fired
+    guards in the instrumented universe (#4 pruning signal)."""
+    agg: dict[str, int] = {}
+    for rec in run_records:
+        for g, n in (rec.get("guards_fired") or {}).items():
+            agg[g] = agg.get(g, 0) + n
+    print("\nGUARD TELEMETRY (this suite):")
+    if agg:
+        for g, n in sorted(agg.items(), key=lambda kv: (-kv[1], kv[0])):
+            print(f"  {n:3}x  {g}")
+    else:
+        print("  (no guards fired)")
+    try:
+        from agentcommander.tui.commands import _guard_universe
+        universe = _guard_universe()
+        never = sorted(g for g in universe if g not in agg)
+        print(f"  {len(agg)}/{len(universe)} instrumented guards fired this suite; "
+              f"{len(never)} silent.")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _write_results(env, args, selected, run_records, n_pass, suite_ms) -> None:
