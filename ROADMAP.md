@@ -124,6 +124,16 @@ a local Obsidian-style vault (projects, decisions, infra, patterns).
   os.path.splitext truncated "llama.cpp…"→"llama"). Live-verified end-to-end:
   search→read→answer against the real 1,626-note vault.
 
+**Read-only enforcement (owner directive — AC must never write the vault):**
+three layers — (1) the vault tools only open files for reading; (2) a sandbox
+*read-only zone* (`safety/sandbox.register_readonly_zone`, synced from config in
+`dispatcher.invoke`) refuses `write_file`/`delete_file` inside the vault even
+when the working directory IS the vault; (3) a `code_tool` guard blocks
+`execute` code that writes/deletes inside the vault. Live-verified all three
+block while reads pass. Best-effort on `execute` (arbitrary code) — the
+airtight guarantee is an OS read-only ACL on the vault. Tests in
+`tests/test_vault_readonly.py` (8).
+
 **Caveats / follow-ups:** synthesis faithfulness is model-bound (a 14B read the
 right note but summarized loosely) — a stronger orchestrator or a forced
 summarizer-over-read-content pass would help. The embeddings index is
