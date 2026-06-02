@@ -1815,6 +1815,31 @@ class PipelineRun:
             if ps["action"] == "break":
                 yield PipelineEvent(type="done", final=ps["final_output"])
 
+    def _gather_installed_models(self) -> "dict[str, set[str]]":
+        """Map provider_id → set of installed model ids, for fan-out routing.
+
+        Best-effort and cached for the lifetime of this run: a provider that's
+        unreachable contributes an empty set (its models just can't be used as
+        alternate hosts). The probe is a cheap /api/tags-style GET per active
+        provider; we only ever call this when a fan_out actually fires.
+        """
+        cache = getattr(self, "_installed_models_cache", None)
+        if cache is not None:
+            return cache
+        from agentcommander.providers.base import list_active
+        inst: dict[str, set[str]] = {}
+        for p in list_active():
+            try:
+                inst[p.id] = {
+                    (m.get("id") or m.get("name"))
+                    for m in p.list_models()
+                    if (m.get("id") or m.get("name"))
+                }
+            except Exception:  # noqa: BLE001 - unreachable host → no alt models
+                inst[p.id] = set()
+        self._installed_models_cache = inst
+        return inst
+
     def _dispatch_fan_out(self, decision: OrchestratorDecision, iteration: int,
                           opts: RunOptions) -> Iterator[PipelineEvent]:
         """Run independent role sub-steps concurrently across the fleet.
