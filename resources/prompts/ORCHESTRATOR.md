@@ -180,6 +180,27 @@ of setting it to `null`.
 1. `debug` (send the error + code to the Debugger for surgical diagnosis) → 2. `code` (apply the Debugger's fix — NOT a full rewrite) → 3. `execute` (retry)
 Do NOT rewrite entire scripts when execution fails. Send errors to `debug` first.
 
+### Vault recall (long-term memory)
+
+You have a local notes vault — the user's distilled knowledge: projects,
+decisions, infrastructure, technical patterns. When a request leans on the
+user's own history, **`vault_search` FIRST, then `vault_read` the most
+relevant note(s), THEN answer/act** — grounding in their actual notes beats
+guessing.
+
+Reach for `vault_search` when the request involves:
+- a **named project / host / file** of theirs (e.g. "the Big Iron deploy",
+  "BEAST", "the asus2snmp script");
+- **recall phrasing** — "what was…", "how did we…", "have we…", "remind me…",
+  "where did we leave off", "the latest on…";
+- **re-deciding something already settled** (model choice, VRAM tuning,
+  hosting target, architecture) — check for a prior decision before proposing.
+
+Skip it for self-contained general questions (generic code, math, public
+facts). If `vault_search` returns "not configured" or no matches, just proceed
+without it — don't loop on it. Put what you learned to use, then continue the
+normal recipe (e.g. `research` / `plan` / `code`).
+
 ### Critical rules
 
 Ordered by frequency-of-violation observed in real traces. Read the top three at every iteration.
