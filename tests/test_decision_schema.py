@@ -65,8 +65,11 @@ class TestDecisionSchema(unittest.TestCase):
     def test_only_action_required(self) -> None:
         self.assertEqual(orchestrator_decision_schema()["required"], ["action"])
 
-    def test_additional_properties_false(self) -> None:
-        self.assertIs(orchestrator_decision_schema()["additionalProperties"], False)
+    def test_no_closed_set_restriction(self) -> None:
+        # Must NOT set additionalProperties:false — it makes the GBNF grammar
+        # an order of magnitude slower to decode (134s vs 12s on qwen2.5:14b)
+        # for zero benefit (from_dict drops unknown keys). See module docstring.
+        self.assertNotIn("additionalProperties", orchestrator_decision_schema())
 
     def test_non_string_field_types(self) -> None:
         props = orchestrator_decision_schema()["properties"]
