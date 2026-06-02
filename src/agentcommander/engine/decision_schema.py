@@ -18,18 +18,23 @@ schema-level violations *after* generation: ``unknown_action_guard``,
 ``field_swap_guard`` / ``missing_fields_guard``. Constraining ``action`` to
 the real verb enum at decode time removes the failure at the source.
 
-Design choice — **flat, not conditional.** The schema constrains:
-  - ``action`` to the exact enum of registered verbs (``ALL_ACTIONS``),
-  - every property to the type ``OrchestratorDecision`` actually consumes,
-  - ``additionalProperties: false`` so the model can't waste tokens
-    inventing keys the engine drops anyway.
+Design choice — **flat, and grammar-cheap.** The schema constrains:
+  - ``action`` to the exact enum of registered verbs (``ALL_ACTIONS``) — the
+    constraint that matters, since it makes phantom verbs impossible,
+  - every property to the type ``OrchestratorDecision`` actually consumes
+    (so the model is *guided* to fill e.g. ``steps`` for a ``fan_out``).
 
-It deliberately does **not** encode per-action required fields via
-``if/then/else`` / ``oneOf``. Those constructs blow up the generated GBNF
-grammar and degrade decode speed / reliability on weak local models. The
-existing ``missing_fields_guard`` remains the cheap backstop for "fetch needs
-a url" — it just rarely has to fire now. Promoting to strict per-action
-schemas is tracked in ROADMAP.md (item under #1) if a future strong
+It deliberately does **NOT** set ``additionalProperties: false`` and does
+**not** encode per-action required fields via ``if/then/else`` / ``oneOf``.
+Both make the generated GBNF grammar far more expensive: a closed-set object
+with ~18 optional properties forces an "any-subset-in-any-order, nothing
+else" grammar that slowed constrained decoding on qwen2.5:14b from ~12s to
+~134s for the same 400-char decision (measured 2026-06-02, live on BEAST).
+The closed set bought nothing anyway — ``from_dict`` already drops unknown
+keys. Leaving ``additionalProperties`` unset keeps decoding fast while still
+guiding the model via the typed property list. ``missing_fields_guard``
+remains the cheap backstop for "fetch needs a url". Promoting to strict
+per-action schemas is tracked in ROADMAP.md (#1b) only if a future strong
 orchestrator makes the grammar cost acceptable.
 
 The property set is derived from ``OrchestratorDecision``'s dataclass fields,
