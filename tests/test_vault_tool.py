@@ -87,6 +87,20 @@ class TestResolveAndSandbox(unittest.TestCase):
         self.assertIsNone(vt._resolve_note(self.root, "../../../etc/passwd"))
         self.assertIsNone(vt._resolve_note(self.root, "../secrets"))
 
+    def test_dotted_name_resolves(self):
+        # Regression: os.path.splitext truncated "llama.cpp …" → "llama".
+        # Note titles with dots (llama.cpp, hvr.biz, dwd.info) must resolve.
+        os.makedirs(os.path.join(self.root, "Topics"), exist_ok=True)
+        with open(os.path.join(self.root, "Topics", "llama.cpp VRAM tricks.md"),
+                  "w", encoding="utf-8") as fh:
+            fh.write("# dotted\nbody")
+        self.assertIsNotNone(vt._resolve_note(self.root, "llama.cpp VRAM tricks"))
+        self.assertIsNotNone(vt._resolve_note(self.root, "[[llama.cpp VRAM tricks]]"))
+
+    def test_note_key_strips_md_not_dots(self):
+        self.assertEqual(vt._note_key("Topics/hvr.biz topics.md"), "hvr.biz topics")
+        self.assertEqual(vt._note_key("dwd.info plan"), "dwd.info plan")
+
 
 class TestSemantic(unittest.TestCase):
     def setUp(self):
