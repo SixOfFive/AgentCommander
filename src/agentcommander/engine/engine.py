@@ -1850,13 +1850,33 @@ class PipelineRun:
                     f"[{', '.join(s.get('action') for s in runnable)}] {mode}{skip_note}"),
         )
 
+        # Host-aware routing: when running in parallel, spread the sub-steps
+        # across distinct hosts that have the role's model (same model,
+        # different GPU) so they don't contend on one card. Serial degrade
+        # keeps the default bindings (no point probing hosts).
+        planned = runnable
+        if enabled:
+            installed = self._gather_installed_models()
+            planned = plan_host_routing(
+                runnable, resolve_fn=resolve_role,
+                installed_by_provider=installed)
+            routes = []
+            for p in planned:
+                pid = (p.get("provider_id") or "?").replace("auto-", "")
+                routes.append(f"{p.get('action')}→{pid}"
+                              + ("*" if p.get("_rerouted") else ""))
+            yield PipelineEvent(
+                type="guard", family="fan_out",
+                reason="fan_out routing: " + ", ".join(routes)
+                       + "   (* = rerouted to an alternate host)")
+
         # Snapshot the scratchpad context ONCE so every worker sees the same
         # read-only prior state; the scratchpad isn't mutated until gather.
         scratchpad_text = compact_scratchpad(self.state.scratchpad)
         wall_started = time.time()
 
         results = run_fan_out(
-            runnable,
+            planned,
             scratchpad_text=scratchpad_text,
             conversation_id=opts.conversation_id,
             should_cancel=self.is_cancelled,
