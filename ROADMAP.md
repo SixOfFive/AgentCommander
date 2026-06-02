@@ -104,6 +104,31 @@ per-step rate-limit retry with UI countdown (a rate-limited worker currently
 records a failed sub-step); live streaming of concurrent steps into separate
 popout blocks.
 
+### Vault recall — long-term memory over a local notes vault (DONE, 2026-06-02)
+Read-only tools `vault_search` + `vault_read` give the orchestrator recall over
+a local Obsidian-style vault (projects, decisions, infra, patterns).
+- `tools/vault_tool.py`: semantic search reuses an existing
+  `_index/embeddings.json` (cosine in pure Python; query embedded via Ollama
+  `nomic-embed-text`), falls back to lexical. Lexical is restricted to the
+  indexed/curated note set + stopword-filtered, so it never surfaces raw
+  session archives (info-hygiene). Sandboxed read-only to the vault dir.
+- Verbs added to `TOOL_ACTIONS` (flow into the #1 schema enum + guards);
+  `_decision_to_payload` maps them; `repeated_tool_call_guard` caps
+  `vault_search`=3 / `vault_read`=5 (a weak orchestrator looped 13x otherwise).
+- `/vault set|off|search|status`; vault PATH in the project-local DB
+  (gitignored). Vault CONTENT only ever lands in the gitignored project DB/logs
+  — never the source tree. Tool code is generic (committed); no private data.
+- ORCHESTRATOR.md gained a recall protocol (when to search: named projects,
+  "what was/how did we", decision re-derivation).
+- 15 tests in `tests/test_vault_tool.py` (incl. dotted-name regression:
+  os.path.splitext truncated "llama.cpp…"→"llama"). Live-verified end-to-end:
+  search→read→answer against the real 1,626-note vault.
+
+**Caveats / follow-ups:** synthesis faithfulness is model-bound (a 14B read the
+right note but summarized loosely) — a stronger orchestrator or a forced
+summarizer-over-read-content pass would help. The embeddings index is
+maintained externally (vault-maintenance); AC is a read-only consumer.
+
 ### #6 — TypeCast hint accumulator (was "deferred" in braindump)
 Verified already wired: `engine._bump_hint_for_label` bumps `(model, role)`
 by ±0.1 on classify/orchestrate/role success/failure; `db.repos` persists to
