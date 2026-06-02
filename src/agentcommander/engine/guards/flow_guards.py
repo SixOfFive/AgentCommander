@@ -79,6 +79,12 @@ def repeated_tool_call_guard(scratchpad: list[ScratchpadEntry], iteration: int,
     capped = {
         "list_dir": 5, "fetch": 5, "read_file": 5, "search": 5,
         "write_file": 8, "execute": 8,
+        # Read-only vault recall — same family as fetch/read_file. Without
+        # these, a weak orchestrator re-searches the vault indefinitely
+        # instead of reading a found note or answering (observed: 13x
+        # vault_search in one turn). Capped at 3: a couple of refined
+        # searches is plenty before it should vault_read or answer.
+        "vault_search": 3, "vault_read": 5,
     }
     cap = capped.get(decision.action)
     if cap is None:
