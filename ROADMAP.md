@@ -157,29 +157,40 @@ Surfaced by a live fan_out research run that 404'd (researcher bound to
 
 ---
 
+## DONE (continued)
+
+### #4 — Guard telemetry + `/guards` (DONE, 2026-06-02)
+Records which guards actually fire (return a non-pass verdict) so dead guards
+can be pruned with evidence instead of guesswork.
+- `guard_fires` table (aggregate: family/guard/verdict → count + last_fired) +
+  `db.repos.record_guard_fire`/`guard_fire_stats`/`clear_guard_fires`.
+- `engine/guards/types.record_fire` + `guard_name` (recovers the guard name from
+  each runner entry — bare function via `__name__`, `lambda: foo_guard(...)`
+  via `co_names` — so **zero per-guard bookkeeping**, tracks renames).
+- The 5 list-based runners instrumented (decision/done/flow/execute/write) — one
+  line each at the firing point. 95 guards covered.
+- `/guards` shows a fire-count table + the **never-fired** guards (pruning
+  candidates); `/guards reset` clears. Verified end-to-end: a bogus/empty action
+  recorded `unknown_action_guard` / `empty_action_guard`.
+- 9 tests in `tests/test_guard_telemetry.py`.
+
+**The payoff step (do next):** run the eval suite (#3) + normal usage to
+accumulate fires, then `/guards` → delete the never-fired guards. Many decision
+guards should be dead now that #1 makes invalid actions impossible to emit.
+NOTE: telemetry covers the 5 runner families; `preventive_guards` (1537 lines),
+`post_step`, `fetch`, `output` aren't instrumented yet — extend if needed.
+
+---
+
 ## NEXT
 
-### #4 — Guard telemetry + `/guards stats`
-**Problem.** There are ~140+ guards across 9 families (`preventive_guards.py`
-alone is 1537 lines). Nobody knows which actually fire in practice, so the
-suite only grows — never shrinks. You flagged "too many" at round 41.
+### Prune dead guards (the payoff of #4)
+Accumulate guard-fire data (eval suite + real usage, console closed so the eval
+can take the DB lock), then `/guards` and delete the never-fired ones. Expect a
+meaningful cut now that schema-constrained decoding (#1) is in. This is what
+finally brings guard count DOWN instead of up.
 
-**Approach.**
-- Add a `guard_fires` table (`family, guard_name, verdict, conversation_id,
-  run_id, ts`) and a counter bump at each guard's decision point (or
-  centrally in the guard-runner loop in `engine/guards/*`).
-- `/guards stats` slash command (`tui/commands.py`): table sorted by fire
-  count, with last-fired timestamp and pass/break/continue breakdown.
-- Cross-reference with an eval run (#3): guards that never fire across the
-  full golden suite + normal usage are deletion candidates — and many should
-  now be dead weight after #1 (`unknown_action`, `sentence_as_action`, parts
-  of `field_swap`/`missing_fields`).
-
-**Files.** `db/schema.sql`, `db/repos.py`, `engine/guards/` runners,
-`tui/commands.py`. **Effort:** ~half day. **Acceptance:** after a golden-suite
-run, `/guards stats` lists fire counts; ≥1 guard provably removable.
-
-### #5 — Break up `engine.py` (2770 lines)
+### #5 — Break up `engine.py` (~2950 lines)
 **Problem.** Modularity is a hard constraint, but `engine.py` has become a
 god-file: pipeline loop + chat fallback + compaction + `_LIVE_DATA_PATTERNS_FORCED`
 + `_infer_live_data_url` + `_detect_tool_syntax_intent` + `_honor_tool_text_as_intent`
