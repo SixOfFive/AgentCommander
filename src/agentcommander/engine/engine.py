@@ -2137,58 +2137,6 @@ class PipelineRun:
             used += len(snippet) + len(head) + 2
         return "\n\n".join(parts)
 
-    def _is_scratchpad_leak(self, text: str) -> bool:
-        """True when ``text`` is a verbatim copy of the engine's own
-        scratchpad scaffolding rather than a real model reply.
-
-        Round-22 stress catch: once a prior turn ran a successful tool
-        action, the orchestrator's compact_scratchpad input contained the
-        engine's ``successfully completed:\\n`` wrapper from
-        ``_dispatch_tool``. On subsequent UNRELATED questions, the
-        orchestrator (a 24B model under context pressure) sometimes
-        emitted ``decision.input`` = that exact wrapped output as its
-        answer — bypassing both the chat fallback and the router-echo
-        check. Detecting the wrapper prefix gives us a mechanical, model-
-        agnostic signal that we're looking at a leak rather than a reply,
-        so we can route to ``_chat_fallback_stream`` for a fresh attempt.
-
-        ``compact_scratchpad`` now also strips the wrapper at the prompt-
-        construction layer so the model is less likely to learn the
-        pattern. This check is the safety net for the case where the
-        model already learned it during the run (or generates the prefix
-        on its own initiative).
-        """
-        if not text:
-            return False
-        norm = text.lstrip()
-        norm_lower = norm.lower()
-        # 1. Engine's tool-success wrapper. Never a real reply — only
-        #    _dispatch_tool produces this exact prefix at engine.py:1615.
-        if norm_lower.startswith("successfully completed:"):
-            return True
-        # 2. Role-prompt scaffolding regurgitation. The summarizer /
-        #    architect / planner prompts use phrases like "Summarize what
-        #    was done" and "Work completed:" that should never appear in
-        #    a model's user-facing reply — when the orchestrator emits
-        #    them as ``done.input``, it's reflecting prompt template text
-        #    rather than answering. Round-22 example: TEST 053 came back
-        #    with "Summarize what was done. User asked: ..." instead of
-        #    naming three planets.
-        if norm_lower.startswith("summarize what was done"):
-            return True
-        # 3. Multi-test-summary hallucination loop. Once the orchestrator
-        #    emits a fake "All test cases processed successfully: TEST X:
-        #    ..." block (which itself is a self-reinforcing leak from a
-        #    prior turn's bad output), every subsequent turn copies it.
-        #    The signature is: 3+ "TEST NNN:" patterns when only one
-        #    "TEST NNN" appeared in the current user message — i.e. the
-        #    reply references prior turns rather than answering this one.
-        import re as _re
-        test_refs = _re.findall(r"\bTEST\s+\d{2,3}\b", norm)
-        if len(test_refs) >= 3:
-            return True
-        return False
-
     def _is_router_echo(self, text: str) -> bool:
         """True when ``text`` is a non-answer the chat fallback should
         replace — either empty, just the router's classification word, the
