@@ -103,13 +103,40 @@ def _embed_endpoint() -> str | None:
 # ─── Note file resolution (sandboxed) ───────────────────────────────────────
 
 
+def _excluded_dirs() -> set[str]:
+    extra = _cfg("vault_exclude_dirs")
+    out = set(_ALWAYS_EXCLUDE)
+    if isinstance(extra, str) and extra.strip():
+        out |= {d.strip() for d in extra.split(",") if d.strip()}
+    return out
+
+
 def _iter_markdown(root: str):
+    excluded = _excluded_dirs()
     for dirpath, dirnames, filenames in os.walk(root):
-        # Skip Obsidian internals + the embeddings index dir.
-        dirnames[:] = [d for d in dirnames if d not in (".obsidian", ".git", "_index")]
+        dirnames[:] = [d for d in dirnames if d not in excluded]
         for fn in filenames:
             if fn.lower().endswith(".md"):
                 yield os.path.join(dirpath, fn)
+
+
+def _indexed_stems(root: str) -> "set[str] | None":
+    """Lowercased stems of the notes present in the embeddings index, or None
+    if there's no index. Used to keep lexical recall on the same CURATED scope
+    as semantic recall — so the fallback never surfaces raw session archives
+    (which the recall protocol treats as last-resort, and which can carry
+    sensitive content)."""
+    index_path = _index_path(root)
+    if not os.path.isfile(index_path):
+        return None
+    try:
+        with open(index_path, "r", encoding="utf-8") as fh:
+            index = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(index, dict):
+        return None
+    return {os.path.splitext(os.path.basename(k))[0].lower() for k in index}
 
 
 def _resolve_note(root: str, name: str) -> str | None:
