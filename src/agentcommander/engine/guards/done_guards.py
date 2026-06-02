@@ -19,6 +19,7 @@ from agentcommander.engine.guards.types import (
     code_context,
     has_deliverable,
     push_system_nudge,
+    record_fire,
     user_wants_action,
 )
 from agentcommander.engine.scratchpad import build_final_output
