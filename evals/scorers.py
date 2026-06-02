@@ -109,6 +109,42 @@ def check_no_error(result: dict, check: dict) -> tuple[bool, str]:
     return (err is None), f"error: {err}" if err else "no error"
 
 
+def check_guard_fired(result: dict, check: dict) -> tuple[bool, str]:
+    """A guard named ``value`` fired during the case.
+
+    Relies on the runner injecting per-case guard fires (``guards_fired``,
+    a {guard_name: count} dict diffed around the case) into the scored
+    result. Use to assert a guard CORRECTLY caught a bad pattern.
+    """
+    name = str(check["value"])
+    fired = result.get("guards_fired") or {}
+    n = int(fired.get(name, 0))
+    return n > 0, f"guard {name!r} fired {n}x"
+
+
+def check_guard_not_fired(result: dict, check: dict) -> tuple[bool, str]:
+    """Guard ``value`` must NOT have fired — the false-positive assertion.
+
+    This is the lever for the FP-probe cases: a legitimate output that
+    superficially resembles a guard trigger (a one-word answer, a clarifying
+    question, an apology email, a historical year) must not trip the guard.
+    A failure here is a confirmed false-positive guard.
+    """
+    name = str(check["value"])
+    fired = result.get("guards_fired") or {}
+    n = int(fired.get(name, 0))
+    return n == 0, (f"guard {name!r} WRONGLY fired {n}x" if n
+                    else f"guard {name!r} stayed quiet")
+
+
+def check_no_guard_fired(result: dict, check: dict) -> tuple[bool, str]:
+    """No guard fired at all this case. Strictest FP check for clean prompts."""
+    fired = result.get("guards_fired") or {}
+    if not fired:
+        return True, "no guards fired"
+    return False, "guards fired: " + ", ".join(sorted(fired))
+
+
 _SCORERS: dict[str, Callable[[dict, dict], tuple[bool, str]]] = {
     "contains": check_contains,
     "contains_all": check_contains_all,
