@@ -3,6 +3,8 @@
 Local multi-agent LLM orchestration CLI. Pure-Python (stdlib only — zero runtime dependencies). Mimics the Claude Code Linux console look.
 
 > **Status:** v0.1.0 — full port of the EngineCommander internals (safety layer, 19 agents, 9 guard families, tool dispatcher, providers, TypeCast) plus a live read-only mirror, project-local SQLite with corruption defense, persistent chat history, cross-turn scratchpad memory, and per-model throughput tracking. Single-user, single-machine.
+>
+> **Recent:** schema-constrained orchestrator decoding (the decision JSON is constrained to the action grammar at the sampler level), opt-in parallel **fan-out** across the fleet with makespan-aware host routing, read-only **vault recall** (long-term memory over a local notes vault), and a scored **eval harness** (`evals/`) that replays golden prompts through the real engine.
 
 ## Concept
 
