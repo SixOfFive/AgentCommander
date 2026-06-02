@@ -2023,6 +2023,44 @@ def _distribute_cells(weights: list[int], total_width: int) -> list[int]:
     return cells
 
 
+def cmd_parallel(ctx: CommandContext, args: list[str]) -> None:
+    """Toggle parallel fan-out (prototype) — fleet utilization.
+
+    When ON, the orchestrator may emit a ``fan_out`` decision whose
+    independent role sub-steps run concurrently, each on its role's assigned
+    provider — so binding panel roles to different hosts uses multiple GPUs
+    at once. When OFF (default), a fan_out decision degrades to sequential
+    execution (same result, no concurrency).
+    """
+    from agentcommander.db.repos import get_config, set_config
+
+    sub = (args[0] if args else "").lower()
+    cur = bool(get_config("fan_out_enabled", False))
+
+    if sub in ("on", "enable", "true", "1"):
+        set_config("fan_out_enabled", True)
+        render_system_line(style("ok",
+            "  parallel fan_out: ENABLED"))
+        render_system_line(style("muted",
+            "  the orchestrator may run independent role sub-steps "
+            "concurrently. Bind panel roles to different hosts to use "
+            "multiple GPUs at once, e.g.:"))
+        render_system_line(style("muted",
+            "    /roles set reviewer  http://192.168.15.103:11434 <model>"))
+        render_system_line(style("muted",
+            "    /roles set critic    http://192.168.15.106:11434 <model>"))
+    elif sub in ("off", "disable", "false", "0"):
+        set_config("fan_out_enabled", False)
+        render_system_line(style("ok",
+            "  parallel fan_out: DISABLED — fan_out decisions run serially."))
+    elif sub in ("", "status"):
+        render_system_line(
+            f"  parallel fan_out: {'ENABLED' if cur else 'DISABLED'}")
+    else:
+        render_system_line(style("warn",
+            f"  unknown arg {sub!r} — use /parallel on|off|status"))
+
+
 def cmd_usage(ctx: CommandContext, args: list[str]) -> None:
     """Show per-role prompt-token usage for the current chat (or globally).
 
