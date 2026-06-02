@@ -145,6 +145,16 @@ by ±0.1 on classify/orchestrate/role success/failure; `db.repos` persists to
 `model_hints`; `typecast/autoconfig.py` folds the hints into role scoring.
 No action needed — braindump's "deferred" note is stale.
 
+### Binding/error robustness (DONE, 2026-06-02)
+Surfaced by a live fan_out research run that 404'd (researcher bound to
+`cogito:8b`, not installed on BEAST):
+- **Clearer Ollama errors** (`providers/ollama.py`): a 404 now reads "model 'X'
+  not found on <endpoint> — install it or rebind" instead of bare "HTTP 404".
+- **`/roles set` model validation** (`tui/commands.verify_model_installed`):
+  ✓ confirms / ⚠ warns + suggests closest installed names / notes if
+  unreachable. Non-blocking. Catches ghost bindings at bind time.
+- Tests: `test_ollama_404.py` (2), `test_roles_verify.py` (6).
+
 ---
 
 ## NEXT
