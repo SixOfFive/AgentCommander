@@ -231,17 +231,22 @@ src/agentcommander/
 ├── providers/              base + ollama + llamacpp + capability_hints
 │                           (auto-registered on import)
 ├── tools/                  dispatcher + file_tool / code_tool / web_tool / process_tool /
-│                           http_tool / git_tool / env_tool / browser_tool
+│                           http_tool / git_tool / env_tool / browser_tool /
+│                           vault_tool (read-only notes-vault recall)
 ├── engine/
 │   ├── engine.py           PipelineRun (generator yielding PipelineEvents);
 │   │                       _detect_tool_syntax_intent + _honor_tool_text_as_intent
-│   │                       + _infer_live_data_url
-│   ├── role_call.py        invoke a role via its assigned provider; skips tool
+│   │                       + _infer_live_data_url + _dispatch_fan_out
+│   ├── decision_schema.py  JSON Schema for the orchestrator decision (action enum
+│   │                       from ALL_ACTIONS), used for schema-constrained decoding
+│   ├── fan_out.py          parallel fan-out primitive + makespan-aware host routing
+│   ├── role_call.py        invoke a role via its assigned provider (optional
+│   │                       host/model override for fan-out routing); skips tool
 │   │                       registry appendix on router
 │   ├── live_tee.py         tee events + bar state into pipeline_events / config
 │   ├── role_resolver.py    num_ctx precedence: /context → per-role → ceiling → None;
 │   │                       per-role default caps (router=8k)
-│   ├── actions.py          ROLE_ACTIONS / TOOL_ACTIONS / ACTION_TO_ROLE
+│   ├── actions.py          ROLE_ACTIONS / TOOL_ACTIONS / ACTION_TO_ROLE / FANOUT_ACTION
 │   ├── scratchpad.py       compaction + final-output assembly + compact_conversation_db
 │   └── guards/             9 families: output, write, fetch, post_step, decision,
 │                           flow, execute, done + shared types
@@ -250,6 +255,9 @@ src/agentcommander/
 └── tui/                    ansi.py + render.py + markdown.py + commands.py + app.py +
                             status_bar.py + autocomplete.py + terminal_input.py +
                             permissions.py + setup.py + mirror.py + popouts.py
+evals/                      scored eval harness — golden cases + tolerant scorers +
+                            runner (replays prompts through the real engine).
+                            results/ is gitignored; cases/scorers/runner committed
 resources/prompts/          19 role .md system prompts (14 refactored to standard
                             Identity / Mission / Critical Rules / Output Contract /
                             Examples / Common Failures / Success Metrics shape;
