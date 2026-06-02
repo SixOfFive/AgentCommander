@@ -1331,7 +1331,7 @@ def run_done_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         lambda: fake_citation_guard(scratchpad, iteration, decision),
         lambda: stale_year_guard(scratchpad, iteration, decision),
         lambda: hedge_only_guard(scratchpad, iteration, decision),
-        lambda: question_only_done_guard(scratchpad, iteration, decision),
+        lambda: question_only_done_guard(scratchpad, iteration, decision, user_message),
         lambda: here_is_only_guard(scratchpad, iteration, decision),
         lambda: over_apologetic_guard(scratchpad, iteration, decision),
         lambda: dangling_promise_guard(scratchpad, iteration, decision),
