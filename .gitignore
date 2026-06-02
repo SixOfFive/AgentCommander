@@ -50,3 +50,8 @@ AgentTesting/
 # providers, role assignments, and conversation history isolated per
 # project. The DB carries endpoints + api_keys; never commit it.
 .agentcommander/
+
+# Eval harness output (improvement #3). The golden cases, scorers, and
+# runner ARE committed; per-run results are machine/run specific and stay
+# local. history.tsv is a local scoreboard.
+evals/results/
