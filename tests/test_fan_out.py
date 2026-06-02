@@ -158,5 +158,40 @@ class TestRunFanOut(unittest.TestCase):
         self.assertIs(seen["cancel"], sentinel)
 
 
+class TestFanOutDecisionGuards(unittest.TestCase):
+    """fan_out must survive the decision-guard chain (regression: it was
+    rejected by unknown_action_guard, causing an infinite re-orchestrate loop)."""
+
+    def _decision(self):
+        from agentcommander.types import OrchestratorDecision
+        return OrchestratorDecision(
+            action="fan_out", reasoning="panel",
+            steps=[{"action": "review", "input": "r"},
+                   {"action": "critique", "input": "c"},
+                   {"action": "test", "input": "t"}])
+
+    def test_fan_out_is_a_known_action(self) -> None:
+        from agentcommander.engine.guards.decision_guards import _SPECIAL_ACTIONS, _all_known_actions
+        self.assertIn("fan_out", _SPECIAL_ACTIONS)
+        self.assertIn("fan_out", _all_known_actions())
+
+    def test_fan_out_passes_decision_guards(self) -> None:
+        from agentcommander.engine.guards.decision_guards import run_decision_guards
+        res = run_decision_guards({
+            "decision": self._decision(), "scratchpad": [], "iteration": 1,
+            "user_message": "review critique test", "browser_available": False,
+        })
+        self.assertEqual(res["verdict"]["action"], "pass")
+        self.assertEqual(res["decision"].action, "fan_out")
+
+    def test_unknown_action_guard_excludes_fan_out_from_menu(self) -> None:
+        # fan_out is special — it must not be advertised in the generic
+        # "pick one of" nudge for a truly-unknown action.
+        from agentcommander.engine.guards.decision_guards import (
+            _all_known_actions, _SPECIAL_ACTIONS)
+        menu = _all_known_actions() - _SPECIAL_ACTIONS
+        self.assertNotIn("fan_out", menu)
+
+
 if __name__ == "__main__":
     unittest.main()
