@@ -120,6 +120,32 @@ def _fmt_ms(ms: int) -> str:
     return f"{s:5.1f}s" if s < 60 else f"{int(s)//60}m{int(s)%60:02d}s"
 
 
+def _guard_counts() -> dict[str, int]:
+    """Snapshot {guard_name: total_fire_count} from the telemetry table (#4).
+
+    Diffing this around each case attributes guard fires to the prompt that
+    triggered them — the signal for spotting false-positive guards (a guard
+    that fires on a case whose output was actually fine) and dead guards
+    (never fires across a diverse suite). Returns {} if the table/DB isn't
+    available so the runner degrades gracefully.
+    """
+    try:
+        from agentcommander.db.repos import guard_fire_stats
+        return {s["guard"]: int(s["count"]) for s in guard_fire_stats()}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _guard_delta(before: dict[str, int], after: dict[str, int]) -> dict[str, int]:
+    """Per-case fire counts: guards whose count rose between two snapshots."""
+    out: dict[str, int] = {}
+    for guard, n in after.items():
+        d = n - before.get(guard, 0)
+        if d > 0:
+            out[guard] = d
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="AgentCommander eval runner")
     ap.add_argument("--cases", default=str(_THIS.parent / "cases.jsonl"))
