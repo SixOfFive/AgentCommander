@@ -253,6 +253,19 @@ CREATE TABLE IF NOT EXISTS model_throughput (
   updated_at INTEGER NOT NULL
 );
 
+-- Guard telemetry — which guards actually fire (return a non-pass verdict),
+-- how often, and when. Aggregate (one row per family/guard/verdict) so it
+-- stays tiny; lets `/guards stats` rank guards by fire count and spot
+-- never-fired guards as pruning candidates.
+CREATE TABLE IF NOT EXISTS guard_fires (
+  family TEXT NOT NULL,
+  guard TEXT NOT NULL,
+  verdict TEXT NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  last_fired_at INTEGER NOT NULL,
+  PRIMARY KEY (family, guard, verdict)
+);
+
 -- Per-(host, model) throughput. The same model id can run at very different
 -- speeds on different hosts (a 4070 vs a 3060), so fan-out's makespan-aware
 -- router needs throughput keyed by provider, not just by model. Additive to
