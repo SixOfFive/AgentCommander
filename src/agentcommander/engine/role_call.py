@@ -236,7 +236,7 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
         insert_token_usage(
             conversation_id=conversation_id,
             role=role_enum.value,
-            provider_id=resolved.provider_id,
+            provider_id=eff_provider_id,
             model=model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
