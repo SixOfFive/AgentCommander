@@ -103,6 +103,17 @@ def _embed_endpoint() -> str | None:
 # ─── Note file resolution (sandboxed) ───────────────────────────────────────
 
 
+def _note_key(s: str) -> str:
+    """Basename with a trailing ``.md`` removed — WITHOUT os.path.splitext,
+    which would truncate a name at the first dot ("llama.cpp VRAM…" → "llama").
+    Many note titles contain dots (llama.cpp, hvr.biz, dwd.info), so the naive
+    splitext silently broke resolution for them."""
+    s = os.path.basename(s)
+    if s.lower().endswith(".md"):
+        s = s[:-3]
+    return s
+
+
 def _excluded_dirs() -> set[str]:
     extra = _cfg("vault_exclude_dirs")
     out = set(_ALWAYS_EXCLUDE)
