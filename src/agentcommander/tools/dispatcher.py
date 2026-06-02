@@ -180,6 +180,18 @@ def invoke(name: str, payload: dict[str, Any], *,
     """Dispatch a single tool. Always returns a ToolResult (never raises)."""
     from agentcommander.db.repos import audit  # lazy to avoid import order issues
 
+    # Keep the read-only zones in sync with config before any file op runs, so
+    # the notes vault stays read-only regardless of the working directory.
+    try:
+        from agentcommander.db.repos import get_config
+        from agentcommander.safety import sandbox as _sandbox
+        _sandbox.clear_readonly_zones()
+        _vault = get_config("vault_path")
+        if isinstance(_vault, str) and _vault:
+            _sandbox.register_readonly_zone(_vault)
+    except Exception:  # noqa: BLE001 - never block a dispatch on zone sync
+        pass
+
     descriptor = _REGISTRY.get(name)
     if descriptor is None:
         return ToolResult(ok=False, error=f"unknown tool: {name}")
