@@ -159,8 +159,8 @@ class TestRunFanOut(unittest.TestCase):
 
 
 class TestHostRouting(unittest.TestCase):
-    """plan_host_routing: spread concurrent steps across distinct hosts that
-    have the role's model (same model, different GPU)."""
+    """plan_host_routing is makespan-aware: spread to an alternate host only
+    when per-host throughput says it reduces predicted wall-clock."""
 
     class _RRObj:
         def __init__(self, pid, model):
@@ -171,54 +171,68 @@ class TestHostRouting(unittest.TestCase):
         # table: {Role: (provider_id, model)}
         return lambda role: (self._RRObj(*table[role]) if role in table else None)
 
-    def test_homogeneous_spreads_across_hosts(self) -> None:
+    def _tps(self, table):
+        # table: {(provider_id, model): tokens_per_second}; missing → None
+        return lambda pid, model: table.get((pid, model))
+
+    def test_no_throughput_data_stays_on_default(self) -> None:
+        # Safety: with no per-host throughput known, never gamble on an
+        # alternate — keep every step on its fast default host.
         from agentcommander.types import Role
         table = {Role.RESEARCHER: ("A", "M")}
         installed = {"A": {"M"}, "B": {"M"}}
         subs = [{"action": "research", "input": str(i)} for i in range(3)]
         planned = fo.plan_host_routing(subs, resolve_fn=self._resolver(table),
                                        installed_by_provider=installed)
-        pids = [p["provider_id"] for p in planned]
-        # default host first, then alternate, then back — uses BOTH hosts.
-        self.assertEqual(pids, ["A", "B", "A"])
-        self.assertEqual([p["model"] for p in planned], ["M", "M", "M"])
-        self.assertEqual([p["_rerouted"] for p in planned], [False, True, False])
-
-    def test_model_only_on_default_host_stays(self) -> None:
-        from agentcommander.types import Role
-        table = {Role.RESEARCHER: ("A", "M")}
-        installed = {"A": {"M"}, "B": {"OTHER"}}  # B lacks M
-        subs = [{"action": "research", "input": str(i)} for i in range(3)]
-        planned = fo.plan_host_routing(subs, resolve_fn=self._resolver(table),
-                                       installed_by_provider=installed)
         self.assertEqual([p["provider_id"] for p in planned], ["A", "A", "A"])
-        self.assertEqual([p["_rerouted"] for p in planned], [False, False, False])
-
-    def test_heterogeneous_already_distinct(self) -> None:
-        from agentcommander.types import Role
-        table = {Role.REVIEWER: ("A", "ma"), Role.CRITIC: ("B", "mb"),
-                 Role.TESTER: ("A", "ma")}
-        installed = {"A": {"ma"}, "B": {"mb"}}
-        subs = [{"action": "review", "input": "r"},
-                {"action": "critique", "input": "c"},
-                {"action": "test", "input": "t"}]
-        planned = fo.plan_host_routing(subs, resolve_fn=self._resolver(table),
-                                       installed_by_provider=installed)
-        # review→A, critique→B (distinct already); test→A (ma only on A, contends)
-        self.assertEqual([p["provider_id"] for p in planned], ["A", "B", "A"])
         self.assertFalse(any(p["_rerouted"] for p in planned))
 
-    def test_heterogeneous_reroutes_when_shared(self) -> None:
+    def test_comparable_hosts_split(self) -> None:
+        # Equal throughput on both hosts → splitting 2 steps halves makespan.
         from agentcommander.types import Role
-        # tester's model ALSO lives on B → test reroutes off the busy A.
-        table = {Role.REVIEWER: ("A", "ma"), Role.TESTER: ("A", "ma")}
-        installed = {"A": {"ma"}, "B": {"ma"}}
-        subs = [{"action": "review", "input": "r"},
-                {"action": "test", "input": "t"}]
+        table = {Role.RESEARCHER: ("A", "M")}
+        installed = {"A": {"M"}, "B": {"M"}}
+        tps = self._tps({("A", "M"): 50.0, ("B", "M"): 50.0})
+        subs = [{"action": "research", "input": str(i)} for i in range(2)]
         planned = fo.plan_host_routing(subs, resolve_fn=self._resolver(table),
-                                       installed_by_provider=installed)
+                                       installed_by_provider=installed, throughput_fn=tps)
         self.assertEqual([p["provider_id"] for p in planned], ["A", "B"])
         self.assertEqual([p["_rerouted"] for p in planned], [False, True])
+
+    def test_much_slower_alt_keeps_both_on_fast(self) -> None:
+        # The real-fleet case: B (3060) ~5x slower than A (4070). Splitting
+        # would bottleneck on B, so the makespan greedy keeps BOTH on A.
+        from agentcommander.types import Role
+        table = {Role.RESEARCHER: ("A", "M")}
+        installed = {"A": {"M"}, "B": {"M"}}
+        tps = self._tps({("A", "M"): 50.0, ("B", "M"): 10.0})
+        subs = [{"action": "research", "input": str(i)} for i in range(2)]
+        planned = fo.plan_host_routing(subs, resolve_fn=self._resolver(table),
+                                       installed_by_provider=installed, throughput_fn=tps)
+        self.assertEqual([p["provider_id"] for p in planned], ["A", "A"])
+        self.assertFalse(any(p["_rerouted"] for p in planned))
+
+    def test_three_steps_two_fast_hosts(self) -> None:
+        from agentcommander.types import Role
+        table = {Role.RESEARCHER: ("A", "M")}
+        installed = {"A": {"M"}, "B": {"M"}}
+        tps = self._tps({("A", "M"): 50.0, ("B", "M"): 50.0})
+        subs = [{"action": "research", "input": str(i)} for i in range(3)]
+        planned = fo.plan_host_routing(subs, resolve_fn=self._resolver(table),
+                                       installed_by_provider=installed, throughput_fn=tps)
+        # balanced 2/1 across the two equal hosts, default first
+        self.assertEqual([p["provider_id"] for p in planned], ["A", "B", "A"])
+
+    def test_unmeasured_alt_never_used(self) -> None:
+        # A measured+fast, B unmeasured → B is not gambled on; both stay on A.
+        from agentcommander.types import Role
+        table = {Role.RESEARCHER: ("A", "M")}
+        installed = {"A": {"M"}, "B": {"M"}}
+        tps = self._tps({("A", "M"): 50.0})  # B unknown
+        subs = [{"action": "research", "input": str(i)} for i in range(2)]
+        planned = fo.plan_host_routing(subs, resolve_fn=self._resolver(table),
+                                       installed_by_provider=installed, throughput_fn=tps)
+        self.assertEqual([p["provider_id"] for p in planned], ["A", "A"])
 
     def test_unresolvable_role_passes_through(self) -> None:
         planned = fo.plan_host_routing(
