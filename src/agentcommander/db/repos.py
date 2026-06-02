@@ -981,6 +981,52 @@ def get_throughput(model: str | None) -> float | None:
         return None
 
 
+def record_guard_fire(family: str, guard: str, verdict: str) -> None:
+    """Increment the fire counter for a (family, guard, verdict). Best-effort
+    — guard telemetry must never break a pipeline run."""
+    if not family or not guard or not verdict:
+        return
+    try:
+        db = get_db()
+        db.execute(
+            "INSERT INTO guard_fires (family, guard, verdict, count, last_fired_at) "
+            "VALUES (?, ?, ?, 1, ?) "
+            "ON CONFLICT(family, guard, verdict) DO UPDATE SET "
+            "  count = count + 1, last_fired_at = excluded.last_fired_at",
+            (family, guard, verdict, _now_ms()),
+        )
+    except sqlite3.DatabaseError:
+        pass
+
+
+def guard_fire_stats() -> list[dict[str, Any]]:
+    """All recorded guard fires, most-fired first. Each row:
+    {family, guard, verdict, count, last_fired_at}."""
+    try:
+        rows = get_db().execute(
+            "SELECT family, guard, verdict, count, last_fired_at "
+            "FROM guard_fires ORDER BY count DESC, family, guard"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    return [
+        {"family": r["family"], "guard": r["guard"], "verdict": r["verdict"],
+         "count": int(r["count"]), "last_fired_at": int(r["last_fired_at"])}
+        for r in rows
+    ]
+
+
+def clear_guard_fires() -> int:
+    """Wipe guard telemetry. Returns rows removed."""
+    try:
+        db = get_db()
+        n = db.execute("SELECT COUNT(*) AS c FROM guard_fires").fetchone()["c"]
+        db.execute("DELETE FROM guard_fires")
+        return int(n)
+    except sqlite3.DatabaseError:
+        return 0
+
+
 def get_throughput_for_host(provider_id: str | None,
                             model: str | None) -> float | None:
     """Running-average tokens/sec for ``model`` ON a specific host
