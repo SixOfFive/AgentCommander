@@ -828,7 +828,7 @@ class PipelineRun:
                             # message doesn't match any live-data pattern,
                             # in which case we fall through to the existing
                             # chat fallback unchanged.
-                            forced_url = self._infer_live_data_url(opts.user_message)
+                            forced_url = recovery.infer_live_data_url(opts.user_message)
                             if forced_url is not None:
                                 rr_orch = resolve_role(Role.ORCHESTRATOR)
                                 if rr_orch is not None:
