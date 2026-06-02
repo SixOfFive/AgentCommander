@@ -981,10 +981,68 @@ def get_throughput(model: str | None) -> float | None:
         return None
 
 
+def get_throughput_for_host(provider_id: str | None,
+                            model: str | None) -> float | None:
+    """Running-average tokens/sec for ``model`` ON a specific host
+    (``provider_id``), or ``None`` if that host hasn't been measured for it.
+
+    Used by fan-out's makespan-aware router to decide whether offloading a
+    sub-step to an alternate host would actually reduce wall-clock — the same
+    model can be 5x slower on a weaker GPU, so a model-only number is useless
+    for that decision.
+    """
+    if not provider_id or not model:
+        return None
+    try:
+        row = get_db().execute(
+            "SELECT tokens_per_second FROM model_throughput_by_host "
+            "WHERE provider_id = ? AND model = ?",
+            (provider_id, model),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return None
+    if row is None:
+        return None
+    try:
+        v = float(row["tokens_per_second"])
+        return v if v > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _record_host_throughput(provider_id: str, model: str, rate: float) -> None:
+    """Upsert the per-(host, model) throughput EMA. Best-effort."""
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT tokens_per_second FROM model_throughput_by_host "
+            "WHERE provider_id = ? AND model = ?",
+            (provider_id, model),
+        ).fetchone()
+        if row is None:
+            db.execute(
+                "INSERT INTO model_throughput_by_host "
+                "(provider_id, model, tokens_per_second, samples, updated_at) "
+                "VALUES (?, ?, ?, 1, ?)",
+                (provider_id, model, rate, _now_ms()),
+            )
+        else:
+            new_avg = (float(row["tokens_per_second"]) + rate) / 2.0
+            db.execute(
+                "UPDATE model_throughput_by_host "
+                "SET tokens_per_second = ?, samples = samples + 1, updated_at = ? "
+                "WHERE provider_id = ? AND model = ?",
+                (new_avg, _now_ms(), provider_id, model),
+            )
+    except sqlite3.DatabaseError:
+        pass
+
+
 def record_throughput(model: str | None, completion_tokens: int | None,
                       duration_ms: int | None,
                       *, chars_completed: int | None = None,
-                      sample_text: str | None = None) -> float | None:
+                      sample_text: str | None = None,
+                      provider_id: str | None = None) -> float | None:
     """Update the running-average tokens/sec for ``model`` from one call's
     measurement.
 
