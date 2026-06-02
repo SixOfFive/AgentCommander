@@ -753,6 +753,12 @@ def _handle_input(state: dict, line: str) -> None:
     line = line.strip()
     if not line:
         return
+    # Record EVERY submission (idle prompt AND mid-run queued) in the input
+    # backbuffer — this is the single chokepoint all submitted lines flow
+    # through, so Up/Down walks a complete, persistent history. (Recorded here
+    # rather than in read_line_at_bottom, which the API-key wizard also uses.)
+    from agentcommander.tui.status_bar import _record_history
+    _record_history(line)
     if line.startswith("/"):
         try:
             argv = shlex.split(line)
