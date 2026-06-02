@@ -94,5 +94,8 @@ def orchestrator_decision_schema() -> dict[str, Any]:
         # Only `action` is structurally required. Per-action field
         # requirements stay with missing_fields_guard (see module docstring).
         "required": ["action"],
-        "additionalProperties": False,
+        # NOTE: intentionally NO "additionalProperties": false — it makes the
+        # GBNF grammar an order of magnitude more expensive to decode (see
+        # module docstring) for zero correctness benefit (from_dict drops
+        # unknown keys). The typed `properties` above still guide generation.
     }
