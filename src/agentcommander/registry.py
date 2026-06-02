@@ -45,6 +45,7 @@ class Provider(Protocol):
         max_tokens: int | None = None,
         num_ctx: int | None = None,
         json_mode: bool = False,
+        json_schema: dict[str, Any] | None = None,
     ) -> Iterable[dict[str, Any]]:
         """Yield streaming chunks. Each chunk: {'content': str, 'done': bool, 'usage'?: dict}."""
         ...
