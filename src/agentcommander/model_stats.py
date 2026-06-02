@@ -29,9 +29,17 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+# Serializes the read-modify-write of model_stats.json. Parallel fan_out
+# (improvement: fleet utilization) can call record_observation from several
+# worker threads at once; without this lock two threads could lose each
+# other's update or collide on the temp file. RLock is cheap — the critical
+# section is microseconds (a small JSON load + dump).
+_STATS_LOCK = threading.RLock()
 
 
 # Approximate chars-per-token for the fallback when the provider doesn't
