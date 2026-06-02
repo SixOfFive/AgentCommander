@@ -285,7 +285,7 @@ def _lexical_search(root: str, query: str, top_k: int) -> "list[tuple[str, float
     allowed = _indexed_stems(root)
     scored: list[tuple[str, float]] = []
     for path in _iter_markdown(root):
-        name = os.path.splitext(os.path.basename(path))[0]
+        name = _note_key(path)
         if allowed is not None and name.lower() not in allowed:
             continue
         try:
