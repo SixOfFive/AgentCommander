@@ -1,9 +1,10 @@
 # AgentCommander — improvement roadmap
 
 Engineering backlog distilled from a full read of the codebase + braindump
-(rounds 1–51) on 2026-06-02. Ordered by leverage. Every item respects the
-project's hard constraints: **stdlib-only, serial-only, modular, local-first,
-project-local DB**. No item requires a paid service.
+(rounds 1–51) on 2026-06-02. Ordered by leverage. Items respect the project's
+hard constraints: **stdlib-only, modular, local-first, project-local DB**, and
+no paid services. **Serial-only was relaxed** (owner decision, 2026-06-02) for
+the opt-in parallel fan-out prototype below — AC remains serial by default.
 
 ## Status legend
 - **DONE** — shipped + tested
