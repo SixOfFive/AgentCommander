@@ -252,12 +252,23 @@ owner's say-so.
 
 ---
 
-## Field findings (act-on-when-convenient)
+## Field findings
 
-- **Orchestrator role currently resolves to a llama.cpp `Llama-4-Scout-17B`
-  (split GGUF at `100.106.215.128:8080`) that returns empty content** (~2 min
-  per call; identical with schema on/off). Surfaced by the first `evals` run.
-  This makes the live engine non-functional for real prompts right now —
-  rebind the orchestrator to a working model (`/roles set orchestrator
-  auto-192.168.15.103-11434 qwen2.5:14b` scored PASS in 11.5 s) or fix the
-  llama-server hosting that GGUF. Not an engine bug.
+- **RESOLVED:** the orchestrator was resolving to a broken llama.cpp
+  `Llama-4-Scout-17B` (empty content). Rebound in the AgentTesting DB to
+  `qwen2.5:14b` on BEAST (router→gemma3:4b, panel roles split BEAST/THEOCOMP,
+  summarizer→qwen2.5:14b). Researcher was a ghost (`cogito:8b`, uninstalled) →
+  fixed via `/roles set researcher … llama3:8b-instruct-q4_K_M`. The new
+  `/roles set` model validation now catches this class at bind time.
+- The `100.106.215.128:8080` host is a llama.cpp server mis-registered as an
+  *ollama*-type provider (so `/api/chat` 404s). If you want to use it, register
+  it with `/providers add … llamacpp` instead of ollama.
+
+## Quality follow-ups (model-bound, not structural)
+
+- **Vault synthesis faithfulness** — a 14B reads the right note but summarizes
+  loosely. A forced `summarize`-over-`vault_read`-content pass (or a stronger
+  orchestrator) would tighten recall answers.
+- **fan_out live UI** — concurrent sub-steps don't stream; the status bar can't
+  show them running side-by-side. Wiring each concurrent role into its own
+  popout block (the popout system exists) would make parallelism visible.
