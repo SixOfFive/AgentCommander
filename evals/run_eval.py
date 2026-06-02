@@ -249,6 +249,10 @@ def main() -> int:
         flag_s = f"  [{' '.join(flags)}]" if flags else ""
         print(f"    {status}{flag_s}  {_fmt_ms(result.duration_ms)}  "
               f"iters={result.iterations}  roles={result.roles}")
+        if guards_fired:
+            gstr = ", ".join(f"{g}x{n}" if n > 1 else g
+                             for g, n in sorted(guards_fired.items()))
+            print(f"      guards fired: {gstr}")
         if not args.quiet or not passed:
             for d in details:
                 mark = "ok " if d["passed"] else "XX "
@@ -262,6 +266,7 @@ def main() -> int:
             "category": case.get("category"),
             "passed": passed,
             "details": details,
+            "guards_fired": guards_fired,
             "result": rdict,
         })
 
