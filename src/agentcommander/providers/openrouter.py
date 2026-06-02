@@ -259,7 +259,20 @@ class OpenRouterProvider(ProviderBase):
         }
         if max_tokens is not None:
             body["max_tokens"] = max_tokens
-        if json_mode:
+        # Structured outputs via the OpenAI-compatible json_schema
+        # response_format. Not all upstream models OpenRouter routes to honor
+        # it, but the ones that do constrain generation to the schema. Loose
+        # json_object remains the fallback when only json_mode is set.
+        if json_schema is not None:
+            body["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "decision",
+                    "schema": json_schema,
+                    "strict": True,
+                },
+            }
+        elif json_mode:
             body["response_format"] = {"type": "json_object"}
 
         data = json.dumps(body).encode("utf-8")
