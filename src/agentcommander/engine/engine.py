@@ -1880,6 +1880,22 @@ class PipelineRun:
                         f"wall ({sum_ms}ms summed, {speedup:.1f}x overlap)"),
             )
 
+        # Convergence: track how many fan_outs ran this turn and tell the
+        # orchestrator the panel is finished, so it synthesizes instead of
+        # re-emitting the same fan_out forever (the engine also hard-redirects
+        # a repeat — see the events() fan_out branch).
+        self.state.tool_call_counts["fan_out"] = (
+            self.state.tool_call_counts.get("fan_out", 0) + 1
+        )
+        ok_roles = [r.role for r in results if r.ok]
+        push_nudge(
+            self.state.scratchpad, iteration, "fan_out_complete",
+            f"PANEL COMPLETE: the {len(ok_roles)} results above "
+            f"({', '.join(ok_roles)}) are your inputs. Do NOT fan_out again "
+            f"for the same work — synthesize them now: emit `summarize`, or "
+            f"`done` with the combined answer.",
+        )
+
     def _dispatch_tool(self, decision: OrchestratorDecision, iteration: int,
                        opts: RunOptions) -> Iterator[PipelineEvent]:
         # Write guards (pre-dispatch)
