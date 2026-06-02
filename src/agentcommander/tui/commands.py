@@ -2593,6 +2593,34 @@ def _build_registry() -> dict[str, SlashCommand]:
             examples=("/compact", "/compact undo"),
         ),
         SlashCommand(
+            name="/parallel", aliases=(),
+            summary="toggle parallel fan-out across the fleet (prototype)",
+            handler=cmd_parallel,
+            usage=(
+                "/parallel           # show current state\n"
+                "/parallel on        # enable concurrent fan_out sub-steps\n"
+                "/parallel off       # degrade fan_out to sequential"
+            ),
+            details=(
+                "AgentCommander is serial by default. With /parallel on, the\n"
+                "orchestrator may emit a single 'fan_out' decision whose\n"
+                "independent role sub-steps (e.g. reviewer + critic + tester\n"
+                "on the same artifact) run CONCURRENTLY. Each sub-step uses\n"
+                "its role's assigned provider, so binding panel roles to\n"
+                "different hosts (BEAST / THEOCOMP / Jerry) puts multiple GPUs\n"
+                "to work at once — the point of the feature.\n"
+                "\n"
+                "Only role delegations may run in parallel; side-effecting\n"
+                "tools (write_file/execute/git/...) are never parallelized.\n"
+                "Results are folded back in step order, so runs stay\n"
+                "deterministic. When OFF, a fan_out decision still works — it\n"
+                "just runs the sub-steps one at a time.\n"
+                "\n"
+                "The setting persists in the project DB (config table)."
+            ),
+            examples=("/parallel", "/parallel on", "/parallel off"),
+        ),
+        SlashCommand(
             name="/history", aliases=(),
             summary="show recent conversations",
             handler=cmd_history,
