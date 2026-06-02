@@ -943,6 +943,10 @@ def read_line_at_bottom(prompt_text: str = "❯ ") -> str | None:
         except EOFError:
             return None
 
+    # Ensure the persisted backbuffer is in memory so Up/Down walks prior
+    # sessions' commands on the very first prompt.
+    load_input_history()
+
     cols, rows = term_size()
     input_row = rows
     rule_row = max(1, rows - 2)
