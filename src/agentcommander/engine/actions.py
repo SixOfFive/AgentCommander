@@ -51,7 +51,26 @@ TOOL_ACTIONS: frozenset[str] = frozenset({
     "browser",
 })
 
-ALL_ACTIONS: frozenset[str] = ROLE_ACTIONS | TOOL_ACTIONS | {"done"}
+# Parallel fan-out (prototype). The orchestrator emits ONE `fan_out` decision
+# whose `steps` list holds independent sub-decisions the engine runs
+# concurrently across the fleet (each sub-step resolves to its role's assigned
+# provider, so binding reviewer→BEAST, critic→THEOCOMP, tester→Jerry uses three
+# GPUs at once). This DELIBERATELY relaxes the historical "serial-only / no
+# parallel action" constraint — see ROADMAP.md + braindump round-53.
+#
+# NOTE: AC is still serial *by default*. fan_out is gated behind the
+# `fan_out_enabled` config flag; when disabled the engine degrades a fan_out
+# decision to sequential execution (same result, no concurrency).
+FANOUT_ACTION: str = "fan_out"
+
+# Only these sub-actions may run inside a fan_out for now: the read-only,
+# side-effect-free role delegations. Side-effecting tools (write_file,
+# execute, git, delete_file, *_process) and `done`/`fan_out` itself are
+# excluded so parallel steps can't race on the filesystem or nest. Read-only
+# tool fan-out (multi-source fetch) is a documented follow-up.
+FANOUT_SUB_ACTIONS: frozenset[str] = ROLE_ACTIONS
+
+ALL_ACTIONS: frozenset[str] = ROLE_ACTIONS | TOOL_ACTIONS | {"done", FANOUT_ACTION}
 
 # orchestrator action → role enum
 ACTION_TO_ROLE: dict[str, Role] = {
