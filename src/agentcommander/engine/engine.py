@@ -2972,4 +2972,10 @@ def _decision_to_payload(decision: OrchestratorDecision, exec_code: str,
         return {"command": decision.command or decision.input}
     if a in ("kill_process", "check_process"):
         return {"id": decision.input}
+    if a in ("vault_search", "vault_read"):
+        # Both take their argument in `input` (query / note name). The vault
+        # tools also read `path`/`name` as fallbacks, so pass `path` through
+        # when the orchestrator used it for a note path.
+        payload = {"input": decision.input or decision.path or ""}
+        return payload
     return {}
