@@ -157,6 +157,9 @@ _SCORERS: dict[str, Callable[[dict, dict], tuple[bool, str]]] = {
     "role_fired": check_role_fired,
     "max_iterations": check_max_iterations,
     "no_error": check_no_error,
+    "guard_fired": check_guard_fired,
+    "guard_not_fired": check_guard_not_fired,
+    "no_guard_fired": check_no_guard_fired,
 }
 
 
