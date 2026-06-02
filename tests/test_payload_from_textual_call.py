@@ -1,18 +1,20 @@
-"""Tests for ``PipelineRun._payload_from_textual_call`` (round-45 bugs).
+"""Tests for ``recovery.payload_from_textual_call`` (round-45 bugs).
 
 Trim: kept the two round-45 bug regressions (check_process id, env verb),
 the schema-drift detector (would have caught both bugs automatically),
 and a few sanity verbs to confirm the dispatch table still maps correctly.
+
+(Moved from PipelineRun to engine/recovery.py in the #5 engine.py split.)
 """
 from __future__ import annotations
 
 import unittest
 
-from agentcommander.engine.engine import PipelineRun
+from agentcommander.engine import recovery
 
 
 def _build(verb: str, arg: str = "") -> dict | None:
-    return PipelineRun._payload_from_textual_call(PipelineRun, verb, arg)  # type: ignore[arg-type]
+    return recovery.payload_from_textual_call(verb, arg)
 
 
 class TestPayloadFromTextualCall(unittest.TestCase):
