@@ -128,7 +128,11 @@ def _save(data: dict[str, Any]) -> None:
     p = _stats_path()
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(p.suffix + ".tmp")
+        # Unique temp name per (pid, thread) so concurrent writers never
+        # truncate each other's temp file before the atomic os.replace.
+        # (The module lock already serializes callers in-process; this is
+        # defence-in-depth and also covers multi-process use.)
+        tmp = p.with_suffix(f"{p.suffix}.{os.getpid()}.{threading.get_ident()}.tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         os.replace(tmp, p)
     except OSError:
