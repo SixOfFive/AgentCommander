@@ -2080,6 +2080,85 @@ def cmd_parallel(ctx: CommandContext, args: list[str]) -> None:
             f"  unknown arg {sub!r} — use /parallel on|off|status|route"))
 
 
+def cmd_vault(ctx: CommandContext, args: list[str]) -> None:
+    """Configure / probe the local notes vault (long-term memory).
+
+      /vault                     show vault status
+      /vault set <path>          point recall at a vault directory
+      /vault off                 disconnect the vault
+      /vault search <query>      probe recall (semantic if index present)
+
+    The vault PATH is stored in the project-local DB (gitignored). Vault
+    CONTENT is read on demand and never enters the source tree. The vault_search
+    / vault_read tools are read-only and sandboxed to this directory.
+    """
+    import os
+    from agentcommander.db.repos import get_config, set_config
+    from agentcommander.tools import vault_tool
+
+    sub = (args[0].lower() if args else "")
+
+    if sub == "set":
+        if len(args) < 2:
+            render_system_line(style("warn", "  usage: /vault set <path>"))
+            return
+        path = " ".join(args[1:]).strip().strip('"')
+        if not os.path.isdir(path):
+            render_system_line(style("warn", f"  not a directory: {path}"))
+            return
+        set_config("vault_path", path)
+        render_system_line(style("ok", f"  vault set: {path}"))
+        idx = os.path.join(path, "_index", "embeddings.json")
+        has_idx = os.path.isfile(idx)
+        render_system_line(style("muted",
+            f"  embeddings index: {'found — semantic recall available' if has_idx else 'none — lexical recall only'}"))
+        render_system_line(style("muted",
+            "  the orchestrator can now use vault_search / vault_read."))
+        return
+
+    if sub == "off":
+        set_config("vault_path", "")
+        render_system_line(style("ok", "  vault disconnected."))
+        return
+
+    if sub == "search":
+        if len(args) < 2:
+            render_system_line(style("warn", "  usage: /vault search <query>"))
+            return
+        query = " ".join(args[1:])
+        res = vault_tool._vault_search({"input": query}, _slash_tool_ctx(ctx))
+        if res.ok:
+            render_system_line(res.output or "(no output)")
+        else:
+            render_system_line(style("warn", f"  {res.error}"))
+        return
+
+    # status (default)
+    root = vault_tool.vault_root()
+    if not root:
+        render_system_line("  vault: not configured (use /vault set <path>)")
+        return
+    idx = vault_tool._index_path(root)
+    has_idx = os.path.isfile(idx)
+    ep = vault_tool._embed_endpoint()
+    render_system_line(f"  vault: {root}")
+    render_system_line(style("muted",
+        f"  recall: {'semantic' if (has_idx and ep) else 'lexical'}"
+        f"   index: {'yes' if has_idx else 'no'}"
+        f"   embed endpoint: {ep or 'none'}"))
+
+
+def _slash_tool_ctx(ctx: "CommandContext"):
+    """Minimal ToolContext for invoking a tool from a slash command."""
+    from agentcommander.db.repos import audit
+    from agentcommander.tools.types import ToolContext
+    return ToolContext(
+        working_directory=ctx.state.get("working_directory") if hasattr(ctx, "state") else None,
+        conversation_id=ctx.state.get("conversation_id") if hasattr(ctx, "state") else None,
+        audit=audit,
+    )
+
+
 def cmd_usage(ctx: CommandContext, args: list[str]) -> None:
     """Show per-role prompt-token usage for the current chat (or globally).
 
