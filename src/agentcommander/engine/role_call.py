@@ -180,6 +180,7 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
             max_tokens=agent.default_max_tokens,
             num_ctx=num_ctx,
             json_mode=json_mode,
+            json_schema=json_schema,
             should_cancel=should_cancel,
         ):
             if chunk.content:
