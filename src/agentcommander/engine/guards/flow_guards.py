@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from agentcommander.engine.guards.types import GuardVerdict, push_system_nudge
+from agentcommander.engine.guards.types import GuardVerdict, push_system_nudge, record_fire
 from agentcommander.engine.scratchpad import build_final_output
 from agentcommander.types import OrchestratorDecision, ScratchpadEntry
 
