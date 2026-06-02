@@ -24,10 +24,12 @@ from agentcommander.db.repos import (
 )
 from agentcommander.engine.actions import (
     ACTION_TO_ROLE,
+    FANOUT_ACTION,
     ROLE_ACTIONS,
     TOOL_ACTIONS,
 )
 from agentcommander.engine.decision_schema import orchestrator_decision_schema
+from agentcommander.engine.fan_out import run_fan_out, validate_steps
 from agentcommander.engine.role_call import (
     RoleNotAssigned,
     call_role,
