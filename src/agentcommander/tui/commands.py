@@ -2035,30 +2035,49 @@ def cmd_parallel(ctx: CommandContext, args: list[str]) -> None:
     from agentcommander.db.repos import get_config, set_config
 
     sub = (args[0] if args else "").lower()
-    cur = bool(get_config("fan_out_enabled", False))
+    arg2 = (args[1] if len(args) > 1 else "").lower()
 
+    # `/parallel route [on|off]` — host-aware routing across the fleet.
+    if sub == "route":
+        if arg2 in ("on", "enable", "true", "1"):
+            set_config("fan_out_route_hosts", True)
+            render_system_line(style("ok", "  fan_out host routing: ENABLED"))
+            render_system_line(style("muted",
+                "  concurrent sub-steps spread to alternate hosts that have the "
+                "role's model — but only when measured per-host throughput says "
+                "it cuts wall-clock (so offloading to a slower GPU is avoided)."))
+        elif arg2 in ("off", "disable", "false", "0"):
+            set_config("fan_out_route_hosts", False)
+            render_system_line(style("ok",
+                "  fan_out host routing: DISABLED — sub-steps stay on their "
+                "default host."))
+        else:
+            render_system_line(
+                f"  fan_out host routing: "
+                f"{'ENABLED' if get_config('fan_out_route_hosts', False) else 'DISABLED'}"
+                f"  (use /parallel route on|off)")
+        return
+
+    cur = bool(get_config("fan_out_enabled", False))
     if sub in ("on", "enable", "true", "1"):
         set_config("fan_out_enabled", True)
         render_system_line(style("ok",
             "  parallel fan_out: ENABLED"))
         render_system_line(style("muted",
             "  the orchestrator may run independent role sub-steps "
-            "concurrently. Bind panel roles to different hosts to use "
-            "multiple GPUs at once, e.g.:"))
-        render_system_line(style("muted",
-            "    /roles set reviewer  http://192.168.15.103:11434 <model>"))
-        render_system_line(style("muted",
-            "    /roles set critic    http://192.168.15.106:11434 <model>"))
+            "concurrently. Turn on cross-host spreading with /parallel route on."))
     elif sub in ("off", "disable", "false", "0"):
         set_config("fan_out_enabled", False)
         render_system_line(style("ok",
             "  parallel fan_out: DISABLED — fan_out decisions run serially."))
     elif sub in ("", "status"):
+        route = bool(get_config("fan_out_route_hosts", False))
         render_system_line(
-            f"  parallel fan_out: {'ENABLED' if cur else 'DISABLED'}")
+            f"  parallel fan_out: {'ENABLED' if cur else 'DISABLED'}"
+            f"   |   host routing: {'ENABLED' if route else 'DISABLED'}")
     else:
         render_system_line(style("warn",
-            f"  unknown arg {sub!r} — use /parallel on|off|status"))
+            f"  unknown arg {sub!r} — use /parallel on|off|status|route"))
 
 
 def cmd_usage(ctx: CommandContext, args: list[str]) -> None:
