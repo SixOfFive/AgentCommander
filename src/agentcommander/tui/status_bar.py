@@ -1197,7 +1197,9 @@ def read_line_at_bottom(prompt_text: str = "❯ ") -> str | None:
     sys.stdout.flush()
     bar.park_cursor()
     bar.redraw()
-    _record_history(submitted)
+    # NOTE: history is recorded by the caller (_handle_input), NOT here —
+    # read_line_at_bottom is also used by the first-run wizard for the Ollama
+    # URL / backend / API-KEY prompts, which must never enter the history file.
     return submitted
 
 
