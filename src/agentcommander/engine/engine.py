@@ -78,6 +78,16 @@ CATEGORY_MAX_ITERATIONS: dict[str, int] = {
     "chat": 5,
 }
 
+# Give-up budget for *decision-guard* nudge loops. The flow-guard breaker
+# (consecutive_nudge_guard) counts non-productive flow entries and breaks at 5,
+# but a decision-guard `continue` short-circuits the loop before the flow block
+# ever runs, so decision-level standoffs (e.g. missing_fields_guard re-nudging a
+# bare `{"action":"write_file"}`) were never counted and ran to the hard
+# iteration cap — 21 iters on a trivial request in the 2026-06-02 eval. Set one
+# above the flow cap so a task that legitimately needs several decision
+# corrections isn't killed a beat too early.
+DECISION_NUDGE_BREAK = 6
+
 
 @dataclass
 class RunOptions:
