@@ -253,6 +253,14 @@ def _execute(payload: dict[str, Any], ctx: ToolContext) -> ToolResult:
                   {"category": danger.category, "reason": danger.reason})
         return ToolResult(ok=False, error=f"BLOCKED [{danger.category}]: {danger.reason}")
 
+    vault_write = _scan_vault_write(code)
+    if vault_write:
+        ctx.audit("execute.vault_write_blocked", {"reason": vault_write})
+        return ToolResult(ok=False, error=(
+            f"BLOCKED: {vault_write}. The notes vault is read-only — use "
+            f"vault_search / vault_read to read it, and write any outputs to "
+            f"the working directory instead."))
+
     try:
         cwd = require_working_directory(ctx.working_directory)
     except Exception as exc:  # noqa: BLE001
