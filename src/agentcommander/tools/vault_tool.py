@@ -44,6 +44,18 @@ MAX_READ_CHARS = 6000
 EMBED_TIMEOUT_S = 30.0
 DEFAULT_EMBED_MODEL = "nomic-embed-text"
 
+# Directories never scanned (vault internals + version control).
+_ALWAYS_EXCLUDE = {".obsidian", ".git", ".trash", "_index", "node_modules"}
+
+# Stopwords dropped from lexical queries so a question like "how to fit a model"
+# doesn't score every note that contains "to"/"a"/"in".
+_STOPWORDS = {
+    "a", "an", "the", "to", "of", "in", "on", "for", "with", "and", "or",
+    "is", "are", "be", "how", "what", "why", "when", "where", "do", "does",
+    "i", "my", "we", "it", "this", "that", "can", "should", "would", "from",
+    "into", "via", "using", "use", "get", "got", "was", "were", "as", "at",
+}
+
 
 # ─── Config (project-local DB; gitignored) ──────────────────────────────────
 
