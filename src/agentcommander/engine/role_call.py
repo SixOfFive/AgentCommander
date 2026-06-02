@@ -149,8 +149,9 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
     # If the caller didn't pin a context size, fall back to whatever was
     # persisted on the role assignment (set by `/autoconfig --mincontext N`).
     # That ensures the configured num_ctx actually reaches the provider
-    # instead of the runtime defaulting silently.
-    if num_ctx is None:
+    # instead of the runtime defaulting silently. (Already resolved above for
+    # the override path; this covers the normal path.)
+    if num_ctx is None and resolved is not None:
         num_ctx = resolved.context_window_tokens
 
     messages: list[ChatMessage] = [ChatMessage(role="system", content=system_prompt)]
