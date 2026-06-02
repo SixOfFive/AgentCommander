@@ -2014,7 +2014,7 @@ class PipelineRun:
             execute_language = ev["language"]
 
         # Build payload
-        payload = _decision_to_payload(decision, execute_code, execute_language)
+        payload = recovery.decision_to_payload(decision, execute_code, execute_language)
 
         started = time.time()
         result = invoke_tool(decision.action, payload,
