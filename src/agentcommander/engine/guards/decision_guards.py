@@ -241,7 +241,10 @@ def templating_placeholder_guard(decision: OrchestratorDecision,
 # correction path on the next iteration.
 
 # Special action verbs that the engine handles directly (not in any registry).
-_SPECIAL_ACTIONS: frozenset[str] = frozenset({"done", "chat", "delegate"})
+# Meta-actions that aren't roles or tools but ARE legal orchestrator verbs.
+# fan_out (parallel role fan-out) is dispatched specially in events(); like
+# `done` it's excluded from the unknown-action nudge menu.
+_SPECIAL_ACTIONS: frozenset[str] = frozenset({"done", "chat", "delegate", "fan_out"})
 
 
 def _all_known_actions() -> frozenset[str]:
