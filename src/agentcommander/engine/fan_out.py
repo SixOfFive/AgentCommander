@@ -66,24 +66,44 @@ class FanOutResult:
 
 
 def plan_host_routing(subs: list[dict], *, resolve_fn,
-                      installed_by_provider: "dict[str, set]") -> list[dict]:
-    """Assign each fan-out sub-step to a host, spreading concurrent steps
-    across DISTINCT hosts that have the role's model installed.
+                      installed_by_provider: "dict[str, set]",
+                      throughput_fn=None) -> list[dict]:
+    """Assign each fan-out sub-step to a host, **makespan-aware**.
 
-    Rule: *same model, different GPU.* A sub-step keeps its role's resolved
-    model (so quality is identical to a serial call) but may run on an
-    ALTERNATE host that also has that model — chosen to be the least-used host
-    this fan-out, preferring the role's default host on ties. This is the only
-    routing signal that's both safe (never swaps in an unknown model) and
-    catalog-independent. When the model lives on only one host, the step stays
-    there (it'll contend — unavoidable without the model elsewhere).
+    A sub-step always keeps its role's resolved model (identical quality to a
+    serial call — *same model, different GPU*), but may run on an ALTERNATE
+    host that also has that model. The goal is to minimise the predicted
+    wall-clock (makespan): greedily place each step on the candidate host that
+    minimises the resulting max per-host load, where a step's load on host *h*
+    is ``1 / throughput(h, model)`` (slower host → bigger load).
 
-    Pure function of ``installed_by_provider`` (``{provider_id: {model_ids}}``)
-    and ``resolve_fn`` (role_enum → resolved binding with ``.provider_id`` /
-    ``.model``). Returns ``subs`` enriched with ``provider_id`` / ``model`` /
-    ``_rerouted`` keys, in the same order.
+    This is the fix for the naive "spread to any distinct host" rule, which
+    backfired on a heterogeneous fleet: offloading to a much slower GPU made
+    it the bottleneck (a 3060 ran a 14B ~5x slower than a 4070, so a 2-way
+    split was 3x slower than keeping both on the 4070). With per-host
+    throughput, the greedy keeps both steps on the fast host unless an
+    alternate is fast enough that splitting actually helps (roughly: only
+    offloads to a host less than ~2x slower).
+
+    Inputs:
+      - ``resolve_fn(role_enum)`` → resolved binding (``.provider_id`` / ``.model``)
+      - ``installed_by_provider``: ``{provider_id: {model_ids}}``
+      - ``throughput_fn(provider_id, model)`` → tokens/sec or ``None`` (unknown)
+
+    Safety: a host with **unknown** throughput is never used as an alternate
+    (we don't gamble on an unmeasured host being fast). The role's default
+    host is always a candidate; if its throughput is unknown it's treated
+    optimistically (as fast as the best measured host) so steps stay on it.
+    With no throughput data at all, every step stays on its default host —
+    so enabling routing can't hurt; it just gets smarter as data accrues.
+
+    Returns ``subs`` enriched with ``provider_id`` / ``model`` / ``_rerouted``.
     """
-    used: dict[str, int] = {}
+    if throughput_fn is None:
+        def throughput_fn(_pid, _model):  # noqa: ANN001
+            return None
+
+    host_load: dict[str, float] = {}
     out: list[dict] = []
     for sub in subs:
         action = sub.get("action")
@@ -93,16 +113,36 @@ def plan_host_routing(subs: list[dict], *, resolve_fn,
             out.append({**sub, "provider_id": None, "model": None, "_rerouted": False})
             continue
         pid_def, model_def = rr.provider_id, rr.model
-        hosts = [pid for pid, models in installed_by_provider.items()
-                 if model_def in models]
-        if pid_def not in hosts:
-            # Trust the default binding even if we couldn't probe it (host
-            # down during the probe, or model list stale).
-            hosts.append(pid_def)
-        # Least-used host this fan-out; tie → prefer default host, then stable.
-        chosen = min(hosts, key=lambda pid: (used.get(pid, 0),
-                                             0 if pid == pid_def else 1, pid))
-        used[chosen] = used.get(chosen, 0) + 1
+
+        hosts_with_model = [pid for pid, models in installed_by_provider.items()
+                            if model_def in models]
+        if pid_def not in hosts_with_model:
+            hosts_with_model.append(pid_def)  # trust default even if probe missed it
+
+        def unit(pid: str) -> "float | None":
+            tps = throughput_fn(pid, model_def)
+            return (1.0 / tps) if (tps and tps > 0) else None
+
+        known_units = [unit(h) for h in hosts_with_model if unit(h) is not None]
+        best_known = min(known_units) if known_units else 1.0
+
+        # Candidate pool: hosts with KNOWN throughput, plus the default host
+        # (always allowed). Never offload to an unmeasured alternate.
+        pool = {h for h in hosts_with_model if unit(h) is not None}
+        pool.add(pid_def)
+
+        def eff_unit(pid: str) -> float:
+            u = unit(pid)
+            return u if u is not None else best_known  # unknown default → optimistic
+
+        def makespan_if(pid: str) -> float:
+            after = host_load.get(pid, 0.0) + eff_unit(pid)
+            others = [host_load.get(x, 0.0) for x in pool if x != pid]
+            return max([after, *others])
+
+        chosen = min(pool, key=lambda pid: (round(makespan_if(pid), 6),
+                                            0 if pid == pid_def else 1, pid))
+        host_load[chosen] = host_load.get(chosen, 0.0) + eff_unit(chosen)
         out.append({**sub, "provider_id": chosen, "model": model_def,
                     "_rerouted": chosen != pid_def})
     return out
