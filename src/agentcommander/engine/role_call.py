@@ -257,6 +257,7 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
             model, completion_tokens, duration_ms,
             chars_completed=len(full_text),
             sample_text=full_text,
+            provider_id=eff_provider_id,
         )
     except Exception:  # noqa: BLE001
         pass
