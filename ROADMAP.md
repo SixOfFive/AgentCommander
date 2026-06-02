@@ -190,22 +190,27 @@ can take the DB lock), then `/guards` and delete the never-fired ones. Expect a
 meaningful cut now that schema-constrained decoding (#1) is in. This is what
 finally brings guard count DOWN instead of up.
 
-### #5 — Break up `engine.py` (~2950 lines)
-**Problem.** Modularity is a hard constraint, but `engine.py` has become a
-god-file: pipeline loop + chat fallback + compaction + `_LIVE_DATA_PATTERNS_FORCED`
-+ `_infer_live_data_url` + `_detect_tool_syntax_intent` + `_honor_tool_text_as_intent`
-+ `_payload_from_textual_call`.
+### #5 — Break up `engine.py` (PARTIAL DONE, 2026-06-02)
+**Done:** extracted the pure weak-model **recovery subsystem** into
+`engine/recovery.py` (308 lines) — `decision_to_payload`,
+`detect_tool_syntax_intent`, `clean_textual_arg`, `payload_from_textual_call`,
+`infer_live_data_url` + `LIVE_DATA_PATTERNS_FORCED`, `is_scratchpad_leak`.
+Behavior-preserving (verbatim move); call sites repointed; the two existing
+tests rehomed + `tests/test_recovery.py` (12) added. **engine.py 2981 → 2619**;
+353 tests green.
 
-**Approach.** Extract the weak-model recovery subsystem into
-`engine/recovery.py` (tool-syntax-as-intent, forced live-data fetch, payload
-building) and the compaction helpers are already partly in `scratchpad.py`.
-Bonus: much of this recovery code becomes removable once #1/#4 prove the
-guards/coercion it backstops no longer fire — do #4's measurement first so
-the split doubles as a delete.
+**Why not <1500 yet (honest):** the remaining bulk is the *stateful pipeline
+loop* — `events()`, `_orchestrate`, `_dispatch_role/_tool/_fan_out`,
+`_handle_done`, `_chat_fallback_stream`, `_honor_tool_text_as_intent`,
+`_retry_on_rate_limit`, hint/vote + meta-agent wrappers. These are `self`-bound
+generators that ARE the engine; extracting them needs a PipelineRun **mixin
+split** (higher risk) and shouldn't be forced into a behavior-preserving
+refactor. The bigger shrink should come from **deletion**: once #4's telemetry
+shows which guards/recovery paths never fire (esp. after #1), delete them.
 
-**Files.** New `engine/recovery.py`; `engine/engine.py` shrinks to the loop.
-**Effort:** ~1 day (mechanical, test-covered). **Acceptance:** `engine.py`
-< ~1500 lines; 276 unit tests + eval suite unchanged.
+**Remaining (LATER):** (a) prune dead guards + the recovery/coercion they
+backstop (gated on #4 data), (b) optional PipelineRun mixin split
+(loop / dispatch / fallback) if engine.py is still unwieldy after pruning.
 
 ---
 
