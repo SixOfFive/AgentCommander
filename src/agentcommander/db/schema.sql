@@ -252,3 +252,16 @@ CREATE TABLE IF NOT EXISTS model_throughput (
   samples INTEGER NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL
 );
+
+-- Per-(host, model) throughput. The same model id can run at very different
+-- speeds on different hosts (a 4070 vs a 3060), so fan-out's makespan-aware
+-- router needs throughput keyed by provider, not just by model. Additive to
+-- the model-keyed table above (which the UI still reads); written alongside it.
+CREATE TABLE IF NOT EXISTS model_throughput_by_host (
+  provider_id TEXT NOT NULL,
+  model TEXT NOT NULL,
+  tokens_per_second REAL NOT NULL DEFAULT 0,
+  samples INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (provider_id, model)
+);
