@@ -151,15 +151,22 @@ def push_system_nudge(scratchpad: list[ScratchpadEntry], iteration: int,
 def guard_name(thunk: object) -> str:
     """Recover the guard's name from a runner entry. Handles both shapes the
     runners use: a bare function object (``__name__`` directly, e.g. the
-    execute runner) and a ``lambda: foo_guard(...)`` wrapper (the called guard
-    is a module global, so it's in the lambda's ``co_names`` while closed-over
-    args are free vars). Zero per-guard bookkeeping; tracks renames. Falls back
-    gracefully on a non-uniform thunk."""
+    execute runner) and a ``lambda: foo_guard(...)`` wrapper.
+
+    For the lambda shape the called guard's name lives in EITHER ``co_names``
+    (when the guard is a module global of the runner's module — the legacy
+    case) OR ``co_freevars`` (when the runner imports the guard LOCALLY, so the
+    name is a closure cell, not a global). ``run_done_guards`` imports the 17
+    preventive guards locally, so every one of them recorded as the anonymous
+    ``"<guard>"`` until this looked at ``co_freevars`` too. Inspect both, then
+    isolate the ``*_guard`` token. Zero per-guard bookkeeping; tracks renames.
+    Falls back gracefully on a non-uniform thunk."""
     nm = getattr(thunk, "__name__", "")
     if nm and nm != "<lambda>":
         return nm
     try:
-        names = getattr(thunk, "__code__").co_names  # type: ignore[attr-defined]
+        code = getattr(thunk, "__code__")  # type: ignore[attr-defined]
+        names = tuple(code.co_names) + tuple(code.co_freevars)
     except Exception:  # noqa: BLE001
         return "<guard>"
     guardish = [n for n in names if n.endswith("_guard")]
