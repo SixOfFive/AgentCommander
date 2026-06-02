@@ -71,6 +71,7 @@ class LlamaCppProvider(ProviderBase):
         max_tokens: int | None = None,
         num_ctx: int | None = None,  # noqa: ARG002 - unused; llama-server ignores at request time
         json_mode: bool = False,
+        json_schema: dict[str, Any] | None = None,
         should_cancel: Callable[[], bool] | None = None,  # noqa: ARG002 - signature parity; llama-server cancellation not wired
     ) -> Iterator[ChatChunk]:
         body: dict[str, Any] = {
@@ -81,7 +82,20 @@ class LlamaCppProvider(ProviderBase):
         }
         if max_tokens is not None:
             body["max_tokens"] = max_tokens
-        if json_mode:
+        # Structured outputs. llama-server constrains generation to a JSON
+        # Schema via the OpenAI-compatible json_schema response_format (GBNF
+        # under the hood). Falls back to loose json_object when only json_mode
+        # is set; schema wins when both are supplied.
+        if json_schema is not None:
+            body["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "decision",
+                    "schema": json_schema,
+                    "strict": True,
+                },
+            }
+        elif json_mode:
             body["response_format"] = {"type": "json_object"}
 
         data = json.dumps(body).encode("utf-8")
