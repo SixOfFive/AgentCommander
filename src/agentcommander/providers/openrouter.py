@@ -231,6 +231,7 @@ class OpenRouterProvider(ProviderBase):
         max_tokens: int | None = None,
         num_ctx: int | None = None,  # noqa: ARG002 - OpenRouter ignores at request time
         json_mode: bool = False,
+        json_schema: dict[str, Any] | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> Iterator[ChatChunk]:
         """Stream a chat completion via the OpenAI-compat SSE endpoint.
