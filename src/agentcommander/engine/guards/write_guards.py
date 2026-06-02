@@ -258,5 +258,6 @@ def run_write_guards(ctx: dict[str, Any]) -> dict[str, Any]:
     for guard in guards:
         verdict = guard()
         if verdict.action != "pass":
+            record_fire("write", guard, verdict.action)
             return {"action": verdict.action, "final_output": verdict.final_output}
     return {"action": "pass"}
