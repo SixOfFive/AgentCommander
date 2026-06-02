@@ -2458,7 +2458,7 @@ class PipelineRun:
             yield PipelineEvent(type="done", final=replacement)
             return
 
-        payload = self._payload_from_textual_call(verb, arg)
+        payload = recovery.payload_from_textual_call(verb, arg)
         if payload is None:
             yield PipelineEvent(type="done",
                 final=f"Couldn't auto-recover from `{verb} {arg}` "
