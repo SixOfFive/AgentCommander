@@ -950,6 +950,12 @@ class PipelineRun:
                                             iterations=iteration, category=category)
                         return
 
+                # Dispatch — parallel fan-out (prototype). One decision, many
+                # independent role sub-steps run concurrently across the fleet.
+                if decision.action == FANOUT_ACTION:
+                    yield from self._dispatch_fan_out(decision, iteration, opts)
+                    continue
+
                 # Dispatch — role delegation
                 if decision.action in ROLE_ACTIONS:
                     yield from self._dispatch_role(decision, iteration, opts)
