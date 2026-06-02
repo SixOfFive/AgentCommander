@@ -232,8 +232,10 @@ def main() -> int:
         if not args.quiet:
             print(f"    prompt: {case['prompt'][:90]}")
 
+        guards_before = _guard_counts()
         result = harness.run_case(case["prompt"], timeout_s=timeout_s,
                                   working_directory=wd)
+        guards_fired = _guard_delta(guards_before, _guard_counts())
         rdict = result.to_dict()
         passed, details = scorers.score_case(rdict, case.get("checks", []))
         n_pass += int(passed)
