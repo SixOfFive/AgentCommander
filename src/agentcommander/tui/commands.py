@@ -2123,6 +2123,75 @@ def cmd_parallel(ctx: CommandContext, args: list[str]) -> None:
             f"  unknown arg {sub!r} — use /parallel on|off|status|route"))
 
 
+_GUARD_TELEMETRY_FAMILIES = {
+    "decision": "decision_guards",
+    "done": "done_guards",
+    "flow": "flow_guards",
+    "execute": "execute_guards",
+    "write": "write_guards",
+}
+
+
+def _guard_universe() -> dict[str, str]:
+    """Map every `*_guard` function in the INSTRUMENTED families → its family.
+    Used to surface guards that have never fired (pruning candidates). Only the
+    instrumented families are included so 'never fired' is accurate."""
+    import importlib
+    out: dict[str, str] = {}
+    for family, modname in _GUARD_TELEMETRY_FAMILIES.items():
+        try:
+            mod = importlib.import_module(f"agentcommander.engine.guards.{modname}")
+        except Exception:  # noqa: BLE001
+            continue
+        for name in dir(mod):
+            if name.endswith("_guard") and callable(getattr(mod, name, None)):
+                out[name] = family
+    return out
+
+
+def cmd_guards(ctx: CommandContext, args: list[str]) -> None:
+    """Guard telemetry — which guards actually fire (pruning evidence).
+
+      /guards              fire counts, most-fired first, + never-fired guards
+      /guards reset        clear the telemetry counters
+    """
+    from agentcommander.db.repos import clear_guard_fires, guard_fire_stats
+
+    sub = (args[0].lower() if args else "stats")
+    if sub == "reset":
+        n = clear_guard_fires()
+        render_system_line(style("ok", f"  cleared {n} guard-fire row(s)."))
+        return
+
+    stats = guard_fire_stats()
+    if stats:
+        import datetime as _dt
+        rows = []
+        for s in stats:
+            ts = _dt.datetime.fromtimestamp(s["last_fired_at"] / 1000).strftime("%m-%d %H:%M")
+            rows.append([s["family"], s["guard"], s["verdict"], str(s["count"]), ts])
+        render_table(["family", "guard", "verdict", "count", "last fired"], rows)
+    else:
+        render_system_line(style("muted",
+            "  no guard fires recorded yet — run some prompts, then check back."))
+
+    # Never-fired guards in the instrumented families = pruning candidates.
+    universe = _guard_universe()
+    fired = {s["guard"] for s in stats}
+    never = sorted(g for g in universe if g not in fired)
+    render_system_line("")
+    render_system_line(
+        f"  {len(fired)}/{len(universe)} guards have fired; "
+        f"{len(never)} never fired (across {', '.join(_GUARD_TELEMETRY_FAMILIES)}).")
+    if never:
+        render_system_line(style("muted", "  never-fired (pruning candidates):"))
+        for i in range(0, len(never), 3):
+            render_system_line(style("muted", "    " + ", ".join(never[i:i + 3])))
+    render_system_line(style("muted",
+        "  note: telemetry covers decision/done/flow/execute/write runners. "
+        "Cross-check with an eval run before deleting."))
+
+
 def cmd_vault(ctx: CommandContext, args: list[str]) -> None:
     """Configure / probe the local notes vault (long-term memory).
 
