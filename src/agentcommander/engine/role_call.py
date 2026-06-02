@@ -162,6 +162,10 @@ def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
 
     if json_mode is None:
         json_mode = agent.output_contract is OutputContract.JSON_STRICT
+    # A schema implies JSON output — constrained decoding is a strict superset
+    # of json_mode, so never let a caller pass a schema with json_mode False.
+    if json_schema is not None:
+        json_mode = True
 
     started = time.time()
     collected: list[str] = []
