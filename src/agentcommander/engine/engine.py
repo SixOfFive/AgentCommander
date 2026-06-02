@@ -953,8 +953,39 @@ class PipelineRun:
                 # Dispatch — parallel fan-out (prototype). One decision, many
                 # independent role sub-steps run concurrently across the fleet.
                 if decision.action == FANOUT_ACTION:
-                    yield from self._dispatch_fan_out(decision, iteration, opts)
-                    continue
+                    fo_count = self.state.tool_call_counts.get("fan_out", 0)
+                    if fo_count == 0:
+                        # First fan_out this turn — run the panel.
+                        yield from self._dispatch_fan_out(decision, iteration, opts)
+                        continue
+                    elif fo_count == 1:
+                        # The panel already ran; the orchestrator is repeating
+                        # itself instead of synthesizing. Force a single
+                        # summarize over the accumulated results, then let the
+                        # normal loop reach done. (Bounds the fan_out loop.)
+                        self.state.tool_call_counts["fan_out"] = 2
+                        yield PipelineEvent(
+                            type="guard", family="fan_out",
+                            reason="panel already ran — forcing summarize to converge")
+                        decision = OrchestratorDecision(
+                            action="summarize",
+                            input=("Synthesize the panel results (review, critique, "
+                                   "test) already in the context into one final "
+                                   "answer for the user."),
+                        )
+                        # fall through to the ROLE_ACTIONS dispatch below
+                    else:
+                        # Still trying to fan_out after panel + summarize —
+                        # stop spinning and emit what we have.
+                        final = build_final_output(self.state.scratchpad,
+                                                   self.state.turn_start_idx)
+                        yield PipelineEvent(
+                            type="guard", family="fan_out",
+                            reason="fan_out loop — converging to done with current results")
+                        yield PipelineEvent(type="done", final=final)
+                        update_pipeline_run(self.run_id, status="done",
+                                            iterations=iteration, category=category)
+                        return
 
                 # Dispatch — role delegation
                 if decision.action in ROLE_ACTIONS:
