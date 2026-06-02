@@ -564,9 +564,16 @@ def plan_without_code_guard(scratchpad: list[ScratchpadEntry],
 def terse_done_guard(scratchpad: list[ScratchpadEntry], iteration: int, max_iter: int,
                       decision: OrchestratorDecision, user_message: str) -> GuardVerdict:
     text = (decision.input or "").strip()
+    # "exactly/verbatim/precisely/literally" signal an intentionally terse,
+    # caller-specified reply just as strongly as "just/only" — e.g. "Respond
+    # with exactly: OK". Omitting them made terse_done_guard nudge a correct
+    # one-word answer (2026-06-02 eval, case 7: "Respond with exactly: OK"
+    # took 2 iters / 57s instead of one). Keep both word-order variants.
     brevity = re.search(
-        r"\b(reply|respond|answer|say)\s+(with\s+)?(just|only)\b"
-        r"|\b(just|only)\s+(say|reply|respond|answer)\b"
+        r"\b(reply|respond|answer|say)\s+(with\s+)?"
+        r"(just|only|exactly|verbatim|precisely|literally)\b"
+        r"|\b(just|only|exactly|precisely|verbatim|literally)\s+"
+        r"(say|reply|respond|answer)\b"
         r"|\bone[- ]word\b|\bin\s+one\s+word\b|\b(yes\s+or\s+no)\b",
         user_message, re.IGNORECASE,
     )
