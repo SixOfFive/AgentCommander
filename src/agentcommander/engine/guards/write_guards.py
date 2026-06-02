@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from agentcommander.engine.guards.types import GuardVerdict, push_system_nudge
+from agentcommander.engine.guards.types import GuardVerdict, push_system_nudge, record_fire
 from agentcommander.types import ScratchpadEntry
 
 MAX_FILE_SIZE = 100_000
