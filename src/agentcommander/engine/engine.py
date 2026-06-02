@@ -2391,7 +2391,7 @@ class PipelineRun:
         #
         # Detector shared with the done-branch interceptor — same
         # last-line policy and same auto-recovery treatment.
-        intent = self._detect_tool_syntax_intent(final)
+        intent = recovery.detect_tool_syntax_intent(final)
         if intent is not None:
             bad_verb, bad_arg = intent
             yield from self._honor_tool_text_as_intent(
