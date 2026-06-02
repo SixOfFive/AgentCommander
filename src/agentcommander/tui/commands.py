@@ -359,6 +359,44 @@ def cmd_models(ctx: CommandContext, args: list[str]) -> None:
     render_table(["model", "family", "size", "tok/s"], rows)
 
 
+def _model_present(model: str, installed: list[str]) -> bool:
+    """True if `model` is installed, tolerating Ollama's implicit `:latest`."""
+    if model in installed:
+        return True
+    if ":" not in model and f"{model}:latest" in installed:
+        return True
+    return False
+
+
+def verify_model_installed(provider_id: str, model: str) -> str | None:
+    """Best-effort: is `model` installed on `provider_id`? Returns a line to
+    show the user, or None. Never blocks — a role can be bound before the
+    model is pulled, and some backends (llama.cpp) don't enumerate the same
+    way. The point is to CATCH a ghost binding (e.g. researcher→cogito:8b that
+    404s every call) at bind time instead of mid-run."""
+    from agentcommander.providers.base import ProviderError, resolve as resolve_provider
+    try:
+        prov = resolve_provider(provider_id)
+    except ProviderError:
+        return style("muted", f"  (provider {provider_id} not loaded — couldn't verify the model)")
+    try:
+        installed = [m.get("id") or m.get("name") for m in prov.list_models()]
+        installed = [m for m in installed if m]
+    except Exception:  # noqa: BLE001 - unreachable host: warn, don't block
+        return style("warn", f"  ⚠ couldn't reach {provider_id} to verify "
+                             f"'{model}' is installed — setting anyway")
+    if _model_present(model, installed):
+        return style("ok", f"  ✓ verified: {model} is installed on {provider_id}")
+    base = model.split(":")[0].lower()
+    near = [m for m in installed if base in m.lower()][:5]
+    msg = style("warn",
+                f"  ⚠ '{model}' is NOT installed on {provider_id} — calls will "
+                f"fail with HTTP 404 until you `ollama pull {model}`.")
+    if near:
+        msg += "\n" + style("muted", f"    closest installed: {', '.join(near)}")
+    return msg
+
+
 def cmd_roles(ctx: CommandContext, args: list[str]) -> None:
     from agentcommander.db.connection import get_db
     from agentcommander.db.repos import (
