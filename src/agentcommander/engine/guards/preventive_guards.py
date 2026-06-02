@@ -1165,6 +1165,17 @@ def repeated_paragraph_guard(
 
 
 _QUESTION_BACK_RX = re.compile(r"\?\s*\Z")
+# The user explicitly invited a question-back / clarification. When this
+# matches the user message, a short question IS the requested deliverable, so
+# question_only_done_guard must not nag for it.
+_ASKED_FOR_QUESTION_RX = re.compile(
+    r"\bask\s+(me|us)\b"
+    r"|\bask\b[^.?!]{0,40}\bquestions?\b"
+    r"|\b(a|one|some|any|each|the|your)\s+questions?\b"
+    r"|\bclarif(y|ying|ication)\b"
+    r"|\bwhat\s+(do|would|will)\s+you\s+need\b",
+    re.IGNORECASE,
+)
 
 
 def question_only_done_guard(
