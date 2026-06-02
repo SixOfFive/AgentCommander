@@ -501,10 +501,15 @@ def cmd_roles(ctx: CommandContext, args: list[str]) -> None:
             render_system_line(style("muted", f"  {created_msg}"))
         else:
             pid = pid_or_url
+        # Catch ghost bindings (model not installed → every call 404s) at bind
+        # time. Best-effort + non-blocking: warn, then still persist.
+        note = verify_model_installed(pid, model)
         # Every /roles set is persisted as an override.
         set_role_assignment(role, pid, model, is_override=True)
         render_system_line(f"set {role.value} → {pid} / {model}  "
                            + style("muted", "(override; persisted; beats autoconfig)"))
+        if note:
+            render_system_line(note)
         return
 
     if sub == "unset":
