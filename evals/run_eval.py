@@ -237,6 +237,7 @@ def main() -> int:
                                   working_directory=wd)
         guards_fired = _guard_delta(guards_before, _guard_counts())
         rdict = result.to_dict()
+        rdict["guards_fired"] = guards_fired  # let guard_* scorers see per-case fires
         passed, details = scorers.score_case(rdict, case.get("checks", []))
         n_pass += int(passed)
 
