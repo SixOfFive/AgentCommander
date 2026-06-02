@@ -112,6 +112,37 @@ def infer_live_data_url(user_message: str) -> str | None:
     return None
 
 
+# ─── Scratchpad-leak detection ──────────────────────────────────────────────
+
+
+def is_scratchpad_leak(text: str) -> bool:
+    """True when ``text`` is a verbatim copy of the engine's own scratchpad
+    scaffolding rather than a real model reply.
+
+    Round-22 catch: after a successful tool action, the orchestrator (a weak
+    model under context pressure) sometimes emits the engine's own
+    ``successfully completed:`` wrapper, a role-prompt phrase, or a prior
+    turn's fake multi-test summary as its ``done.input``. Detecting these
+    mechanical signatures lets the engine route to the chat fallback for a
+    fresh attempt instead of shipping the scaffolding as the answer.
+    """
+    if not text:
+        return False
+    norm = text.lstrip()
+    norm_lower = norm.lower()
+    # 1. Engine's tool-success wrapper — never a real reply.
+    if norm_lower.startswith("successfully completed:"):
+        return True
+    # 2. Role-prompt scaffolding regurgitation.
+    if norm_lower.startswith("summarize what was done"):
+        return True
+    # 3. Multi-test-summary hallucination loop: 3+ "TEST NNN:" references means
+    #    the reply is echoing prior turns rather than answering this one.
+    if len(re.findall(r"\bTEST\s+\d{2,3}\b", norm)) >= 3:
+        return True
+    return False
+
+
 # ─── Tool-syntax-as-text detection + payload building ───────────────────────
 
 
