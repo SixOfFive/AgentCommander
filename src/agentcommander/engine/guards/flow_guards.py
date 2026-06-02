@@ -481,5 +481,6 @@ def run_flow_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         plan_call_count = result["plan_call_count"]
         consecutive_nudges = result["consecutive_nudges"]
         if result["verdict"]["action"] != "pass":
+            record_fire("flow", guard, result["verdict"]["action"])
             return result
     return _result("pass", plan_call_count=plan_call_count, consecutive_nudges=consecutive_nudges)
