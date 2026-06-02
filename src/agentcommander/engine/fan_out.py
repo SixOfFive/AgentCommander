@@ -61,6 +61,51 @@ class FanOutResult:
     error: str | None
     duration_ms: int
     model: str | None
+    provider_id: str | None = None
+    rerouted: bool = False
+
+
+def plan_host_routing(subs: list[dict], *, resolve_fn,
+                      installed_by_provider: "dict[str, set]") -> list[dict]:
+    """Assign each fan-out sub-step to a host, spreading concurrent steps
+    across DISTINCT hosts that have the role's model installed.
+
+    Rule: *same model, different GPU.* A sub-step keeps its role's resolved
+    model (so quality is identical to a serial call) but may run on an
+    ALTERNATE host that also has that model — chosen to be the least-used host
+    this fan-out, preferring the role's default host on ties. This is the only
+    routing signal that's both safe (never swaps in an unknown model) and
+    catalog-independent. When the model lives on only one host, the step stays
+    there (it'll contend — unavoidable without the model elsewhere).
+
+    Pure function of ``installed_by_provider`` (``{provider_id: {model_ids}}``)
+    and ``resolve_fn`` (role_enum → resolved binding with ``.provider_id`` /
+    ``.model``). Returns ``subs`` enriched with ``provider_id`` / ``model`` /
+    ``_rerouted`` keys, in the same order.
+    """
+    used: dict[str, int] = {}
+    out: list[dict] = []
+    for sub in subs:
+        action = sub.get("action")
+        role = ACTION_TO_ROLE.get(action) if action else None
+        rr = resolve_fn(role) if role is not None else None
+        if rr is None:
+            out.append({**sub, "provider_id": None, "model": None, "_rerouted": False})
+            continue
+        pid_def, model_def = rr.provider_id, rr.model
+        hosts = [pid for pid, models in installed_by_provider.items()
+                 if model_def in models]
+        if pid_def not in hosts:
+            # Trust the default binding even if we couldn't probe it (host
+            # down during the probe, or model list stale).
+            hosts.append(pid_def)
+        # Least-used host this fan-out; tie → prefer default host, then stable.
+        chosen = min(hosts, key=lambda pid: (used.get(pid, 0),
+                                             0 if pid == pid_def else 1, pid))
+        used[chosen] = used.get(chosen, 0) + 1
+        out.append({**sub, "provider_id": chosen, "model": model_def,
+                    "_rerouted": chosen != pid_def})
+    return out
 
 
 def validate_steps(steps: "list[Any] | None") -> tuple[list[dict], list[str]]:
