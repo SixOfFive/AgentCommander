@@ -909,7 +909,7 @@ class PipelineRun:
                     # wrapper. Round-22 caught this. Fire chat fallback
                     # so the user gets a fresh attempt at the actual
                     # question.
-                    if self._is_scratchpad_leak(final):
+                    if recovery.is_scratchpad_leak(final):
                         yield PipelineEvent(
                             type="guard", family="done",
                             reason="rejecting scratchpad-leak in done.input",
