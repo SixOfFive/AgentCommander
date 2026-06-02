@@ -66,7 +66,13 @@
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_preventive_guards)",
       "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_preventive_guards_round50)",
       "Bash(bash run25.sh)",
-      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_context_optimizations)"
+      "Bash(PYTHONUTF8=1 PYTHONPATH=src py -3 -m unittest tests.test_context_optimizations)",
+      "Bash(bash run15_round51.sh)",
+      "Bash(./ac.bat)",
+      "Bash(python -c \"import json; d=json.load\\(open\\('resources/typecast-openrouter-free.json'\\)\\); print\\(type\\(d\\), len\\(d\\) if hasattr\\(d,'__len__'\\) else ''\\); print\\(list\\(d.keys\\(\\)\\)[:5] if isinstance\\(d,dict\\) else d[:2]\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(cmd.exe //c start \"AgentCommander\" cmd.exe //k \"..\\\\ac.bat\")",
+      "Bash(cmd.exe //c start \"\" cmd.exe //k \"..\\\\\\\\ac.bat\")"
     ]
   }
 }

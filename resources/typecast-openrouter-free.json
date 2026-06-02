@@ -6,10 +6,10 @@
     "voteIncrement": 1,
     "voteMax": 1000000,
     "voteMin": -1000000,
-    "lastFetchedAt": 1778173778144,
+    "lastFetchedAt": 1780418529701,
     "lastVoteAt": 1778173911384,
     "voteCount": 1410,
-    "modelCount": 30
+    "modelCount": 33
   },
   "_models": {
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": {
@@ -39,7 +39,7 @@
     },
     "poolside/laguna-xs.2:free": {
       "name": "poolside/laguna-xs.2:free",
-      "contextLength": 131072,
+      "contextLength": 262144,
       "max_completion_tokens": null,
       "pricing_prompt": null,
       "pricing_completion": null,
@@ -64,7 +64,7 @@
     },
     "poolside/laguna-m.1:free": {
       "name": "poolside/laguna-m.1:free",
-      "contextLength": 131072,
+      "contextLength": 262144,
       "max_completion_tokens": null,
       "pricing_prompt": null,
       "pricing_completion": null,
@@ -214,7 +214,7 @@
     },
     "nvidia/nemotron-3-super-120b-a12b:free": {
       "name": "nvidia/nemotron-3-super-120b-a12b:free",
-      "contextLength": 262144,
+      "contextLength": 1000000,
       "max_completion_tokens": null,
       "pricing_prompt": null,
       "pricing_completion": null,
@@ -239,7 +239,7 @@
     },
     "minimax/minimax-m2.5:free": {
       "name": "minimax/minimax-m2.5:free",
-      "contextLength": 196608,
+      "contextLength": 204800,
       "max_completion_tokens": null,
       "pricing_prompt": null,
       "pricing_completion": null,
@@ -489,7 +489,7 @@
     },
     "qwen/qwen3-coder:free": {
       "name": "qwen/qwen3-coder:free",
-      "contextLength": 262000,
+      "contextLength": 1048576,
       "max_completion_tokens": null,
       "pricing_prompt": null,
       "pricing_completion": null,
@@ -664,7 +664,7 @@
     },
     "meta-llama/llama-3.3-70b-instruct:free": {
       "name": "meta-llama/llama-3.3-70b-instruct:free",
-      "contextLength": 65536,
+      "contextLength": 131072,
       "max_completion_tokens": null,
       "pricing_prompt": null,
       "pricing_completion": null,
@@ -740,6 +740,36 @@
     "baidu/cobuddy:free": {
       "name": "baidu/cobuddy:free",
       "contextLength": 131072,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {}
+    },
+    "deepseek/deepseek-v4-flash:free": {
+      "name": "deepseek/deepseek-v4-flash:free",
+      "contextLength": 1048576,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {}
+    },
+    "arcee-ai/trinity-large-thinking:free": {
+      "name": "arcee-ai/trinity-large-thinking:free",
+      "contextLength": 262144,
+      "max_completion_tokens": null,
+      "pricing_prompt": null,
+      "pricing_completion": null,
+      "modality": null,
+      "supported_params": [],
+      "by_role": {}
+    },
+    "moonshotai/kimi-k2.6:free": {
+      "name": "moonshotai/kimi-k2.6:free",
+      "contextLength": 262144,
       "max_completion_tokens": null,
       "pricing_prompt": null,
       "pricing_completion": null,
