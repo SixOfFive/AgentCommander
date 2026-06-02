@@ -149,11 +149,15 @@ def push_system_nudge(scratchpad: list[ScratchpadEntry], iteration: int,
 
 
 def guard_name(thunk: object) -> str:
-    """Recover the guard function name from a runner's ``lambda: foo_guard(...)``
-    wrapper, via the lambda's code object — the called guard is a module global,
-    so it appears in ``co_names`` while the closed-over args are free vars. Zero
-    per-guard bookkeeping; tracks renames automatically. Falls back gracefully
-    if a future runner uses a non-uniform thunk shape."""
+    """Recover the guard's name from a runner entry. Handles both shapes the
+    runners use: a bare function object (``__name__`` directly, e.g. the
+    execute runner) and a ``lambda: foo_guard(...)`` wrapper (the called guard
+    is a module global, so it's in the lambda's ``co_names`` while closed-over
+    args are free vars). Zero per-guard bookkeeping; tracks renames. Falls back
+    gracefully on a non-uniform thunk."""
+    nm = getattr(thunk, "__name__", "")
+    if nm and nm != "<lambda>":
+        return nm
     try:
         names = getattr(thunk, "__code__").co_names  # type: ignore[attr-defined]
     except Exception:  # noqa: BLE001
