@@ -1784,6 +1784,102 @@ class PipelineRun:
             if ps["action"] == "break":
                 yield PipelineEvent(type="done", final=ps["final_output"])
 
+    def _dispatch_fan_out(self, decision: OrchestratorDecision, iteration: int,
+                          opts: RunOptions) -> Iterator[PipelineEvent]:
+        """Run independent role sub-steps concurrently across the fleet.
+
+        Gated by the ``fan_out_enabled`` config flag: enabled → parallel
+        (ThreadPoolExecutor); disabled → sequential degrade (identical
+        results, no concurrency). Results are integrated into the scratchpad
+        in step order regardless of completion order, so the run stays
+        deterministic and the eval harness can A/B parallel-vs-serial.
+        """
+        from agentcommander.db.repos import get_config
+
+        runnable, skipped = validate_steps(decision.steps)
+
+        if not runnable:
+            # Nothing valid to fan out — nudge the orchestrator back to a
+            # normal decision rather than spinning. (e.g. it emitted fan_out
+            # with tool sub-steps, which aren't allowed in the prototype.)
+            reason = "; ".join(skipped) or "fan_out had no steps"
+            push_nudge(self.state.scratchpad, iteration, "fan_out_empty",
+                       f"fan_out rejected: {reason}. Emit one action per "
+                       f"decision, or group only role delegations under steps.")
+            yield PipelineEvent(type="guard", family="fan_out",
+                                reason=f"fan_out rejected: {reason}")
+            return
+
+        enabled = bool(get_config("fan_out_enabled", False))
+        mode = "parallel" if enabled else "serial (fan_out disabled)"
+        skip_note = f"; skipped {len(skipped)}" if skipped else ""
+        yield PipelineEvent(
+            type="guard", family="fan_out",
+            reason=(f"fan_out: {len(runnable)} sub-task(s) "
+                    f"[{', '.join(s.get('action') for s in runnable)}] {mode}{skip_note}"),
+        )
+
+        # Snapshot the scratchpad context ONCE so every worker sees the same
+        # read-only prior state; the scratchpad isn't mutated until gather.
+        scratchpad_text = compact_scratchpad(self.state.scratchpad)
+        wall_started = time.time()
+
+        results = run_fan_out(
+            runnable,
+            scratchpad_text=scratchpad_text,
+            conversation_id=opts.conversation_id,
+            should_cancel=self.is_cancelled,
+            parallel=enabled,
+        )
+
+        wall_ms = int((time.time() - wall_started) * 1000)
+        sum_ms = sum(r.duration_ms for r in results)
+
+        # Integrate in step order — deterministic regardless of which worker
+        # finished first.
+        for r in results:
+            # Mirror _dispatch_role's UI hooks so the bar / popouts show each
+            # sub-role as a completed block.
+            if opts.on_role_start is not None:
+                try:
+                    opts.on_role_start(r.role, r.model or "?", None)
+                except Exception:  # noqa: BLE001
+                    pass
+
+            self._push_entry(ScratchpadEntry(
+                step=iteration, role=r.role, action=r.action,
+                input=r.input, output=r.output or (r.error or ""),
+                timestamp=time.time(), duration_ms=r.duration_ms,
+            ))
+
+            if opts.on_role_end is not None:
+                try:
+                    opts.on_role_end(r.role, r.model or "?", 0, 0)
+                except Exception:  # noqa: BLE001
+                    pass
+
+            if r.ok:
+                self._bump_hint_for_label(r.role, self.HINT_BUMP_SUCCESS)
+                yield PipelineEvent(type="role", role=r.role, output=r.output)
+            else:
+                # Per-step failure is isolated: record it, nudge, surface it,
+                # but let the other sub-steps' results stand.
+                self._record_failure_vote(r.role)
+                self._bump_hint_for_label(r.role, self.HINT_BUMP_FAILURE)
+                push_nudge(self.state.scratchpad, iteration,
+                           f"{r.role}_failed",
+                           f"fan_out sub-step {r.role} failed: {r.error}")
+                yield PipelineEvent(type="error", role=r.role, error=r.error)
+
+        # Report the concurrency win: wall-clock vs summed per-step time.
+        if enabled and len(results) > 1 and wall_ms > 0:
+            speedup = sum_ms / wall_ms if wall_ms else 1.0
+            yield PipelineEvent(
+                type="guard", family="fan_out",
+                reason=(f"fan_out done: {len(results)} step(s) in {wall_ms}ms "
+                        f"wall ({sum_ms}ms summed, {speedup:.1f}x overlap)"),
+            )
+
     def _dispatch_tool(self, decision: OrchestratorDecision, iteration: int,
                        opts: RunOptions) -> Iterator[PipelineEvent]:
         # Write guards (pre-dispatch)
