@@ -1095,6 +1095,9 @@ def record_throughput(model: str | None, completion_tokens: int | None,
 
     seconds = duration_ms / 1000.0
     rate = float(effective_tokens) / seconds
+    # Per-host EMA (for fan-out's makespan router) — same rate, keyed by host.
+    if provider_id:
+        _record_host_throughput(provider_id, model, rate)
     db = get_db()
     try:
         row = db.execute(
