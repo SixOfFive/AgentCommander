@@ -142,23 +142,35 @@ def _run_one(index: int, sub: dict, *, scratchpad_text: str,
     if role is None:  # defensive — validate_steps should have filtered this
         return FanOutResult(index, action, inp, "?", "", False,
                             f"not a fan-out sub-action: {action!r}", 0, None)
-    rr = resolve_role(role)
-    model = rr.model if rr else None
+    # Host-aware routing override (from plan_host_routing): run this role on a
+    # specific host+model so concurrent steps land on different GPUs. Both
+    # must be present to override; otherwise call_role resolves normally.
+    pid_override = sub.get("provider_id")
+    model_override = sub.get("model")
+    rerouted = bool(sub.get("_rerouted"))
+    model = model_override
+    if model is None:
+        rr = resolve_role(role)
+        model = rr.model if rr else None
     try:
         out = call_role(
             role,
             user_input=inp,
             scratchpad_text=scratchpad_text,
             conversation_id=conversation_id,
+            provider_id=pid_override,
+            model=model_override,
             on_delta=None,            # no live streaming for concurrent steps
             should_cancel=should_cancel,
         )
         return FanOutResult(index, action, inp, role.value, out, True, None,
-                            int((time.time() - started) * 1000), model)
+                            int((time.time() - started) * 1000), model,
+                            provider_id=pid_override, rerouted=rerouted)
     except Exception as exc:  # noqa: BLE001 - isolate per-step failure
         return FanOutResult(index, action, inp, role.value, "", False,
                             f"{type(exc).__name__}: {exc}",
-                            int((time.time() - started) * 1000), model)
+                            int((time.time() - started) * 1000), model,
+                            provider_id=pid_override, rerouted=rerouted)
 
 
 def run_fan_out(subs: list[dict], *, scratchpad_text: str,
