@@ -143,3 +143,34 @@ def push_system_nudge(scratchpad: list[ScratchpadEntry], iteration: int,
         step=iteration, role="tool", action="system_nudge",
         input=reason, output=output, timestamp=time.time(),
     ))
+
+
+# ─── Guard telemetry (which guards actually fire) ──────────────────────────
+
+
+def guard_name(thunk: object) -> str:
+    """Recover the guard function name from a runner's ``lambda: foo_guard(...)``
+    wrapper, via the lambda's code object — the called guard is a module global,
+    so it appears in ``co_names`` while the closed-over args are free vars. Zero
+    per-guard bookkeeping; tracks renames automatically. Falls back gracefully
+    if a future runner uses a non-uniform thunk shape."""
+    try:
+        names = getattr(thunk, "__code__").co_names  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001
+        return "<guard>"
+    guardish = [n for n in names if n.endswith("_guard")]
+    if guardish:
+        return guardish[0]
+    return names[0] if names else "<guard>"
+
+
+def record_fire(family: str, thunk: object, verdict_action: str) -> None:
+    """Record that the guard wrapped by ``thunk`` fired with ``verdict_action``.
+    No-op for 'pass'. Best-effort — telemetry never breaks a run."""
+    if verdict_action == "pass":
+        return
+    try:
+        from agentcommander.db.repos import record_guard_fire
+        record_guard_fire(family, guard_name(thunk), verdict_action)
+    except Exception:  # noqa: BLE001
+        pass
