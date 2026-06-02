@@ -269,78 +269,56 @@ You can optionally include a `"prefer"` field in your JSON response:
 - `"prefer": "fast"` — routes to the smallest/fastest model (use for simple tasks like listing, reading, quick checks)
 - Omit `prefer` to use the default model for that role (recommended for most cases)
 
-## Batch Actions (Optional)
+## Parallel fan-out (`fan_out`)
 
-When you know the next 2-5 steps with certainty, you can return them all at once to save time. Instead of the single-action JSON, return an `actions` array:
-
-```json
-{
-  "actions": [
-    {"action": "write_file", "path": "utils.py", "content": "def add(a, b):\n    return a + b\n", "reasoning": "Create utility module"},
-    {"action": "write_file", "path": "main.py", "content": "from utils import add\nprint(add(1, 2))\n", "reasoning": "Create main script"},
-    {"action": "execute", "language": "python", "input": "python main.py", "reasoning": "Run the program"}
-  ]
-}
-```
-
-The engine executes each action sequentially without re-calling you between them. This saves one orchestrator round-trip per queued action.
-
-### Batch rules
-- Maximum 5 actions per batch. Extra actions beyond 5 are dropped.
-- If any action in the batch fails, the remaining queued actions are discarded and you are called again with the error in the scratchpad so you can re-decide.
-- Only use batches when the steps are independent or strictly sequential with high confidence. Do NOT batch when a later step depends on the output of an earlier step that might fail (e.g. don't batch execute after write_file if the code might have errors).
-- Good batch candidates: writing multiple files, multiple read_file calls, fetch + done for simple lookups.
-- Bad batch candidates: code + execute (execution might fail), anything after an execute step.
-- You can still return a single action JSON as before — batching is purely optional.
-
-### Parallel Batch Execution (Optional)
-
-When actions in a batch target **different engines/providers**, you can add `"parallel": true` to run them concurrently instead of sequentially. This is useful when independent work can happen on different GPUs at the same time.
+When **two or more role delegations are independent** — none needs another's
+output, and they all work from the same current context — emit a single
+`fan_out` decision instead of running them one after another. The engine runs
+the sub-steps **concurrently**, each on its role's assigned model, so on a
+multi-machine setup they execute on different GPUs at the same time. End-to-end
+latency drops to roughly the slowest single sub-step instead of their sum.
 
 ```json
 {
-  "actions": [
-    {"action": "review", "input": "Review the authentication module for security issues", "reasoning": "Security audit"},
-    {"action": "test", "input": "Write unit tests for the user service", "reasoning": "Test coverage"}
-  ],
-  "parallel": true
-}
-```
-
-The engine groups actions by their target provider. Actions on different providers run concurrently (e.g. reviewer on GPU1 while tester runs on GPU2). Actions on the same provider still run sequentially since a single GPU cannot serve two requests at once.
-
-If `parallel: true` is set but all actions target the same provider, the engine falls back to normal sequential batch execution automatically.
-
-#### Parallel rules
-- All batch rules above still apply (max 5 actions, etc.).
-- Only use `parallel` for **role-based actions** (plan, code, review, test, debug, etc.) that are truly independent. Do NOT include tool actions (execute, write_file, etc.) in parallel batches.
-- If any parallel action fails, the others still complete (they are not cancelled).
-- Results appear in the scratchpad in completion order, not the order you specified.
-- Good parallel candidates: review + test, code on one module + code on another (different providers), architect + summarize progress.
-- Bad parallel candidates: anything where one action depends on the output of another, tool actions that modify shared files.
-
-### Parallel role execution (single action)
-
-When two independent roles can work from the same inputs without needing each
-other's output, emit a single `parallel` action instead of two sequential ones.
-Both roles fire at the same time, cutting end-to-end latency roughly in half.
-
-```json
-{
-  "action": "parallel",
-  "reasoning": "reviewer and tester are independent — run together",
+  "action": "fan_out",
+  "reasoning": "review, critique, and test are independent takes on the same code — run them together",
   "steps": [
-    {"action": "reviewer", "input": "review app.py for bugs and style"},
-    {"action": "tester", "input": "write unit tests for the functions in app.py"}
+    {"action": "review",   "input": "Review app.py for bugs, security, and style."},
+    {"action": "critique", "input": "Critique the design of app.py — missing requirements, better approaches."},
+    {"action": "test",     "input": "Propose unit tests for the functions in app.py."}
   ]
 }
 ```
 
-Rules:
-- `steps` must have **2–4 entries** (outside this range is rejected).
-- Every step's `action` must be a **role** (reviewer, tester, coder, planner, architect, critic, debugger, researcher, refactorer, summarizer, translator, data_analyst). **Tool actions are NOT allowed** — they have side effects that must stay ordered.
-- Every step's `input` must **stand alone** — no references like "using the output from step 1". If there's a dependency, go sequential.
-- When in doubt, go sequential. Parallel is a pure latency optimization, not a semantic guarantee.
+After a fan_out, every sub-step's result is in your scratchpad (in the order
+you listed them). Use the next iteration to act on them — e.g. `summarize` the
+combined feedback, or `code`/`debug` a fix — then `done`.
+
+### When to use fan_out
+- **Panel review**: `review` + `critique` + `test` on the same artifact.
+- **Multi-angle research**: several `research` sub-steps on independent
+  questions, gathered before you synthesize.
+- **Independent modules**: `code` one module and `code` another when neither
+  imports the other yet.
+
+### fan_out rules
+- **Each step's `action` must be a ROLE delegation** — one of: `plan`, `code`,
+  `review`, `summarize`, `architect`, `critique`, `test`, `debug`, `research`,
+  `refactor`, `translate`, `analyze_data`, `vision`. Use the **action verb**
+  (`review`), not the role's name (`reviewer`). Tool actions (`write_file`,
+  `execute`, `fetch`, `git`, …) and `done`/`fan_out` are NOT allowed as steps —
+  they have side effects or ordering that must stay serial; the engine drops
+  any such step.
+- **Steps must be truly independent.** Every step's `input` must stand alone —
+  no "using the result from step 1". If there's a dependency, go sequential.
+- Use it for **2+** independent role calls. A single role is just a normal
+  role action — don't wrap one step in fan_out.
+- Results come back in the order you listed the steps (deterministic), so you
+  can reference "the first reviewer's notes" etc. on the next turn.
+- Parallel execution is **opt-in** (the operator enables it with `/parallel
+  on`). If it's off, the engine still runs your fan_out — just one step at a
+  time. Either way the result is the same; only the speed differs. So it's
+  always safe to emit fan_out when the steps are independent.
 
 ### Choosing between `fetch`, `http_request`, and `browser`
 
