@@ -548,6 +548,7 @@ def run_decision_guards(ctx: dict[str, Any]) -> dict[str, Any]:
     for guard in guards:
         verdict = guard()
         if verdict.action == "continue":
+            record_fire("decision", guard, verdict.action)
             return {"decision": decision,
                     "verdict": {"action": "continue", "final_output": None}}
     return {"decision": decision, "verdict": {"action": "pass", "final_output": None}}
