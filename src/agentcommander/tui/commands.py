@@ -2719,6 +2719,30 @@ def _build_registry() -> dict[str, SlashCommand]:
             examples=("/parallel", "/parallel on", "/parallel off"),
         ),
         SlashCommand(
+            name="/vault", aliases=(),
+            summary="connect/probe the local notes vault (long-term memory)",
+            handler=cmd_vault,
+            usage=(
+                "/vault                 # status\n"
+                "/vault set <path>      # point recall at a vault directory\n"
+                "/vault off             # disconnect\n"
+                "/vault search <query>  # probe recall"
+            ),
+            details=(
+                "Gives the orchestrator read-only recall over a local notes\n"
+                "vault (Obsidian-style markdown). vault_search finds notes\n"
+                "(semantic when an _index/embeddings.json is present — query\n"
+                "embedded via Ollama nomic-embed-text and cosine-ranked —\n"
+                "otherwise keyword); vault_read returns a note's body.\n"
+                "\n"
+                "The vault PATH lives in the project-local DB (gitignored);\n"
+                "vault CONTENT is read on demand and never enters git. Both\n"
+                "tools are sandboxed to the vault directory and never write."
+            ),
+            examples=("/vault", "/vault set C:/Users/me/Obsidian/vault",
+                      "/vault search llama.cpp VRAM"),
+        ),
+        SlashCommand(
             name="/history", aliases=(),
             summary="show recent conversations",
             handler=cmd_history,
