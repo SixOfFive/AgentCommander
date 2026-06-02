@@ -186,6 +186,13 @@ def record_observation(
     seconds = duration_ms / 1000.0
     rate = float(tokens) / seconds
 
+    with _STATS_LOCK:
+        return _record_locked(model, rate, tokens, estimated, duration_ms,
+                              prompt_tokens, prompt_eval_ms)
+
+
+def _record_locked(model, rate, tokens, estimated, duration_ms,
+                   prompt_tokens, prompt_eval_ms) -> dict[str, Any] | None:
     data = _load()
     row = data["models"].get(model)
     if row is None or not isinstance(row, dict):
