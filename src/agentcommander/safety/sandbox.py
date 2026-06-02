@@ -25,6 +25,35 @@ class FilesystemSecurityError(Exception):
     """Raised when a path operation would escape the sandbox."""
 
 
+# ─── Read-only zones ────────────────────────────────────────────────────────
+# Directories that may be READ but never written/deleted, regardless of the
+# working directory. Used for the notes vault: AgentCommander can search/read
+# it for recall, but must never modify it — even if the user points the
+# working directory at (or above) the vault. Populated from config at each
+# tool dispatch (see tools/dispatcher.invoke).
+_READONLY_ZONES: set[str] = set()
+
+
+def _norm(path: str) -> str:
+    return os.path.normpath(os.path.abspath(path))
+
+
+def register_readonly_zone(path: str) -> None:
+    if path:
+        _READONLY_ZONES.add(_norm(path))
+
+
+def clear_readonly_zones() -> None:
+    _READONLY_ZONES.clear()
+
+
+def is_in_readonly_zone(candidate_path: str) -> bool:
+    """True if candidate_path is at or under any registered read-only zone."""
+    if not _READONLY_ZONES:
+        return False
+    return any(is_path_within(candidate_path, zone) for zone in _READONLY_ZONES)
+
+
 def is_valid_directory(dir_path: str) -> bool:
     try:
         return os.path.isdir(dir_path)
