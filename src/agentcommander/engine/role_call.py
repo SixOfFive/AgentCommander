@@ -69,6 +69,7 @@ def tool_registry_appendix() -> str:
 def call_role(role: Role | str, *, user_input: str, scratchpad_text: str = "",
               conversation_id: str | None = None,
               json_mode: bool | None = None,
+              json_schema: dict | None = None,
               num_ctx: int | None = None,
               on_delta: Callable[[str], None] | None = None,
               on_finish: Callable[[int | None, int | None], None] | None = None,
