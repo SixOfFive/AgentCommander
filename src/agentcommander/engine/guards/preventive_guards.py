@@ -1170,6 +1170,7 @@ _QUESTION_BACK_RX = re.compile(r"\?\s*\Z")
 def question_only_done_guard(
     scratchpad: list[ScratchpadEntry], iteration: int,  # noqa: ARG001
     decision: OrchestratorDecision,
+    user_message: str = "",
 ) -> GuardVerdict:
     """Reject short done.input that is JUST a question back to the user.
 
@@ -1181,7 +1182,18 @@ def question_only_done_guard(
     There IS a legitimate "I need clarification" path; for that use case
     the answer should be longer / contain explicit "I need…" phrasing,
     which keeps it under this guard's threshold.
+
+    EXCEPTION: when the user *explicitly asked the model to ask a question*
+    ("Ask me one question to get started", "what would you need to know?",
+    "ask a clarifying question"), a short question-back IS the requested
+    output — nudging it is a false positive. This guard had no view of the
+    request at all until 2026-06-02, when the v2 eval (case
+    ``clarifying-question``) caught it firing twice on exactly that prompt,
+    forcing the model to pad its answer over two wasted iterations. Mirror
+    terse_done_guard: consult the user message before blocking.
     """
+    if _ASKED_FOR_QUESTION_RX.search(user_message or ""):
+        return GuardVerdict(action="pass")
     text = decision.input if isinstance(decision.input, str) else ""
     txt = text.strip()
     if len(txt) > 80 or len(txt) < 5:
