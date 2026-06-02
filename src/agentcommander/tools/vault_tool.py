@@ -147,7 +147,7 @@ def _indexed_stems(root: str) -> "set[str] | None":
         return None
     if not isinstance(index, dict):
         return None
-    return {os.path.splitext(os.path.basename(k))[0].lower() for k in index}
+    return {_note_key(k).lower() for k in index}
 
 
 def _resolve_note(root: str, name: str) -> str | None:
