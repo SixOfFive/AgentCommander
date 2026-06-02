@@ -698,7 +698,7 @@ class PipelineRun:
                     # forces another full orchestrator iteration which on
                     # weaker models burns time without fixing the format.
                     di_text = decision.input if isinstance(decision.input, str) else ""
-                    intent = self._detect_tool_syntax_intent(di_text)
+                    intent = recovery.detect_tool_syntax_intent(di_text)
                     if intent is not None:
                         rr_orch = resolve_role(Role.ORCHESTRATOR)
                         if rr_orch is not None:
