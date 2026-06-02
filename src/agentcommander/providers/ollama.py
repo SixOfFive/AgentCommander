@@ -271,7 +271,14 @@ class OllamaProvider(ProviderBase):
         }
         if options:
             body["options"] = options
-        if json_mode:
+        # Structured outputs. A full JSON Schema constrains generation at the
+        # sampler level (Ollama 0.5+ converts it to a GBNF grammar), so the
+        # model can't emit an invalid shape. Falls back to the loose
+        # `format: "json"` (valid JSON, any shape) when only json_mode is set.
+        # The schema takes precedence when both are supplied.
+        if json_schema is not None:
+            body["format"] = json_schema
+        elif json_mode:
             body["format"] = "json"
 
         url = f"{self.endpoint}/api/chat"
