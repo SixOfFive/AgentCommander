@@ -9,6 +9,7 @@ SAFETY GATE STACK:
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,42 @@ from agentcommander.safety.dangerous_patterns import scan_dangerous_code
 from agentcommander.safety.sandbox import require_working_directory
 from agentcommander.tools.dispatcher import register
 from agentcommander.tools.types import ToolContext, ToolDescriptor, ToolResult
+
+# Write/delete operations used to spot code that would modify the read-only
+# notes vault. Best-effort (heuristic) — the airtight guarantee is an OS-level
+# read-only ACL on the vault for the account AgentCommander runs as.
+_VAULT_WRITE_RX = re.compile(
+    r"(open\s*\([^)]*['\"][wax]"           # open(path, 'w'/'a'/'x'...)
+    r"|>>?\s*\S"                            # shell redirect > / >>
+    r"|\b(rm|del|move|mv|cp|copy|remove|unlink|rmtree|rmdir|rename|replace|"
+    r"mkdir|write_text|write_bytes|set-content|out-file|remove-item|new-item|"
+    r"add-content|tee)\b)",
+    re.IGNORECASE,
+)
+
+
+def _scan_vault_write(code: str) -> str | None:
+    """Heuristic: does ``code`` write/delete inside the configured vault?
+
+    Returns a reason string to block on, or None. Reads of the vault (no write
+    token on the line) pass — recall via execute is fine; mutation isn't.
+    """
+    try:
+        from agentcommander.db.repos import get_config
+        root = get_config("vault_path")
+    except Exception:  # noqa: BLE001
+        root = None
+    if not isinstance(root, str) or not root:
+        return None
+    markers = [root.replace("\\", "/").lower()]
+    base = os.path.basename(root.rstrip("/\\")).lower()
+    if len(base) >= 4:
+        markers.append(base)
+    for line in code.splitlines():
+        low = line.replace("\\", "/").lower()
+        if any(m in low for m in markers) and _VAULT_WRITE_RX.search(line):
+            return "code appears to write to or delete inside the read-only vault"
+    return None
 
 MAX_OUTPUT_BYTES = 200_000
 DEFAULT_TIMEOUT_S = 60
