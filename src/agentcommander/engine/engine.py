@@ -1634,6 +1634,7 @@ class PipelineRun:
                              scratchpad_text=scratchpad_text,
                              conversation_id=self.opts.conversation_id,
                              json_mode=True,
+                             json_schema=orchestrator_decision_schema(),
                              on_finish=_capture,
                              should_cancel=self.is_cancelled)
         try:
