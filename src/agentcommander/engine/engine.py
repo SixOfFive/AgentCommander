@@ -29,7 +29,7 @@ from agentcommander.engine.actions import (
     TOOL_ACTIONS,
 )
 from agentcommander.engine.decision_schema import orchestrator_decision_schema
-from agentcommander.engine.fan_out import run_fan_out, validate_steps
+from agentcommander.engine.fan_out import plan_host_routing, run_fan_out, validate_steps
 from agentcommander.engine.role_call import (
     RoleNotAssigned,
     call_role,
