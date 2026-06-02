@@ -36,6 +36,36 @@ through the real engine and reports pass/fail + iterations + latency. Includes
 a `--schema-off` A/B control to quantify #1. Replaces the eyeball-the-DB loop.
 See `evals/README.md`.
 
+### Parallel fan-out (prototype) — fleet utilization
+**Relaxes the historical "serial-only / no parallel action" hard constraint**,
+by owner decision (2026-06-02). The orchestrator can emit one `fan_out`
+decision whose independent **role** sub-steps (reuse the existing `steps`
+field) run concurrently on a bounded stdlib `ThreadPoolExecutor`; each sub-step
+uses its role's assigned provider, so binding panel roles to different hosts
+puts multiple GPUs to work at once.
+
+- `engine/fan_out.py` — pure primitive (`validate_steps`, `run_fan_out`),
+  deterministic step-order results, per-step error isolation, cancellation
+  threaded through.
+- `engine.py::_dispatch_fan_out` — flag-gated integration; **disabled →
+  sequential degrade** (same results), which also gives the eval harness a
+  clean parallel-vs-serial A/B.
+- `actions.py` — `FANOUT_ACTION` + `FANOUT_SUB_ACTIONS` (role verbs only;
+  side-effecting tools never parallelized); auto-flows into the #1 schema enum.
+- `/parallel on|off|status` (config `fan_out_enabled`, default OFF).
+- Thread-safety: SQLite is already lock-serialized; added a module lock +
+  unique temp filename to `model_stats.json` writes.
+- 9 tests in `tests/test_fan_out.py` (overlap timing, ordering determinism,
+  error isolation). Live: ran a reviewer/critic/tester panel across BEAST +
+  THEOCOMP — 2.4× step overlap; correct ordered results.
+
+**Follow-ups (LATER):** read-only tool fan-out (multi-source `fetch`);
+per-step rate-limit retry with UI countdown (currently a worker that hits a
+rate limit records a failed sub-step); live streaming of concurrent steps into
+separate popout blocks; an orchestrator-prompt section teaching when to emit
+`fan_out`. **Fleet caveat:** speedup ≈ sum/slowest-step — large only when
+sub-steps land on *distinct* hosts (same-host Ollama calls contend for one GPU).
+
 ### #6 — TypeCast hint accumulator (was "deferred" in braindump)
 Verified already wired: `engine._bump_hint_for_label` bumps `(model, role)`
 by ±0.1 on classify/orchestrate/role success/failure; `db.repos` persists to
