@@ -117,6 +117,8 @@ The bottom three rows are reserved for the live status bar:
 | `/db [check\|reindex\|vacuum\|backup\|salvage\|reset]` | Inspect + repair the project DB |
 | `/chat [list\|new\|clear\|resume\|title\|export]` | Manage conversations |
 | `/compact [undo]` | Manually compact the active chat's scratchpad via the summarizer; `/compact undo` restores the most recent compaction's originals |
+| `/parallel [on\|off\|status\|route on\|off]` | Toggle opt-in `fan_out` (concurrent role sub-steps) and host routing across the fleet |
+| `/vault [set <path>\|off\|search <q>\|status]` | Connect read-only recall over a local notes vault (long-term memory). Path stored in the gitignored project DB |
 | `/new [<title>]` | Alias for `/chat new` |
 | `/status` | Stacked-bar of per-model usage for the current chat |
 | `/agents` | The 19 agents — category, output contract, prompt availability |
