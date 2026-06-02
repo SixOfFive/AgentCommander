@@ -227,6 +227,7 @@ class OllamaProvider(ProviderBase):
         max_tokens: int | None = None,
         num_ctx: int | None = None,
         json_mode: bool = False,
+        json_schema: dict[str, Any] | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> Iterator[ChatChunk]:
         options: dict[str, Any] = {}
