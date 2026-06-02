@@ -816,14 +816,49 @@ def get_status_bar() -> StatusBar:
 # ─── Bottom-anchored input ────────────────────────────────────────────────
 
 
-# In-process input history. Ring-bounded so a long session doesn't grow
-# without bound. Most-recent entry is at index -1.
-_HISTORY_MAX = 200
+# Input history. Ring-bounded in memory; persisted to a project-local file so
+# Up/Down walks a real backbuffer across launches (like a shell), not just the
+# current session. Most-recent entry is at index -1.
+_HISTORY_MAX = 500
 _history: list[str] = []
+_history_loaded = False
+
+
+def _history_file() -> Path:
+    """Project-local history file, next to the DB (gitignored .agentcommander)."""
+    return Path.cwd() / ".agentcommander" / "input_history"
+
+
+def load_input_history() -> None:
+    """Load persisted history into memory (once). Trims the on-disk file to the
+    most-recent ``_HISTORY_MAX`` entries so it can't grow without bound."""
+    global _history_loaded
+    if _history_loaded:
+        return
+    _history_loaded = True
+    try:
+        p = _history_file()
+        if not p.is_file():
+            return
+        lines = [ln.strip() for ln in
+                 p.read_text(encoding="utf-8", errors="replace").splitlines()]
+        lines = [ln for ln in lines if ln]
+        _history.clear()
+        _history.extend(lines[-_HISTORY_MAX:])
+        if len(lines) > _HISTORY_MAX:
+            # Rewrite trimmed so the file doesn't grow forever.
+            try:
+                p.write_text("\n".join(_history) + "\n", encoding="utf-8")
+            except OSError:
+                pass
+    except OSError:
+        pass
 
 
 def _record_history(line: str) -> None:
-    """Append ``line`` to the input history, skipping consecutive duplicates."""
+    """Append ``line`` to the input history (memory + disk), skipping
+    consecutive duplicates. Safe to call from any submission path."""
+    load_input_history()
     line = line.strip()
     if not line:
         return
@@ -832,6 +867,13 @@ def _record_history(line: str) -> None:
     _history.append(line)
     if len(_history) > _HISTORY_MAX:
         del _history[: len(_history) - _HISTORY_MAX]
+    try:
+        p = _history_file()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    except OSError:
+        pass
 
 
 def _paint_input_row(prompt_text: str, buffer: str, cols: int, input_row: int) -> None:
