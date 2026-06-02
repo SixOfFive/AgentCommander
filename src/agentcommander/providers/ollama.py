@@ -340,7 +340,31 @@ class OllamaProvider(ProviderBase):
                     f"Ollama rate-limited: HTTP {exc.code}",
                     retry_after=retry_after,
                 ) from exc
-            raise ProviderError(f"Ollama /api/chat failed: HTTP {exc.code} {exc.reason}") from exc
+            # Surface the daemon's error body — Ollama's 404 for a missing
+            # model is e.g. {"error": "model \"cogito:8b\" not found, ..."}.
+            # A bare "HTTP 404 Not Found" sent debuggers chasing a wrong URL
+            # when the real cause was a role bound to an uninstalled model.
+            detail = ""
+            try:
+                raw_body = exc.read().decode("utf-8", errors="replace")
+                if raw_body:
+                    try:
+                        detail = (json.loads(raw_body).get("error") or "")[:300]
+                    except (ValueError, AttributeError):
+                        detail = raw_body[:300]
+            except Exception:  # noqa: BLE001
+                pass
+            if exc.code == 404:
+                raise ProviderError(
+                    f"Ollama: model {model!r} not found on {self.endpoint} "
+                    f"(HTTP 404). Install it (`ollama pull {model}`) or rebind "
+                    f"the role to an installed model with `/roles set`."
+                    + (f" [{detail}]" if detail else "")
+                ) from exc
+            raise ProviderError(
+                f"Ollama /api/chat failed: HTTP {exc.code} {exc.reason}"
+                + (f" — {detail}" if detail else "")
+            ) from exc
         except urllib.error.URLError as exc:
             raise ProviderError(f"Ollama /api/chat failed: {exc}") from exc
 
