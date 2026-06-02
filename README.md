@@ -17,7 +17,7 @@ Install models in Ollama (or point at a llama.cpp server). On startup, AgentComm
 | Constraint | Decision |
 |---|---|
 | Dependencies | **Zero.** stdlib only — `urllib`, `sqlite3`, `re`, `argparse`, ANSI escapes |
-| Concurrency | **Serial.** No `parallel` action, no async coordination. One TUI thread + one engine worker thread (so `/stop` can fire mid-run) |
+| Concurrency | **Serial by default.** The orchestrator loop is sequential (one TUI thread + one engine worker so `/stop` can fire mid-run). An **opt-in `fan_out`** action runs independent role sub-steps concurrently on a bounded `ThreadPoolExecutor` (stdlib) — used for panels (review+critique+test) and fleet utilization. Still no asyncio |
 | Multi-tenant | **No.** Single user, single working directory |
 | Network | Local Ollama / llama.cpp by default; OpenRouter / Anthropic / Google as plug-in providers (deferred) |
 | Plugins | Protocol-based registries — drop a `.py` and register at module top-level |
