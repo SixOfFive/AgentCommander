@@ -261,17 +261,27 @@ def _semantic_search(root: str, query: str, top_k: int) -> "list[tuple[str, floa
 
 
 def _lexical_search(root: str, query: str, top_k: int) -> "list[tuple[str, float]]":
-    terms = [t.lower() for t in query.split() if t.strip()]
+    # Drop stopwords + 1-char tokens so the query is the meaningful terms only.
+    terms = [t for t in (w.lower().strip(".,!?:;\"'()[]") for w in query.split())
+             if len(t) > 1 and t not in _STOPWORDS]
+    if not terms:
+        # Query was all stopwords — fall back to the raw tokens so we still try.
+        terms = [t.lower() for t in query.split() if t.strip()]
     if not terms:
         return []
+    # Restrict to the curated (indexed) scope when available — keeps the
+    # fallback off raw session archives. None → scan everything (minus internals).
+    allowed = _indexed_stems(root)
     scored: list[tuple[str, float]] = []
     for path in _iter_markdown(root):
+        name = os.path.splitext(os.path.basename(path))[0]
+        if allowed is not None and name.lower() not in allowed:
+            continue
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as fh:
                 body = fh.read().lower()
         except OSError:
             continue
-        name = os.path.splitext(os.path.basename(path))[0]
         name_l = name.lower()
         score = 0.0
         for t in terms:
