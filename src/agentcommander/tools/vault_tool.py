@@ -165,9 +165,9 @@ def _resolve_note(root: str, name: str) -> str | None:
     if os.path.isfile(cand) and is_path_within(cand, root):
         return cand
     # Fall back to a stem match across the tree (case-insensitive).
-    target = os.path.splitext(os.path.basename(name))[0].lower()
+    target = _note_key(name).lower()
     for path in _iter_markdown(root):
-        if os.path.splitext(os.path.basename(path))[0].lower() == target:
+        if _note_key(path).lower() == target:
             if is_path_within(path, root):
                 return path
     return None
