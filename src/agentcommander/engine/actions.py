@@ -49,6 +49,10 @@ TOOL_ACTIONS: frozenset[str] = frozenset({
     "git",
     "env",
     "browser",
+    # Vault recall (long-term memory over the user's local notes). Read-only,
+    # sandboxed to the configured vault directory.
+    "vault_search",
+    "vault_read",
 })
 
 # Parallel fan-out (prototype). The orchestrator emits ONE `fan_out` decision
