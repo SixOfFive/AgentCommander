@@ -2855,6 +2855,26 @@ def _build_registry() -> dict[str, SlashCommand]:
                       "/vault search llama.cpp VRAM"),
         ),
         SlashCommand(
+            name="/guards", aliases=(),
+            summary="guard telemetry — which guards fire (pruning evidence)",
+            handler=cmd_guards,
+            usage=(
+                "/guards          # fire counts + never-fired guards\n"
+                "/guards reset    # clear the counters"
+            ),
+            details=(
+                "Records which guards actually fire (return a non-pass verdict)\n"
+                "across the decision/done/flow/execute/write runners, with a\n"
+                "fire count and last-fired time per (guard, verdict). Surfaces\n"
+                "guards that have NEVER fired as pruning candidates — many\n"
+                "decision guards became dead weight once schema-constrained\n"
+                "decoding made invalid actions impossible. Cross-check with an\n"
+                "eval run (evals/) before deleting. Counters persist in the\n"
+                "project DB; /guards reset clears them."
+            ),
+            examples=("/guards", "/guards reset"),
+        ),
+        SlashCommand(
             name="/history", aliases=(),
             summary="show recent conversations",
             handler=cmd_history,
