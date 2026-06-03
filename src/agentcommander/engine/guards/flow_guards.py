@@ -141,7 +141,8 @@ def oscillation_guard(scratchpad: list[ScratchpadEntry], iteration: int,
 
 def rapid_rewrite_guard(scratchpad: list[ScratchpadEntry], iteration: int,
                          decision: OrchestratorDecision, plan_call_count: int,
-                         consecutive_nudges: int) -> dict[str, Any]:
+                         consecutive_nudges: int,
+                         user_message: str = "") -> dict[str, Any]:
     if decision.action != "write_file":
         return _result("pass", plan_call_count=plan_call_count, consecutive_nudges=consecutive_nudges)
     target = decision.path or decision.input or ""
@@ -155,10 +156,31 @@ def rapid_rewrite_guard(scratchpad: list[ScratchpadEntry], iteration: int,
         e.action == "execute" or e.role in ("debugger", "coder", "reviewer") for e in recent
     )
     if just_wrote and no_exec_between:
-        push_system_nudge(scratchpad, iteration, "rapid_rewrite",
-                          f'WARNING: you just wrote "{target}" and are writing it again '
-                          f"without testing. Execute it first.")
-        return _result("continue", plan_call_count=plan_call_count, consecutive_nudges=consecutive_nudges)
+        # The model already wrote this exact file successfully and is now
+        # redundantly re-writing it without running anything. Two outcomes,
+        # split by what the user actually asked for:
+        #
+        #   * The request wants the file RUN ("and run it", "what's the
+        #     output", "verify it works") -> nudge toward execute, as before.
+        #   * The request is a pure file CREATION ("write a file named X")
+        #     -> the deliverable already exists. A 14B orchestrator often
+        #     fails to recognise completion and re-writes the same file until
+        #     the iteration cap (2026-06-02 eval: write-hello-file looped to
+        #     the chat cap of 5 and erred instead of finishing). Complete the
+        #     turn cleanly instead of looping.
+        #
+        # The run-intent regex must match imperative run-requests but NOT the
+        # descriptive "...prints 'hello world' WHEN RUN" — that "run" describes
+        # the file's behaviour, it is not a request to execute it now.
+        if _WANTS_RUN_RX.search(user_message or ""):
+            push_system_nudge(scratchpad, iteration, "rapid_rewrite",
+                              f'WARNING: you just wrote "{target}" and are writing it again '
+                              f"without testing. Execute it first.")
+            return _result("continue", plan_call_count=plan_call_count,
+                           consecutive_nudges=consecutive_nudges)
+        return _result("break", plan_call_count=plan_call_count,
+                       consecutive_nudges=consecutive_nudges,
+                       final_output=f"Created `{target}` successfully.")
     return _result("pass", plan_call_count=plan_call_count, consecutive_nudges=consecutive_nudges)
 
 
