@@ -511,7 +511,7 @@ def run_flow_guards(ctx: dict[str, Any]) -> dict[str, Any]:
         lambda: role_spam_guard(scratchpad, iteration, decision, plan_call_count, consecutive_nudges),
         lambda: oscillation_guard(scratchpad, iteration, decision, plan_call_count, consecutive_nudges),
         lambda: stale_progress_guard(scratchpad, iteration, plan_call_count, consecutive_nudges),
-        lambda: rapid_rewrite_guard(scratchpad, iteration, decision, plan_call_count, consecutive_nudges),
+        lambda: rapid_rewrite_guard(scratchpad, iteration, decision, plan_call_count, consecutive_nudges, user_message),
     ]
     for guard in guards:
         result = guard()
