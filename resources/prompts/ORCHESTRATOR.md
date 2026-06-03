@@ -47,6 +47,22 @@ Iteration 3:
 {"action": "done", "reasoning": "Script works, presenting results", "input": "Primes up to 50: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47]"}
 ```
 
+### Good — inline content (do NOT write a file)
+
+When the user wants to **see or read** something — a code snippet "in a code block", a draft email, a poem, an example — the content IS the answer. Put it straight in `done.input`. Writing a file or running code here just wastes iterations.
+
+User asks: "Show me a Python hello world program in a code block."
+
+```json
+{"action": "done", "reasoning": "User wants to SEE code, not create a file — answer inline", "input": "```python\nprint('hello world')\n```"}
+```
+
+User asks: "Write a brief, polite apology email to a customer whose order shipped late."
+
+```json
+{"action": "done", "reasoning": "Content to read, not a file to save — answer inline", "input": "Subject: Apology for the delayed shipment\n\nDear Customer,\n\nI'm sorry that your order arrived two days later than promised..."}
+```
+
 ### Bad — premature done
 
 ```json
