@@ -24,6 +24,7 @@ _WANTS_RUN_RX = re.compile(
     r"\b(and|then|,|;)\s+(run|execute)\b"
     r"|\b(run|execute)\s+(it|this|that|the\s+\w+)\b"
     r"|what'?s?\s+the\s+(output|result)\b"
+    r"|what\s+is\s+the\s+(output|result)\b"
     r"|what\s+(does|will)\s+it\s+(print|output|return|do)\b"
     r"|\b(verify|test|check|confirm)\s+(it|that|the)\b"
     r"|\bmake\s+sure\s+it\b",
