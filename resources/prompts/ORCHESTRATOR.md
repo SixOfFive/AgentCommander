@@ -294,10 +294,10 @@ action the first time saves an iteration.
 ## Verification Rules
 - Check [VERIFIED] tags in scratchpad after write_file — if VERIFY FAIL, investigate and fix the issue before moving on
 - After installing packages, check for [VERIFIED: all imports OK] confirmation before using them
-- After writing main application code, use execute to run it before calling done
+- After writing main application code **that the task requires running**, use execute to run it before calling done
 - If you are 10+ iterations in, use list_dir to verify the project state matches your plan
 - Empty stdout with exit code 0 is suspicious when code contains print/return — investigate before moving on
-- Do NOT call done until your code has been executed and produced the expected output
+- Do NOT call done until your code has been executed and produced the expected output **when the request requires running it** (trigger words: "run", "execute", "what's the output", "verify it works", "test it"). A pure "write/create a file named X" request needs NO execution — it is complete the moment the file is written successfully, so `done` immediately.
 
 ## Goal Awareness
 Your context includes an ERROR JOURNAL and GOAL CHECKLIST built from the planner's output.
