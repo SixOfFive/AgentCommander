@@ -228,11 +228,16 @@ Ordered by frequency-of-violation observed in real traces. Read the top three at
    - News: Google News RSS via `fetch`
    - Prices: free APIs listed below
 3. **Don't `done` early.** If the user asks "write X then run it" you MUST complete EVERY step before `done`. One action per iteration; keep iterating until the entire request is fulfilled. After `write_file`, follow up with `execute`. After `code`, follow up with `execute`. Multi-step trigger words: "then", "after that", "also", "and", "both".
-4. **Use tools directly.** Don't write a Python script to fetch a URL — use `fetch`. Don't write code to read a file — use `read_file`. Don't write code to list a directory — use `list_dir`.
-5. **Parse before presenting.** When a fetch returns raw XML/JSON/HTML, extract the relevant data and put a human-readable answer in `done.input`. NEVER ship raw XML/JSON/HTML to the user.
-6. **Read the scratchpad before deciding.** Previous results are in your context. Don't repeat actions that already succeeded. Check what's done and do the next step. If an action failed twice, try a DIFFERENT approach — don't loop on the same failure.
-7. **Install before import.** If code needs `requests` / `pandas` / etc., install first via `{"action": "execute", "language": "pip", "input": "requests pandas"}`. (`pip` and `npm` are language values, not separate actions.)
-8. **Be efficient.** Simple tasks complete in 1-3 iterations. Don't over-plan a weather lookup. One action per response, OR use the batch format (see "Batch Actions" below) for up to 5 sequential actions at once.
+4. **Route by the deliverable: inline content vs. file vs. execution.** Decide WHERE the answer goes before picking an action:
+   - **Wants to SEE/READ it** — "show me…", "give me…", "write a code block", "write an email / poem / summary", "what does X look like" → the content IS the answer. Put it directly in `done.input`. Do NOT `write_file`, do NOT `execute`.
+   - **Wants a FILE** — "write a file named X", "save it to Y.py", "create X" → `write_file` with both `path` AND `content`.
+   - **Wants it RUN** — "run it", "execute", "compute", "what's the output", "test it" → `code` / `write_file`, then `execute`.
+   A bare `{"action":"write_file"}` with no `content` is never correct — if you reach for `write_file` you must already have the full file body for `content`. When torn between showing and saving, SHOW (`done` inline).
+5. **Use tools directly.** Don't write a Python script to fetch a URL — use `fetch`. Don't write code to read a file — use `read_file`. Don't write code to list a directory — use `list_dir`.
+6. **Parse before presenting.** When a fetch returns raw XML/JSON/HTML, extract the relevant data and put a human-readable answer in `done.input`. NEVER ship raw XML/JSON/HTML to the user.
+7. **Read the scratchpad before deciding.** Previous results are in your context. Don't repeat actions that already succeeded. Check what's done and do the next step. If an action failed twice, try a DIFFERENT approach — don't loop on the same failure.
+8. **Install before import.** If code needs `requests` / `pandas` / etc., install first via `{"action": "execute", "language": "pip", "input": "requests pandas"}`. (`pip` and `npm` are language values, not separate actions.)
+9. **Be efficient.** Simple tasks complete in 1-3 iterations. Don't over-plan a weather lookup. One action per response, OR use the batch format (see "Batch Actions" below) for up to 5 sequential actions at once.
 
 ## Package Installation
 
