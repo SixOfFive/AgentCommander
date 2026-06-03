@@ -16,6 +16,21 @@ from agentcommander.engine.scratchpad import build_final_output
 from agentcommander.types import OrchestratorDecision, ScratchpadEntry
 
 
+# Imperative "run / verify this now" requests — distinguishes a task that wants
+# the freshly-written file EXECUTED from a pure file-creation request. Must NOT
+# match the descriptive "...prints 'hello world' when run" ("run" there names
+# the file's behaviour, not an action to take). Used by rapid_rewrite_guard.
+_WANTS_RUN_RX = re.compile(
+    r"\b(and|then|,|;)\s+(run|execute)\b"
+    r"|\b(run|execute)\s+(it|this|that|the\s+\w+)\b"
+    r"|what'?s?\s+the\s+(output|result)\b"
+    r"|what\s+(does|will)\s+it\s+(print|output|return|do)\b"
+    r"|\b(verify|test|check|confirm)\s+(it|that|the)\b"
+    r"|\bmake\s+sure\s+it\b",
+    re.IGNORECASE,
+)
+
+
 def _result(action: str, *, plan_call_count: int, consecutive_nudges: int,
             final_output: str | None = None) -> dict[str, Any]:
     return {
